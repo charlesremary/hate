@@ -1,4 +1,7 @@
-/* tkt-pm — vanilla JS frontend */
+// Copyright 2026 Charles Emary
+// SPDX-License-Identifier: FSL-1.1-Apache-2.0
+
+/* hate — vanilla JS frontend */
 
 const API = {
   async get(url) {
@@ -508,7 +511,7 @@ document.getElementById('filter-hide-closed').addEventListener('change', loadTic
 
 // Sort preference is per-browser, not per-project — a PM picking "due date"
 // usually wants it for all their projects.
-const SORT_STORAGE_KEY = 'tkt-pm:sort';
+const SORT_STORAGE_KEY = 'hate:sort';
 (function restoreSortPreference() {
   const saved = localStorage.getItem(SORT_STORAGE_KEY);
   if (!saved) return;

@@ -1,3 +1,6 @@
+// Copyright 2026 Charles Emary
+// SPDX-License-Identifier: FSL-1.1-Apache-2.0
+
 // Package api provides HTTP handlers for the hate REST API.
 // All JSON responses match the Python FastAPI format exactly.
 // Error responses use {"detail": "message"}.

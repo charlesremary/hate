@@ -1,3 +1,6 @@
+# Copyright 2026 Charles Emary
+# SPDX-License-Identifier: FSL-1.1-Apache-2.0
+
 # Build targets for hate.
 # `make` (or `make all`) builds the native macOS arm64 binary AND the
 # Windows x64 (.exe) cross-compile into ./dist.
