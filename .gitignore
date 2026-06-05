@@ -1,6 +1,7 @@
 # Build artifacts
 /hate
 /tkt-pm-go
+/dist/
 *.exe
 
 # OS
