@@ -73,6 +73,46 @@ function linkifyTicketRefs(text) {
   return String(text).replace(re, '<a class="ticket-ref" data-ticket="$1" href="javascript:void(0)" onclick="event.preventDefault();event.stopPropagation();openTicketPanel(\'$1\');hideTicketHovercard(true);">$1</a>');
 }
 
+// Escape user text for safe insertion into innerHTML.
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Convenience: escape then linkify TKT refs (for short inline strings).
+function escapeAndLinkify(text) {
+  return linkifyTicketRefs(escapeHtml(text));
+}
+
+// Render markdown to sanitized HTML, then re-apply TKT-ref chips to the
+// resulting *text nodes* only (so we never rewrite href/attribute contents).
+function renderMarkdown(text) {
+  if (!text) return '';
+  if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
+    // Libraries failed to load — degrade to escaped, whitespace-preserving text.
+    return `<div style="white-space:pre-wrap">${escapeAndLinkify(text)}</div>`;
+  }
+  const html = DOMPurify.sanitize(marked.parse(String(text), { gfm: true, breaks: true }));
+  if (!currentProject || !currentProject.prefix) return html;
+
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const re = new RegExp(`\\b${escapeRegex(currentProject.prefix)}-[A-Za-z0-9]{3,}\\b`);
+  const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT);
+  const targets = [];
+  while (walker.nextNode()) {
+    const n = walker.currentNode;
+    if (n.parentNode && n.parentNode.closest && n.parentNode.closest('a')) continue; // skip existing links
+    if (re.test(n.nodeValue)) targets.push(n);
+  }
+  targets.forEach(n => {
+    const span = document.createElement('span');
+    span.innerHTML = escapeAndLinkify(n.nodeValue);
+    n.replaceWith(...span.childNodes);
+  });
+  return tpl.innerHTML;
+}
+
 // Hovercard for ticket references. A single shared DOM node is created lazily
 // on first hover and reused for every chip.
 const HOVERCARD_SHOW_DELAY = 220;
@@ -152,7 +192,7 @@ function renderTicketHovercardBody(t) {
     ? `<div style="color:#888;font-size:11px;margin-top:6px">Last: ${lastAct.action.replace(/_/g, ' ')} · ${lastAct.timestamp.replace('T', ' ').replace('Z', '').slice(0, 16)}</div>`
     : '';
   const desc = t.description
-    ? `<div style="margin-top:6px;color:#555;font-size:12px;max-height:60px;overflow:hidden">${t.description.length > 240 ? t.description.slice(0, 240) + '…' : t.description}</div>`
+    ? `<div style="margin-top:6px;color:#555;font-size:12px;max-height:60px;overflow:hidden;white-space:pre-wrap">${escapeHtml(t.description.length > 240 ? t.description.slice(0, 240) + '…' : t.description)}</div>`
     : '';
   const atts = (t.attachments || []).length
     ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #eee">
@@ -451,10 +491,80 @@ function compareTickets(a, b, mode) {
   }
 }
 
+// ── Predecessor readiness & work-order ─────────────────
+// A predecessor counts as "done" once it is complete or closed (matches the
+// backend's terminal statuses). Readiness is computed against the full loaded
+// ticket set (allTickets) so closed/filtered predecessors are still counted.
+const DONE_STATUSES = new Set(['complete', 'closed']);
+function isDone(t) { return !!t && DONE_STATUSES.has(t.status); }
+
+// Returns { state: 'none'|'ready'|'blocked', blocking: N } for one ticket.
+// Orphaned predecessor refs (not in the set) are treated as satisfied, mirroring
+// the backend balance engine.
+function predecessorState(t, byId) {
+  const preds = t.predecessors || [];
+  if (preds.length === 0) return { state: 'none', blocking: 0 };
+  let blocking = 0;
+  for (const pid of preds) {
+    const p = byId.get(pid);
+    if (p && !isDone(p)) blocking++;
+  }
+  return { state: blocking > 0 ? 'blocked' : 'ready', blocking };
+}
+
+// Inline badge shown next to the title. Nothing for done tickets or tickets
+// without predecessors.
+function depBadge(t, byId) {
+  if (isDone(t)) return '';
+  const { state, blocking } = predecessorState(t, byId);
+  if (state === 'ready') return ' <span class="badge dep-ready">Ready</span>';
+  if (state === 'blocked') return ` <span class="badge dep-blocked">Blocked · ${blocking}</span>`;
+  return '';
+}
+
+// Topological depth = longest chain of *unfinished* predecessors. Ready tickets
+// (no unfinished preds) are depth 0; a ticket always ranks after its blockers.
+// Cycle-safe via the recursion stack guard.
+function computeWorkOrder(tickets, byId) {
+  const depth = new Map();
+  function computeDepth(id, stack) {
+    if (depth.has(id)) return depth.get(id);
+    if (stack.has(id)) return 0; // cycle: stop climbing
+    stack.add(id);
+    const t = byId.get(id);
+    let d = 0;
+    if (t) {
+      for (const pid of (t.predecessors || [])) {
+        const p = byId.get(pid);
+        if (p && !isDone(p)) d = Math.max(d, 1 + computeDepth(pid, stack));
+      }
+    }
+    stack.delete(id);
+    depth.set(id, d);
+    return d;
+  }
+  tickets.forEach(t => computeDepth(t.id, new Set()));
+  return depth;
+}
+
 function renderTicketTable(tickets) {
   const tbody = document.getElementById('ticket-tbody');
   const mode = document.getElementById('filter-sort').value || 'start';
-  tickets.sort((a, b) => compareTickets(a, b, mode));
+  const byId = new Map((allTickets || []).map(t => [t.id, t]));
+
+  if (mode === 'work') {
+    const depth = computeWorkOrder(tickets, byId);
+    tickets.sort((a, b) =>
+         ((isDone(a) ? 1 : 0) - (isDone(b) ? 1 : 0))           // active before done
+      || ((depth.get(a.id) || 0) - (depth.get(b.id) || 0))     // ready before blocked, preds first
+      || cmpDate(a.planned_start_date, b.planned_start_date)
+      || cmpDate(a.due_date, b.due_date)
+      || ((PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99))
+      || a.id.localeCompare(b.id));
+  } else {
+    tickets.sort((a, b) => compareTickets(a, b, mode));
+  }
+
   if (tickets.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" style="padding:16px;color:#999">No tickets. Create one with "+ New Ticket".</td></tr>';
     return;
@@ -462,7 +572,7 @@ function renderTicketTable(tickets) {
   tbody.innerHTML = tickets.map(t => `
     <tr data-id="${t.id}">
       <td><strong>${t.id}</strong></td>
-      <td>${t.title}</td>
+      <td>${t.title}${depBadge(t, byId)}</td>
       <td>${t.phase || '—'}</td>
       <td>${statusBadge(t.status)}</td>
       <td>${t.assignee ? t.assignee.split('@')[0] : '—'}</td>
@@ -558,11 +668,18 @@ function renderTicketPanel(t) {
     ['Phase', `<input class="inline-edit" value="${t.phase||''}" onblur="editField('${t.id}','phase',this.value.trim()||null)" placeholder="e.g. Discovery">`],
   ];
 
-  const activity = [...(t.activity || [])].reverse().slice(0, 20).map(a => `
+  const activity = [...(t.activity || [])].reverse().slice(0, 20).map(a => {
+    // Comments can be full markdown; system events are short single-line strings.
+    const detail = !a.detail ? ''
+      : a.action === 'comment'
+        ? `<div class="md act-md">${renderMarkdown(a.detail)}</div>`
+        : ': ' + escapeAndLinkify(a.detail);
+    return `
     <li class="activity-item">
       <div class="act-time">${a.timestamp.replace('T',' ').replace('Z','')} ${a.author ? '· ' + a.author.split('@')[0] : ''}</div>
-      <div class="act-detail"><strong>${a.action}</strong>${a.detail ? ': ' + linkifyTicketRefs(a.detail) : ''}</div>
-    </li>`).join('');
+      <div class="act-detail"><strong>${a.action}</strong>${detail}</div>
+    </li>`;
+  }).join('');
 
   const timeEntries = t.time_entries || [];
   const totalHours = timeEntries.reduce((s, e) => s + e.hours, 0);
@@ -579,14 +696,14 @@ function renderTicketPanel(t) {
   const today = new Date().toISOString().slice(0, 10);
 
   const cancelBanner = t.cancellation_reason
-    ? `<div style="background:#fff3e0;border-left:4px solid #e65100;padding:8px 12px;margin:8px 0;font-size:13px"><strong>⏩ Force closed</strong>${t.closed_at ? ' on ' + t.closed_at.slice(0,10) : ''}: ${linkifyTicketRefs(t.cancellation_reason)}</div>`
+    ? `<div style="background:#fff3e0;border-left:4px solid #e65100;padding:8px 12px;margin:8px 0;font-size:13px"><strong>⏩ Force closed</strong>${t.closed_at ? ' on ' + t.closed_at.slice(0,10) : ''}: ${escapeAndLinkify(t.cancellation_reason)}</div>`
     : '';
 
   content.innerHTML = `
     <div class="panel-section">
       <h4>${t.title} <span class="time-badge">${totalHours.toFixed(2)}h</span></h4>
       ${cancelBanner}
-      ${t.description ? `<p style="margin-top:8px;font-size:13px;color:#555">${linkifyTicketRefs(t.description)}</p>` : ''}
+      ${t.description ? `<div class="md" style="margin-top:8px">${renderMarkdown(t.description)}</div>` : ''}
     </div>
     <div class="panel-section">
       ${fields.map(([l, v]) => `<div class="field-row"><span class="field-label">${l}</span><span class="field-value">${v}</span></div>`).join('')}
