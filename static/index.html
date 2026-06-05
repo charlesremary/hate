@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>hate</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <span class="logo">hate</span>
+        <span class="header-btns">
+          <button class="icon-btn" id="btn-help" title="Help &amp; documentation">ⓘ</button>
+          <button class="icon-btn" id="btn-settings" title="Settings">⚙</button>
+        </span>
+      </div>
+      <div class="sidebar-actions">
+        <button class="btn-secondary" id="btn-new-project">+ New Project</button>
+        <button class="btn-secondary" id="btn-open-project">Open Existing…</button>
+        <button class="btn-secondary" id="btn-manage-projects">Manage Tracked…</button>
+        <label class="toggle-label" style="display:flex;gap:6px;align-items:center;padding:6px 8px 0;font-size:12px;color:#999">
+          <input type="checkbox" id="filter-show-closed-projects"> Show closed projects
+        </label>
+      </div>
+      <nav id="project-list">
+        <div class="loading">Loading projects…</div>
+      </nav>
+    </aside>
+
+    <main id="main">
+      <div id="welcome" class="welcome">
+        <h2>Welcome to tkt-pm</h2>
+        <p>Select a project from the sidebar to get started.</p>
+      </div>
+      <div id="project-view" class="hidden">
+        <div id="project-closed-banner" class="hidden" style="background:#fff3e0;border-left:4px solid #e65100;padding:8px 14px;margin:0;font-size:13px">
+          🔒 <strong>This project is closed</strong> <span id="project-closed-date" style="color:#999"></span>. Ticket changes are blocked — reopen the project under <em>Manage Tracked…</em> to make changes.
+        </div>
+        <header class="project-header">
+          <div>
+            <h1 id="project-title"></h1>
+            <span id="project-health-badge" class="health-badge"></span>
+          </div>
+          <div class="project-actions">
+            <span id="commit-as" class="commit-as" title="Git identity for this project"></span>
+            <span id="sync-status" class="sync-status"></span>
+            <button class="btn-secondary" id="btn-sync" title="Pull & push changes">⇅ Sync</button>
+            <button class="btn-secondary" id="btn-team" title="Manage team">👤 Team</button>
+            <button class="btn-secondary" id="btn-run-snapshot">⟳ Snapshot</button>
+            <button class="btn-secondary" id="btn-check-schedule" title="Find tickets that over-allocate someone's daily capacity">✓ Check schedule</button>
+            <button class="btn-secondary" id="btn-balance" title="Auto-balance the project to fit everyone's real daily capacity">⚖ Balance</button>
+          </div>
+        </header>
+
+        <div class="tabs">
+          <button class="tab active" data-tab="tickets">Tickets</button>
+          <button class="tab" data-tab="dashboard">PM Dashboard</button>
+          <button class="tab hidden" data-tab="billing">Billing</button>
+        </div>
+
+        <!-- Tickets tab -->
+        <div id="tab-tickets" class="tab-content">
+          <div class="tickets-toolbar">
+            <button class="btn-primary" id="btn-new-ticket">+ New Ticket</button>
+            <select id="filter-status"><option value="">All statuses</option></select>
+            <select id="filter-type"><option value="">All types</option></select>
+            <select id="filter-phase"><option value="">All phases</option></select>
+            <select id="filter-sort" title="Sort tickets by">
+              <option value="start">Sort: Start date</option>
+              <option value="due">Sort: Due date</option>
+              <option value="priority">Sort: Priority</option>
+              <option value="created">Sort: Created</option>
+            </select>
+            <label class="toggle-label"><input type="checkbox" id="filter-hide-closed" checked> Hide closed</label>
+          </div>
+          <div id="ticket-list-container">
+            <table id="ticket-table">
+              <thead>
+                <tr>
+                  <th>ID</th><th>Title</th><th>Phase</th><th>Status</th>
+                  <th>Assignee</th><th>Planned start</th><th>Due</th>
+                </tr>
+              </thead>
+              <tbody id="ticket-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Dashboard tab -->
+        <div id="tab-dashboard" class="tab-content hidden">
+          <iframe id="dashboard-frame" src="about:blank" frameborder="0"></iframe>
+        </div>
+
+        <!-- Billing tab -->
+        <div id="tab-billing" class="tab-content hidden">
+          <div class="billing-toolbar">
+            <label>Start <input type="date" id="billing-start"></label>
+            <label>End <input type="date" id="billing-end"></label>
+            <label>Author <select id="billing-author"><option value="">All authors</option></select></label>
+            <button class="btn-primary" onclick="generateBillingCSV()">Export CSV</button>
+          </div>
+          <div id="billing-content" style="flex:1;overflow-y:auto;padding:0 20px 20px">
+            <p style="color:#999;padding:16px">Select a date range or switch to this tab to see all time entries.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings panel -->
+      <div id="settings-view" class="hidden">
+        <h2>Settings</h2>
+        <form id="settings-form">
+          <label>Projects root directory
+            <input type="text" id="settings-projects-root" placeholder="~/projects">
+          </label>
+          <label><input type="checkbox" id="show-billing"> Show Billing tab</label>
+          <fieldset>
+            <legend>Scheduler</legend>
+            <label><input type="checkbox" id="scheduler-enabled"> Enable automatic snapshots</label>
+            <label>Interval (hours)
+              <input type="number" id="scheduler-interval" min="1" max="168" value="24">
+            </label>
+          </fieldset>
+          <fieldset id="project-info-fieldset">
+            <legend>Project info <span id="project-info-project" style="font-weight:normal;color:#999"></span></legend>
+            <p id="project-info-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to edit its display name.</p>
+            <div id="project-info-fields" class="hidden">
+              <label>Display name <input type="text" id="pi-project-name" maxlength="120"></label>
+              <p style="font-size:12px;color:#999;margin:6px 0 0">
+                Only the display name changes — the folder, prefix, and existing ticket IDs are not touched.
+                Older snapshots and the baseline keep the original name as a historical record.
+              </p>
+            </div>
+          </fieldset>
+          <fieldset id="effort-sizing-fieldset">
+            <legend>Effort sizing <span id="effort-sizing-project" style="font-weight:normal;color:#999"></span></legend>
+            <p id="effort-sizing-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to edit its effort-to-days values.</p>
+            <div id="effort-sizing-inputs" class="hidden" style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
+              <label>XS (days) <input type="number" id="effort-xs" min="1" step="1"></label>
+              <label>S (days)  <input type="number" id="effort-s"  min="1" step="1"></label>
+              <label>M (days)  <input type="number" id="effort-m"  min="1" step="1"></label>
+              <label>L (days)  <input type="number" id="effort-l"  min="1" step="1"></label>
+              <label>XL (days) <input type="number" id="effort-xl" min="1" step="1"></label>
+            </div>
+            <p id="effort-sizing-note" class="hidden" style="font-size:12px;color:#999;margin:8px 0 0">
+              Changes apply to new tickets and unbaselined work only — an existing
+              baseline keeps its original planned days. Defaults: xs&nbsp;1, s&nbsp;2, m&nbsp;3, l&nbsp;5, xl&nbsp;8.
+            </p>
+          </fieldset>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">Save Settings</button>
+            <button type="button" class="btn-secondary" id="btn-run-now">Run Now</button>
+          </div>
+        </form>
+        <div id="scheduler-result"></div>
+      </div>
+
+      <!-- Help / documentation -->
+      <div id="help-view" class="hidden">
+        <div class="help-doc">
+          <h1>hate — Help &amp; Documentation</h1>
+          <p class="help-lead">hate is a lightweight ticketing and project-management tool. Each
+            project is a folder of plain JSON files kept under version control, so the whole team
+            works from the same source of truth by pushing and pulling.</p>
+
+          <nav class="help-toc">
+            <strong>Contents</strong>
+            <a href="#help-overview">1. How it's organized</a>
+            <a href="#help-tickets">2. Tickets</a>
+            <a href="#help-promotion">3. The promotion model</a>
+            <a href="#help-time">4. Logging time &amp; billing</a>
+            <a href="#help-predecessors">5. Predecessors</a>
+            <a href="#help-pm">6. For Project Managers</a>
+            <a href="#help-team">7. Team &amp; Identity</a>
+          </nav>
+
+          <!-- 1 -->
+          <section id="help-overview">
+            <h2>1. How it's organized</h2>
+            <p>A <strong>project</strong> is a directory containing a <code>.tkt/config.json</code>
+              file. Inside it, every ticket is its own JSON file under <code>tickets/</code>, and an
+              <code>index.json</code> keeps a fast summary of them all.</p>
+            <ul>
+              <li><strong>+ New Project</strong> creates a fresh project folder inside your projects root.</li>
+              <li><strong>Open Existing…</strong> registers a project that already exists on disk —
+                e.g. a repository a teammate cloned. Point it at the folder that contains the
+                <code>.tkt</code> directory.</li>
+              <li>Projects in the sidebar are grouped by <em>client</em>.</li>
+            </ul>
+            <p>Each project has three tabs: <strong>Tickets</strong> (the work),
+              <strong>PM Dashboard</strong> (the schedule &amp; health view), and
+              <strong>Billing</strong> (logged time). The Billing tab is hidden by default — turn it
+              on under the gear ⚙ Settings.</p>
+            <h3>Renaming a project</h3>
+            <p>Open the project, click the gear ⚙, and edit <em>Project info → Display name</em>.
+              Only the display name changes — the folder on disk, the project's short ID (used in
+              snapshot filenames), the ticket prefix, and existing ticket IDs are all left alone.
+              The rename is committed to the project's git history. Older snapshots and the
+              baseline keep the original name baked in as a historical record — they are not
+              rewritten.</p>
+          </section>
+
+          <!-- 2 -->
+          <section id="help-tickets">
+            <h2>2. Tickets</h2>
+            <p>Create a ticket with <strong>+ New Ticket</strong>. Click any row to open its detail
+              panel, where every field is editable inline and the full activity history is shown.</p>
+
+            <h3>Ticket types</h3>
+            <p>A ticket's type determines the workflow it follows — see §3.</p>
+            <table class="help-table">
+              <thead><tr><th>Type</th><th>Use it for</th></tr></thead>
+              <tbody>
+                <tr><td><code>task</code></td><td>A general unit of work — a short path, no dev/QA cycle.</td></tr>
+                <tr><td><code>dev task</code></td><td>Work that goes through a development and QA cycle.</td></tr>
+                <tr><td><code>design task</code></td><td>Design work that goes through a review and approval cycle.</td></tr>
+                <tr><td><code>meeting</code></td><td>A meeting that already happened. Has an <em>attendees</em> field. <strong>Auto-completes</strong> on creation.</td></tr>
+                <tr><td><code>administration</code></td><td>Overhead / non-project work. <strong>Auto-completes</strong> on creation.</td></tr>
+              </tbody>
+            </table>
+            <p><strong>Meeting</strong> and <strong>administration</strong> tickets are created
+              already <span class="badge s-complete">Complete</span> — they record something that's
+              done. You can log hours on them right in the create dialog, and they have no
+              promote/demote workflow.</p>
+
+            <h3>Fields</h3>
+            <ul>
+              <li><strong>Priority</strong> — critical, high, medium, low.</li>
+              <li><strong>Effort</strong> — xs, s, m, l, xl. This is a t-shirt size; the PM engine
+                converts it to planned days (see §6).</li>
+              <li><strong>Phase</strong> — a free-text grouping (e.g. "Discovery", "Sprint 1"). Used
+                to filter the ticket list.</li>
+              <li><strong>Assignee / Creator</strong> — people from the project's Team list.</li>
+              <li><strong>Planned start &amp; Due date</strong> — feed the schedule.</li>
+              <li><strong>Predecessors</strong> — dependency links (see §5).</li>
+            </ul>
+
+            <h3>Attachments</h3>
+            <p>Every ticket has an <strong>Attachments</strong> section in its detail panel. Drop a
+              file onto the dashed zone, or click to pick one. Useful for things like
+              <code>CLAUDE.md</code> AI-context files, design screenshots, mockups, or PDFs.</p>
+            <ul>
+              <li>Files are stored in the project repo under
+                <code>attachments/&lt;ticket-id&gt;/</code> and are committed to git like tickets —
+                they sync to teammates via the same push/pull.</li>
+              <li>Each file is capped at <strong>25&nbsp;MB</strong>. Filenames are sanitized on
+                upload (no paths, no dotdots).</li>
+              <li>Images, text/markdown, and PDFs render <em>inline</em> in the browser; other
+                types download. There's a small thumbnail next to image attachments in the list.</li>
+              <li>A <strong>closed project</strong> is read-only: you can still view and download
+                attachments, but uploads and deletes are blocked until you reopen it.</li>
+            </ul>
+
+            <h3>Cross-referencing tickets</h3>
+            <p>Mention another ticket's ID anywhere it makes sense — in the description, a comment,
+              a force-close reason — and it automatically becomes a clickable chip. Pattern is
+              <code>&lt;project-prefix&gt;-&lt;suffix&gt;</code>, e.g. <code>CW-7k3x</code>.
+              Only references to tickets in the <em>current</em> project linkify; IDs with a
+              different prefix stay as plain text.</p>
+            <ul>
+              <li><strong>Hover</strong> a chip to peek at the referenced ticket: its title,
+                status, assignee, last activity, and a list of its attachments. Attachments in the
+                card are themselves links — click one to view or download directly without
+                navigating.</li>
+              <li><strong>Click</strong> the chip (or the "Open ticket →" link in the card) to
+                open the referenced ticket in the main panel.</li>
+              <li>Chips for tickets that don't exist render <span style="text-decoration:line-through;color:#888">struck-through</span>
+                so broken references are visible at a glance.</li>
+            </ul>
+          </section>
+
+          <!-- 3 -->
+          <section id="help-promotion">
+            <h2>3. The promotion model</h2>
+            <p>Each <em>workflow</em> ticket type — <strong>task</strong>, <strong>dev task</strong>,
+              and <strong>design task</strong> — has its own path through the statuses. Instead of
+              picking a status directly, you <strong>promote</strong> (▲, move forward) or
+              <strong>demote</strong> (▼, move back) from the ticket panel, and the buttons follow
+              that type's path. Every transition is recorded in the activity log. (Meeting and
+              administration tickets auto-complete on creation and have no workflow.)</p>
+
+            <h3>Task</h3>
+            <p class="help-flow">
+              <span class="badge s-not_started">Not Started</span> →
+              <span class="badge s-in_progress">In Progress</span> →
+              <span class="badge s-complete">Complete</span> →
+              <span class="badge s-closed">Closed</span>
+            </p>
+
+            <h3>Dev task</h3>
+            <p class="help-flow">
+              <span class="badge s-not_started">Not Started</span> →
+              <span class="badge s-in_progress">In Progress</span> →
+              <span class="badge s-dev_complete">Dev Complete</span> →
+              <span class="badge s-qa_testing">QA Testing</span> →
+              <span class="badge s-complete">Complete</span> →
+              <span class="badge s-closed">Closed</span>
+            </p>
+            <p>Dev tasks have a rework loop: demoting from
+              <span class="badge s-qa_testing">QA Testing</span> drops the ticket to
+              <span class="badge s-rework">Rework</span>, and promoting from Rework sends it back to
+              QA Testing.</p>
+
+            <h3>Design task</h3>
+            <p class="help-flow">
+              <span class="badge s-not_started">Not Started</span> →
+              <span class="badge s-in_progress">In Progress</span> →
+              <span class="badge s-submitted_for_review">Submitted for Review</span> →
+              <span class="badge s-approved">Approved</span> →
+              <span class="badge s-closed">Closed</span>
+            </p>
+
+            <h3>Blocked — any workflow type</h3>
+            <p>The <strong>⛔ Block</strong> button in the ticket panel moves a ticket to
+              <span class="badge s-blocked">Blocked</span> — no workflow has a path <em>into</em>
+              Blocked, so the button is the only way in. Promoting or demoting from Blocked returns
+              the ticket to <em>whatever status it was in before</em>, which the tool figures out by
+              reading the activity log.</p>
+
+            <h3>Force close — skipping the workflow</h3>
+            <p>Use <strong>⏩ Force close</strong> in the ticket panel when a ticket won't be worked
+              to completion — duplicates, scoped-out items, mistakes, anything that should leave
+              the active list without going through promotion. It lands the ticket directly at
+              <span class="badge s-closed">Closed</span>, regardless of where it was in the workflow.</p>
+            <p>Force close <strong>requires a written reason</strong> (minimum five characters),
+              which is recorded permanently:</p>
+            <ul>
+              <li>As a <code>force_closed</code> entry in the ticket's activity log.</li>
+              <li>On the ticket itself in the <em>cancellation_reason</em> field, shown as a banner
+                in the panel so future readers can see why it was dropped.</li>
+            </ul>
+            <p>This is different from normal completion — a ticket reaching Closed via promotion
+              represents real finished work; a ticket reaching Closed via Force close represents
+              work that was cancelled. Both are <strong>terminal</strong>: a force-closed ticket
+              cannot be promoted, demoted, or force-closed again.</p>
+            <p>Use Force close instead of trying to delete a ticket. Deletion would corrupt the
+              baseline; Force close transitions the ticket cleanly and preserves the audit trail.
+              Time entries and predecessor links on a force-closed ticket are kept intact.</p>
+
+            <h3>Automatic side effects</h3>
+            <ul>
+              <li>The first time a ticket reaches <span class="badge s-in_progress">In Progress</span>,
+                its <strong>actual start date</strong> is stamped with today's date.</li>
+              <li>Reaching <span class="badge s-complete">Complete</span> or
+                <span class="badge s-closed">Closed</span> stamps the <strong>closed-at</strong>
+                timestamp. Demoting back out of those clears it again.</li>
+              <li><span class="badge s-closed">Closed</span> is <strong>terminal</strong> for every
+                type — a closed ticket cannot be promoted or demoted.</li>
+            </ul>
+          </section>
+
+          <!-- 4 -->
+          <section id="help-time">
+            <h2>4. Logging time &amp; billing</h2>
+            <p>Open a ticket and click <strong>⏱ Log Time</strong>. Enter a date, hours, and a short
+              description. Hours are rounded to the nearest quarter (0.25).</p>
+            <ul>
+              <li>The <strong>author</strong> of a time entry is whoever you're currently
+                <em>working as</em> — the project's git identity (see §7). Set that correctly before
+                logging time, or entries get attributed to the wrong person.</li>
+              <li>Meeting and administration tickets can capture hours at creation time.</li>
+            </ul>
+            <p>The <strong>Billing</strong> tab rolls every time entry across the project into one
+              table. Narrow it with the <strong>Start</strong> / <strong>End</strong> date range and
+              the <strong>Author</strong> filter — the Total updates to match — then
+              <strong>Export CSV</strong> to download exactly what's shown. Enable the tab under
+              ⚙ Settings → "Show Billing tab".</p>
+          </section>
+
+          <!-- 5 -->
+          <section id="help-predecessors">
+            <h2>5. Predecessors</h2>
+            <p>A <strong>predecessor</strong> is a ticket that must finish before another can
+              meaningfully start — a dependency link. Add them when creating a ticket or from the
+              ticket panel; the predecessor has to already exist.</p>
+            <p>Predecessors are what turn a flat list of tickets into a <em>schedule</em>. The PM
+              engine uses them to order work, compute the critical path, and project end dates
+              (see §6).</p>
+          </section>
+
+          <!-- 6 -->
+          <section id="help-pm">
+            <h2>6. For Project Managers</h2>
+
+            <h3>Baselining</h3>
+            <p>A <strong>baseline</strong> is a frozen copy of the plan — every task's planned
+              start, planned end, planned days, and dependencies — captured at one moment. It's the
+              yardstick everything else is measured against. <strong>The baseline is immutable:</strong>
+              once created, it cannot be changed or re-created.</p>
+            <p>Open the <strong>PM Dashboard</strong> tab. Before a baseline exists you'll see a
+              pre-baseline view with a <strong>Baseline Now</strong> button — it freezes the current
+              tickets as the plan. When baselining this way:</p>
+            <ul>
+              <li>Planned days come from each ticket's <strong>effort</strong> size, via the
+                <code>effort_to_days</code> map in the project config — by default
+                xs&nbsp;=&nbsp;1, s&nbsp;=&nbsp;2, m&nbsp;=&nbsp;3, l&nbsp;=&nbsp;5, xl&nbsp;=&nbsp;8 days. You can
+                change these values per project under ⚙ Settings → <em>Effort sizing</em>.
+                <strong>The baseline is frozen at the values in effect when you baseline</strong> —
+                editing the map afterwards only affects new tickets and unbaselined work.</li>
+              <li>If a ticket has a <strong>due date</strong>, that becomes its planned end and
+                planned days is recalculated from the date range.</li>
+              <li>Planned start comes from the ticket's actual or planned start date, falling back
+                to today.</li>
+            </ul>
+
+            <div class="help-callout" style="background:#fff3e0;border-left:4px solid #e65100;padding:12px 16px;margin:12px 0;border-radius:4px">
+              <p style="margin:0 0 8px"><strong>⚠ Before you baseline — read this.</strong></p>
+              <p style="margin:0 0 8px">The baseline is built from two inputs: each ticket's
+                <strong>planned start date</strong> and its <strong>effort size</strong>. The baseline
+                is immutable — once frozen, every later snapshot is measured against it, and there is
+                no way to correct a bad baseline. If the inputs are wrong, every snapshot from then
+                on will show slip that isn't really slip.</p>
+              <p style="margin:0 0 8px"><strong>Start dates matter as much as effort.</strong> Two
+                tickets with the same XL size land in very different places on the schedule depending
+                on when each one starts. Walk the ticket list before clicking <em>Baseline Now</em>
+                and ask: is this start date realistic? Does it account for predecessor work, the
+                assignee's availability, and the project's actual kickoff?</p>
+              <p style="margin:0"><strong>Effort sizes are days of effort, not wall-clock time.</strong>
+                An L = 5 means roughly five working days of focused work on that ticket — not five
+                calendar days from start to finish. A consultant who's only on this project two days
+                a week, a developer who's split across two projects, or anyone who starts later than
+                planned will all show up as slipping <em>even if their actual effort matches the
+                estimate</em>. If you know up front that an assignee is part-time or shared, reflect
+                that in the start dates (push them out) or in the effort size (round up) before
+                baselining — not after.</p>
+            </div>
+
+            <h3>Capacity &amp; the schedule check</h3>
+            <p>Each team member has a <strong>Daily hours</strong> value (default 8) editable in
+              <strong>👤 Team</strong>. This is the per-day capacity used by the
+              <strong>✓ Check schedule</strong> button in the project header. The check is a
+              one-shot analysis — it does not auto-reschedule.</p>
+            <p>For each non-terminal ticket with a planned start, due date, assignee, and effort,
+              the check converts effort to person-hours (1 size = 8h, e.g. <code>m</code>&nbsp;=&nbsp;24h),
+              divides those hours evenly across the business days from start to due, and sums the
+              daily load per assignee. Any day where assigned hours exceed that person's daily
+              capacity is reported with the contributing tickets — click any chip in the report to
+              jump to that ticket and push its dates out.</p>
+            <p>Tickets that are missing a date, assignee, or effort are listed as <em>skipped</em>
+              at the bottom of the report so the check doesn't pretend to be exhaustive.</p>
+
+            <h3>Auto-balance — get a realistic baseline schedule</h3>
+            <p>The <strong>⚖ Balance</strong> button in the project header rewrites planned-start
+              and due dates on every open ticket so the schedule actually fits the team's daily
+              capacity. It's a math button, not magic — it answers <em>"how long would this take
+              if everyone worked one realistic day at a time?"</em></p>
+            <ul>
+              <li><strong>Walks the predecessor graph.</strong> A ticket can't start until its
+                predecessors finish. If a cycle exists, Balance refuses and reports the offending
+                tickets.</li>
+              <li><strong>Within a "ready" batch</strong> (no unfinished predecessors), tickets are
+                ordered <em>priority desc → effort desc → ID</em>. Critical-and-large gets
+                scheduled first.</li>
+              <li><strong>Equal-split capacity.</strong> A person with three ready tickets gets each
+                one a third of their daily hours. As tickets finish, freed capacity flows to the
+                remaining ready set.</li>
+              <li><strong>Skips closed/complete tickets</strong> — historical work isn't moved.
+                Tickets missing an effort size or assignee are also skipped and listed in the
+                report.</li>
+              <li><strong>Preview first.</strong> Click ⚖ Balance to see the proposed changes,
+                including the original vs proposed project end date. Click <em>Apply</em> to write
+                the new dates and commit them as a single
+                <code>balance project (N tickets rescheduled)</code> commit. If you hate it, one
+                <code>git revert</code> away.</li>
+            </ul>
+            <p><strong>Baseline interaction:</strong> if the project is baselined, Balance still
+              works — but every future snapshot will see massive slip relative to the original
+              baseline, because the new dates intentionally don't match it. That's accurate, not a
+              bug: Balance is showing you what the schedule <em>should have been</em>. Treat the
+              first run on a baselined project as a wake-up call rather than a daily tool.</p>
+
+            <h3>Closing a project</h3>
+            <p>When a project is finished — or paused indefinitely — open
+              <strong>Manage Tracked…</strong> in the sidebar and click <strong>Close</strong>. A
+              closed project is <strong>read-only</strong>: you cannot add, edit, promote, demote,
+              block, comment on, log time on, or delete tickets, and you cannot change a ticket's
+              predecessors. Everything stays viewable — open tickets, the dashboard, the baseline,
+              past snapshots — just not editable.</p>
+            <p>Closed projects are <strong>hidden from the sidebar by default</strong>. Toggle
+              <em>Show closed projects</em> above the sidebar list to see them, or open them from
+              the Manage modal. Closing is reversible — the same modal has a <strong>Reopen</strong>
+              button that lifts the lock and restores write access.</p>
+
+            <h3>Snapshots</h3>
+            <p>A <strong>snapshot</strong> compares today's ticket state against the baseline. Run
+              one with the <strong>⟳ Snapshot</strong> button in the project header (or let the
+              Scheduler run them automatically — see below). Each snapshot is saved by date under
+              <code>.tkt/pm/snapshots/</code>. A snapshot computes:</p>
+            <ul>
+              <li><strong>Slip days</strong> — for each task, how far its current due date is past
+                its baseline planned end.</li>
+              <li><strong>Slip events</strong> — see below.</li>
+              <li><strong>Projected end dates</strong> — recalculated from actual velocity.</li>
+              <li><strong>Critical path</strong> and <strong>health</strong>.</li>
+            </ul>
+
+            <h3>Health</h3>
+            <p>Every snapshot computes a project health color from total slip (as a percentage of
+              planned duration) and the number of unresolved slip events:</p>
+            <table class="help-table">
+              <thead><tr><th>Health</th><th>When</th></tr></thead>
+              <tbody>
+                <tr><td><span class="health-badge health-green">● Green</span></td><td>Slip under 10% of planned duration <em>and</em> no unresolved slip events.</td></tr>
+                <tr><td><span class="health-badge health-yellow">● Yellow</span></td><td>Slip between 10% and 25%, <em>or</em> there is at least one unresolved slip event.</td></tr>
+                <tr><td><span class="health-badge health-red">● Red</span></td><td>Slip over 25%, <em>or</em> more than three unresolved slip events.</td></tr>
+              </tbody>
+            </table>
+
+            <h3>Slip events</h3>
+            <p>When a snapshot finds a task whose due date has moved past its baseline — and that
+              slippage isn't already explained — it opens a <strong>slip event</strong> with status
+              <em>unresolved</em>. There's at most one open event per task at a time.</p>
+            <p>A PM <strong>resolves</strong> a slip event by attaching a reason category and a short
+              narrative. Once resolved, that slippage is considered "explained" and won't be
+              re-flagged. The reason categories are: <code>estimation_error</code>,
+              <code>external_dependency</code>, <code>scope_change</code>,
+              <code>resource_diversion</code>, <code>technical_blocker</code>,
+              <code>environment_tooling</code>, <code>client_delay</code>,
+              <code>requirements_change</code>.</p>
+            <p><strong>Where to resolve them.</strong> Open the <strong>PM Dashboard</strong> tab and
+              find the slip ledger — every unresolved event has a <strong>Resolve</strong> button.
+              Pick a category, write the explanation, and submit.</p>
+            <p><strong>Resolving doesn't refresh the dashboard on its own.</strong> The resolution is
+              written to the slip ledger immediately, but the dashboard's health color and
+              unresolved-event count are read from the latest <em>snapshot</em> — so they won't
+              change until a new snapshot is run. After you resolve an event, a prompt asks whether
+              to <strong>Run Snapshot Now</strong> or <strong>Wait</strong>. Run it now to see the
+              effect immediately; choose Wait if you're working through several events and would
+              rather snapshot once at the end.</p>
+
+            <h3>How the schedule is calculated</h3>
+            <p><strong>Planned schedule (WBS from a template).</strong> Tasks are ordered by their
+              sequence number. A task starts the business day after the latest of its dependencies
+              ends — or on the project start date if it has none. Its duration is the template's
+              baseline days adjusted by any duration multiplier, and the end date is reached by
+              counting <em>business days only</em> (weekends are skipped).</p>
+            <p><strong>Projected end dates (in a snapshot).</strong> The engine measures
+              <strong>velocity</strong> — the planned days of completed work divided by the actual
+              calendar days elapsed since the project started (clamped between 0.25× and 10×). Each
+              unfinished task's planned duration is divided by that velocity, the task is scheduled
+              after its predecessors' projected ends, and business days are added. Completed tasks
+              use their actual end date. The project's projected end is the latest of them all.</p>
+            <p><strong>Critical path.</strong> Using baseline durations and the dependency graph, the
+              engine runs the standard forward pass (earliest start/finish) and backward pass
+              (latest start/finish). A task's <strong>float</strong> is how long it could slip
+              without delaying the project; tasks with <strong>zero float</strong> are on the
+              critical path.</p>
+
+            <h3>Scheduler</h3>
+            <p>Under ⚙ Settings you can enable <strong>automatic snapshots</strong> on an interval
+              (in hours), so health and projections stay current without anyone clicking
+              ⟳ Snapshot. <strong>Run Now</strong> triggers a snapshot run for all projects
+              immediately.</p>
+          </section>
+
+          <!-- 7 -->
+          <section id="help-team">
+            <h2>7. Team &amp; Identity</h2>
+            <p>The <strong>👤 Team</strong> button in the project header opens one dialog with two
+              distinct parts. They're related, so it helps to keep the difference straight:</p>
+
+            <h3>You on this project</h3>
+            <p>This is <em>your</em> identity — the name and email your Git commits and your logged
+              time entries are attributed to. It's set per-project, which keeps work on one client's
+              project from being attributed to another. Edit it and click <strong>Save identity</strong>;
+              the project header's "Working as" banner reflects it.</p>
+            <p>Below the fields, a status line tells you whether that identity is
+              <strong>linked to a team member</strong>:</p>
+            <ul>
+              <li><strong>✓ Linked</strong> — your identity matches a member on the roster (by email
+                or git username), so tickets can be assigned to you and your time entries resolve to
+                a real person.</li>
+              <li><strong>⚠ Not on the roster</strong> — your identity is set but doesn't match any
+                team member. Click <strong>Add me to the team</strong> to fix it in one step.</li>
+              <li><strong>⚠ No identity set</strong> — until you save one, commits and time entries
+                aren't attributed to anyone.</li>
+            </ul>
+
+            <h3>Team members</h3>
+            <p>The roster of people who can be assigned tickets on this project. Each member has a
+              name, email, optional git username, and role. The member that matches your saved
+              identity is tagged <strong>you</strong>.</p>
+            <ul>
+              <li><strong>+ Add member</strong> reveals the add form.</li>
+              <li><strong>✎ Edit</strong> on any row lets you fix a name, email, git username, or
+                role in place — no need to delete and re-add.</li>
+              <li><strong>✕ Remove</strong> takes a member off the roster.</li>
+            </ul>
+
+            <h3>Sync</h3>
+            <p>Each project is a Git repository, and tkt-pm auto-commits after every change (new
+              ticket, status change, logged time, and so on). <strong>⇅ Sync</strong> pulls
+              teammates' changes (rebasing) and pushes yours; on a conflict it aborts cleanly and
+              leaves your repo untouched. The button only appears when the project has a remote
+              configured.</p>
+          </section>
+
+          <p class="help-foot">That's the whole tool. Reach this page any time from the ⓘ button
+            beside the gear.</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- Ticket detail / edit panel -->
+    <div id="ticket-panel" class="side-panel hidden">
+      <div class="panel-header">
+        <h3 id="panel-ticket-id"></h3>
+        <button class="icon-btn" id="btn-close-panel">✕</button>
+      </div>
+      <div id="panel-content"></div>
+    </div>
+
+    <!-- Balance preview modal -->
+    <div id="balance-modal-overlay" class="hidden">
+      <div id="balance-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:860px;max-height:85vh;overflow:auto;margin:4% auto">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <h3 style="margin:0">Auto-balance — preview</h3>
+          <button class="icon-btn" id="btn-close-balance">✕</button>
+        </div>
+        <div id="balance-content" style="font-size:13px"></div>
+      </div>
+    </div>
+
+    <!-- Schedule conflict report modal -->
+    <div id="conflicts-modal-overlay" class="hidden">
+      <div id="conflicts-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:720px;max-height:80vh;overflow:auto;margin:5% auto">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <h3 style="margin:0">Schedule check</h3>
+          <button class="icon-btn" id="btn-close-conflicts">✕</button>
+        </div>
+        <div id="conflicts-content" style="font-size:13px"></div>
+      </div>
+    </div>
+
+    <!-- Force-close ticket modal -->
+    <div id="force-close-modal-overlay" class="hidden">
+      <div id="force-close-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:480px;margin:8% auto">
+        <h3>Force close ticket</h3>
+        <p style="font-size:13px;color:#555;margin:8px 0 12px">
+          This skips the normal promotion workflow and lands the ticket at <strong>closed</strong>.
+          Use it for duplicates, scoped-out work, or anything that won't be done.
+          A reason is required and recorded permanently in the activity log.
+        </p>
+        <p style="font-size:13px;color:#333;margin:0 0 12px"><strong>Ticket:</strong> <span id="fc-ticket-label"></span></p>
+        <form id="force-close-form">
+          <label style="display:block">Reason
+            <textarea id="fc-reason" rows="3" minlength="5" required placeholder="e.g. Duplicate of TKT-abcd — keeping the older one." style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-top:4px"></textarea>
+          </label>
+          <div class="form-actions" style="margin-top:12px">
+            <button type="submit" class="btn-primary">Force close</button>
+            <button type="button" class="btn-secondary" id="btn-cancel-force-close">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- New ticket modal -->
+    <div id="modal-overlay" class="hidden">
+      <div id="new-ticket-modal">
+        <h3>New Ticket</h3>
+        <form id="new-ticket-form">
+          <label>Type <select id="nt-type" required>
+            <option value="task">Task</option>
+            <option value="dev_task">Dev Task</option>
+            <option value="design_task">Design Task</option>
+            <option value="meeting">Meeting</option>
+            <option value="administration">Administration</option>
+          </select></label>
+          <label>Title <input type="text" id="nt-title" required placeholder="Short description"></label>
+          <label>Description <textarea id="nt-description" rows="3"></textarea></label>
+          <div id="nt-fields-standard">
+            <label>Priority <select id="nt-priority">
+              <option value="medium">Medium</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="low">Low</option>
+            </select></label>
+            <label>Effort <select id="nt-effort">
+              <option value="">—</option>
+              <option value="xs">XS</option>
+              <option value="s">S</option>
+              <option value="m">M</option>
+              <option value="l">L</option>
+              <option value="xl">XL</option>
+            </select></label>
+            <label>Due date <input type="date" id="nt-due-date"></label>
+          </div>
+          <label>Assignee <select id="nt-assignee"><option value="">Unassigned</option></select></label>
+          <div id="nt-fields-meeting" class="hidden">
+            <label>Attendees <input type="text" id="nt-attendees" placeholder="Names or emails (optional)"></label>
+          </div>
+          <div id="nt-fields-time" class="hidden">
+            <label>Hours <input type="number" id="nt-hours" step="0.25" min="0.25" placeholder="1.5"></label>
+          </div>
+          <label>Phase <input type="text" id="nt-phase" placeholder="e.g. Discovery, Sprint 1, Phase 2"></label>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">Create</button>
+            <button type="button" class="btn-secondary" id="btn-cancel-ticket">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- New project modal -->
+    <div id="new-project-modal-overlay" class="hidden">
+      <div id="new-project-modal">
+        <h3>New Project</h3>
+        <form id="new-project-form">
+          <label>Client <input type="text" id="np-client" placeholder="Amplify, Better Tactic, Personal"></label>
+          <label>Folder name <input type="text" id="np-folder" required placeholder="my-project"></label>
+          <label>Project name <input type="text" id="np-name" required placeholder="My Project"></label>
+          <label>Project ID / prefix <input type="text" id="np-id" required placeholder="PROJ" maxlength="8"></label>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">Create</button>
+            <button type="button" class="btn-secondary" id="btn-cancel-project">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Open existing project modal -->
+    <div id="open-project-modal-overlay" class="hidden">
+      <div id="open-project-modal">
+        <h3>Open Existing Project</h3>
+        <form id="open-project-form">
+          <label>Project folder path
+            <input type="text" id="op-path" required placeholder="/Users/you/projects/cloned-repo">
+          </label>
+          <p style="font-size:12px;color:#999;margin:-6px 0 12px">Point to a folder containing a <code>.tkt</code> directory — e.g. a repo a teammate cloned to disk.</p>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">Open</button>
+            <button type="button" class="btn-secondary" id="btn-cancel-open-project">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Manage tracked projects modal -->
+    <div id="manage-projects-modal-overlay" class="hidden">
+      <div id="manage-projects-modal">
+        <h3>Manage Tracked Projects</h3>
+        <p style="font-size:12px;color:#999;margin-bottom:12px">Removing a project hides it from the sidebar — the folder on disk is left untouched. Restore it any time.</p>
+        <div id="manage-projects-list"></div>
+        <div class="form-actions">
+          <button type="button" class="btn-secondary" id="btn-close-manage-projects">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- Team & identity modal -->
+    <div id="team-modal-overlay" class="hidden">
+      <div id="team-modal">
+        <h3>Team &amp; Identity</h3>
+
+        <section class="team-section">
+          <h4>You on this project</h4>
+          <p class="team-hint">Your commits and logged time are attributed to this identity.</p>
+          <div class="identity-fields">
+            <label>Name <input type="text" id="gi-name" placeholder="Chuck Emary"></label>
+            <label>Email <input type="text" id="gi-email" placeholder="chuck@amplify.com"></label>
+            <button class="btn-primary" id="btn-set-identity">Save identity</button>
+          </div>
+          <div id="identity-status" class="identity-status"></div>
+        </section>
+
+        <section class="team-section">
+          <h4>Team members</h4>
+          <p class="team-hint">People who can be assigned tickets on this project.</p>
+          <div id="team-list"></div>
+          <button type="button" class="btn-secondary" id="btn-show-add-resource">+ Add member</button>
+          <form id="add-resource-form" class="hidden">
+            <div class="resource-fields">
+              <label>Name <input type="text" id="res-name" required placeholder="Full name"></label>
+              <label>Email <input type="text" id="res-email" required placeholder="name@company.com"></label>
+              <label>Git username <input type="text" id="res-git-user" placeholder="git-handle"></label>
+              <label>Role <input type="text" id="res-role" placeholder="developer" value="developer"></label>
+              <label>Daily hours <input type="number" id="res-daily-hours" min="0.5" max="24" step="0.5" placeholder="8" title="Daily capacity used by Check schedule. Defaults to 8 if left blank."></label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary">Add member</button>
+              <button type="button" class="btn-secondary" id="btn-cancel-add-resource">Cancel</button>
+            </div>
+          </form>
+        </section>
+
+        <div class="form-actions team-footer">
+          <button type="button" class="btn-secondary" id="btn-close-team">Done</button>
+        </div>
+      </div>
+    </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

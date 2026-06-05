@@ -1,0 +1,92 @@
+{
+  "template_id": "rest-integration",
+  "template_version": "1.2",
+  "display_name": "REST Service Integration",
+  "description": "Standard template for integrating with an external REST API backend",
+  "tasks": [
+    {
+      "template_task_id": "rest-integration.analyze-spec",
+      "title": "Analyze API specification",
+      "baseline_days": 3,
+      "sequence": 1,
+      "dependencies": [],
+      "notes": "Adjust upward if spec is undocumented or incomplete. Add 2 days if no swagger/openapi doc exists."
+    },
+    {
+      "template_task_id": "rest-integration.setup-auth",
+      "title": "Set up authentication layer",
+      "baseline_days": 4,
+      "sequence": 2,
+      "dependencies": ["rest-integration.analyze-spec"],
+      "notes": "OAuth2 flows add ~2 days. API key auth is baseline. SAML adds ~4 days."
+    },
+    {
+      "template_task_id": "rest-integration.build-client",
+      "title": "Build REST client wrapper",
+      "baseline_days": 5,
+      "sequence": 3,
+      "dependencies": ["rest-integration.setup-auth"],
+      "notes": "Includes retry logic, timeout handling, basic error mapping."
+    },
+    {
+      "template_task_id": "rest-integration.error-handling",
+      "title": "Implement error handling and logging",
+      "baseline_days": 3,
+      "sequence": 4,
+      "dependencies": ["rest-integration.build-client"],
+      "notes": "Map API error codes to internal error types. Add structured logging."
+    },
+    {
+      "template_task_id": "rest-integration.unit-tests",
+      "title": "Write unit tests with mocked responses",
+      "baseline_days": 3,
+      "sequence": 5,
+      "dependencies": ["rest-integration.build-client"],
+      "notes": "Mock all external calls. Target 80% coverage minimum."
+    },
+    {
+      "template_task_id": "rest-integration.integration-tests",
+      "title": "Write integration tests against staging API",
+      "baseline_days": 4,
+      "sequence": 6,
+      "dependencies": ["rest-integration.error-handling", "rest-integration.unit-tests"],
+      "notes": "Requires staging environment access. Flag dependency on external team for staging credentials."
+    },
+    {
+      "template_task_id": "rest-integration.network-config",
+      "title": "Network and firewall configuration",
+      "baseline_days": 3,
+      "sequence": 2,
+      "dependencies": [],
+      "notes": "External dependency — network team. Raise change request early. Often causes slip.",
+      "owner_team": "network"
+    },
+    {
+      "template_task_id": "rest-integration.deploy-staging",
+      "title": "Deploy to staging and smoke test",
+      "baseline_days": 2,
+      "sequence": 7,
+      "dependencies": ["rest-integration.integration-tests", "rest-integration.network-config"],
+      "notes": "Gate on network config being complete."
+    },
+    {
+      "template_task_id": "rest-integration.deploy-prod",
+      "title": "Deploy to production",
+      "baseline_days": 1,
+      "sequence": 8,
+      "dependencies": ["rest-integration.deploy-staging"],
+      "is_milestone": true,
+      "notes": "Requires signed off smoke test results and change approval board approval."
+    }
+  ],
+  "calibration_history": [
+    {
+      "date": "2026-01-15",
+      "note": "Increased analyze-spec baseline from 2 to 3 days based on AUTH and BILLING project actuals"
+    },
+    {
+      "date": "2026-02-01",
+      "note": "Added network-config as explicit task after it caused untracked slip in 3 consecutive projects"
+    }
+  ]
+}

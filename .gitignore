@@ -1,0 +1,7 @@
+# Build artifacts
+/hate
+/tkt-pm-go
+*.exe
+
+# OS
+.DS_Store
