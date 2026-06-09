@@ -41,8 +41,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 .sidebar-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 12px; border-bottom: 1px solid #2d3449;
+  background: #0e0f12;
 }
-.logo { font-weight: 700; font-size: 15px; color: #fff; letter-spacing: .5px; }
+.logo-img { height: 26px; width: auto; display: block; max-width: 150px; }
 
 .sidebar-actions { padding: 10px 10px 4px; }
 

@@ -231,12 +231,14 @@ func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 	predsReady := func(bt *balanceTicket, day time.Time) bool {
 		for _, pid := range bt.predecessors {
 			if terminal[pid] {
-				if !terminalDue[pid].Before(day) && !terminalDue[pid].Equal(day) {
-					// terminal predecessor "finishes" on terminalDue[pid]; we treat
-					// this ticket as ready the day after.
-					if terminalDue[pid].After(day) || terminalDue[pid].Equal(day) {
-						return false
-					}
+				// Terminal predecessor "finishes" on terminalDue[pid]; the ticket
+				// is ready the weekday after. Block while day <= terminalDue[pid]
+				// (i.e. terminalDue is not before day) so we only release strictly
+				// after it. This mirrors the scheduled-predecessor path below,
+				// which becomes ready a day late "for free" because readiness is
+				// snapshotted at the start of each day, before any work is done.
+				if !terminalDue[pid].Before(day) {
+					return false
 				}
 				continue
 			}
