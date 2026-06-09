@@ -4,6 +4,52 @@ A lightweight ticketing and project-management tool. Each project is a folder of
 plain JSON files kept under version control, so the whole team works from the
 same source of truth by pushing and pulling.
 
+## Background — why hate exists
+
+hate is the working implementation of an argument made in a series on project
+management at [charlesemary.com](https://charlesemary.com). The series isn't about
+this tool — it's about why conventional project management is broken, and what to do
+instead. hate is the "do instead."
+
+**The diagnosis:**
+
+- **Two systems that never sync.** PMs live in a scheduling tool (MS Project,
+  Smartsheet); the people doing the work live in a ticketing system. Both claim to
+  describe the same project, yet diverge immediately and neither is authoritative —
+  so the PM burns time reconciling them.
+- **The PM as nag, not coordinator.** Most tooling optimizes for chasing updates and
+  compiling status by hand, instead of the genuinely valuable human work: unblocking
+  dependencies and coordinating people.
+- **Silent slip.** Dates move with no required reason and no audit trail — a
+  year-long project ends up six months late with no record of how. "Death by a
+  thousand cuts, with no record of the cuts."
+- **Proprietary lock-in.** Ticket data sits in a SaaS database: not diffable, not
+  version-controlled, not natively readable by the LLMs now doing much of the work.
+
+**The inversion hate is built around:**
+
+- **Tickets are the source of truth.** Project status is *computed* from the work
+  items, not maintained by hand in a parallel schedule. Status emerges from data, not
+  meetings.
+- **One system, git-native.** Each project is a folder of plain JSON tickets under
+  Git — history, diffing, branching, and an immutable audit trail come for free; JSON
+  keeps everything transparent and LLM-readable. No proprietary database.
+- **Accountability on the work.** The people doing the work keep their tickets
+  current; the system surfaces slip automatically as signal; the PM's job narrows to
+  coordination and unblocking.
+- **Low cognitive overhead.** You *Promote* a ticket instead of picking a state from
+  a dropdown, and record only predecessors — successors are derived.
+- **LLM-native by design.** Because tickets are git-tracked JSON, an AI agent can
+  create tickets for a plan and promote them as it executes — closing the gap where
+  an LLM changes 200 files and leaves no record of what it did or why.
+
+**The full argument:**
+
+1. [Rethinking Project Management](https://charlesemary.com/pm-agent-rethinking-project-management/)
+2. [Reimagining Project Management, Part 2](https://charlesemary.com/reimagining-project-management-part-2/)
+3. [Closing the Loop on AI-Driven Development](https://charlesemary.com/closing-the-loop-on-ai-driven-development/)
+4. [Building and Using a Git-Based Ticket System](https://charlesemary.com/building-and-using-a-git-based-ticket-system/)
+
 ## On-disk layout
 
 A project is an ordinary Git repository. HATE owns a few paths inside it:

@@ -167,6 +167,7 @@
 
           <nav class="help-toc">
             <strong>Contents</strong>
+            <a href="#help-why">Why hate exists</a>
             <a href="#help-overview">1. How it's organized</a>
             <a href="#help-tickets">2. Tickets</a>
             <a href="#help-promotion">3. The promotion model</a>
@@ -175,6 +176,55 @@
             <a href="#help-pm">6. For Project Managers</a>
             <a href="#help-team">7. Team &amp; Identity</a>
           </nav>
+
+          <!-- 0 -->
+          <section id="help-why">
+            <h2>Why hate exists</h2>
+            <p>hate is the working implementation of an argument made in a series on project
+              management at <a href="https://charlesemary.com" target="_blank" rel="noopener">charlesemary.com</a>.
+              The series isn't about this tool — it's about why conventional project management is
+              broken, and what to do instead. hate is the "do instead."</p>
+            <p><strong>The diagnosis:</strong></p>
+            <ul>
+              <li><strong>Two systems that never sync.</strong> PMs live in a scheduling tool; the
+                people doing the work live in a ticketing system. They diverge immediately and
+                neither is authoritative, so the PM burns time reconciling them.</li>
+              <li><strong>The PM as nag, not coordinator.</strong> Most tooling optimizes for chasing
+                updates and compiling status by hand, instead of the valuable human work: unblocking
+                dependencies and coordinating people.</li>
+              <li><strong>Silent slip.</strong> Dates move with no required reason and no audit trail —
+                a project ends up months late with no record of how. "Death by a thousand cuts, with
+                no record of the cuts."</li>
+              <li><strong>Proprietary lock-in.</strong> Ticket data sits in a SaaS database: not
+                diffable, not version-controlled, not natively readable by the LLMs now doing much of
+                the work.</li>
+            </ul>
+            <p><strong>The inversion hate is built around:</strong></p>
+            <ul>
+              <li><strong>Tickets are the source of truth.</strong> Project status is
+                <em>computed</em> from the work items, not maintained by hand in a parallel schedule.
+                Status emerges from data, not meetings.</li>
+              <li><strong>One system, git-native.</strong> Each project is a folder of plain JSON
+                tickets under Git — history, diffing, branching, and an immutable audit trail come for
+                free; JSON keeps everything transparent and LLM-readable.</li>
+              <li><strong>Accountability on the work.</strong> The people doing the work keep their
+                tickets current; the system surfaces slip automatically as signal; the PM's job
+                narrows to coordination and unblocking.</li>
+              <li><strong>Low cognitive overhead.</strong> You <em>Promote</em> a ticket instead of
+                picking a state from a dropdown, and record only predecessors — successors are
+                derived.</li>
+              <li><strong>LLM-native by design.</strong> Because tickets are git-tracked JSON, an AI
+                agent can create tickets for a plan and promote them as it executes — closing the gap
+                where an LLM changes 200 files and leaves no record of what it did or why.</li>
+            </ul>
+            <p><strong>The full argument:</strong></p>
+            <ol>
+              <li><a href="https://charlesemary.com/pm-agent-rethinking-project-management/" target="_blank" rel="noopener">Rethinking Project Management</a></li>
+              <li><a href="https://charlesemary.com/reimagining-project-management-part-2/" target="_blank" rel="noopener">Reimagining Project Management, Part 2</a></li>
+              <li><a href="https://charlesemary.com/closing-the-loop-on-ai-driven-development/" target="_blank" rel="noopener">Closing the Loop on AI-Driven Development</a></li>
+              <li><a href="https://charlesemary.com/building-and-using-a-git-based-ticket-system/" target="_blank" rel="noopener">Building and Using a Git-Based Ticket System</a></li>
+            </ol>
+          </section>
 
           <!-- 1 -->
           <section id="help-overview">
