@@ -454,8 +454,11 @@ async function loadTickets() {
 
     allTickets = await API.get(url);
     populatePhaseFilter(allTickets);
+    populateTagFilter(allTickets);
     const hideClosed = document.getElementById('filter-hide-closed').checked;
-    const visible = hideClosed ? allTickets.filter(t => t.status !== 'closed' && t.status !== 'complete') : allTickets;
+    const tagFilter = document.getElementById('filter-tag').value;
+    let visible = hideClosed ? allTickets.filter(t => t.status !== 'closed' && t.status !== 'complete') : allTickets;
+    if (tagFilter) visible = visible.filter(t => (t.tags || []).includes(tagFilter));
     renderTicketTable(visible);
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="7" style="padding:16px;color:red">${e.message}</td></tr>`;
@@ -654,9 +657,42 @@ function populatePhaseFilter(tickets) {
   sel.value = current;
 }
 
+// Tag filter: parent/child "Children of <id>" entries first, then plain tags.
+// Built with DOM APIs (textContent/value) so user-defined tags can't inject HTML.
+function populateTagFilter(tickets) {
+  const sel = document.getElementById('filter-tag');
+  const current = sel.value;
+  const all = new Set();
+  tickets.forEach(t => (t.tags || []).forEach(tag => all.add(tag)));
+  const parents = [...all].filter(isReservedTag).sort();
+  const plain = [...all].filter(x => !isReservedTag(x)).sort();
+
+  sel.innerHTML = '';
+  const allOpt = document.createElement('option');
+  allOpt.value = ''; allOpt.textContent = 'All tags';
+  sel.appendChild(allOpt);
+
+  const addGroup = (label, items, labelFor) => {
+    if (!items.length) return;
+    const g = document.createElement('optgroup');
+    g.label = label;
+    items.forEach(tag => {
+      const o = document.createElement('option');
+      o.value = tag; o.textContent = labelFor(tag);
+      g.appendChild(o);
+    });
+    sel.appendChild(g);
+  };
+  addGroup('Parent / child', parents, tag => `Children of ${tag.slice(PARENT_TAG_PREFIX.length)}`);
+  addGroup('Tags', plain, tag => tag);
+
+  sel.value = current;
+}
+
 document.getElementById('filter-status').addEventListener('change', loadTickets);
 document.getElementById('filter-type').addEventListener('change', loadTickets);
 document.getElementById('filter-phase').addEventListener('change', loadTickets);
+document.getElementById('filter-tag').addEventListener('change', loadTickets);
 document.getElementById('filter-hide-closed').addEventListener('change', loadTickets);
 
 // Sort preference is per-browser, not per-project — a PM picking "due date"
