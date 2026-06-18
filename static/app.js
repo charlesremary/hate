@@ -547,10 +547,50 @@ function computeWorkOrder(tickets, byId) {
   return depth;
 }
 
+// ── Parent/child via reserved `parent:<ID>` tags ───────
+// A child carries one tag `parent:<PARENT_TICKET_ID>`. No schema change — the
+// parent is an ordinary ticket and the link is just a conventionally-named tag.
+const PARENT_TAG_PREFIX = 'parent:';
+function isReservedTag(tag) { return tag.startsWith(PARENT_TAG_PREFIX); }
+function visibleTags(t) { return (t.tags || []).filter(x => !isReservedTag(x)); }
+function parentIdOf(t) {
+  const tag = (t.tags || []).find(isReservedTag);
+  return tag ? tag.slice(PARENT_TAG_PREFIX.length).trim() : null;
+}
+function childrenOf(parentId) {
+  if (!parentId) return [];
+  return (allTickets || []).filter(t => (t.tags || []).includes(PARENT_TAG_PREFIX + parentId));
+}
+function childCountMap() {
+  const m = new Map();
+  (allTickets || []).forEach(t => { const p = parentIdOf(t); if (p) m.set(p, (m.get(p) || 0) + 1); });
+  return m;
+}
+
+// The ticket currently shown in the detail panel — lets the tag editors below
+// preserve the *other* category of tags when one category is edited.
+let panelTicket = null;
+
+// Edit visible (non-parent) tags, preserving the parent tag.
+function setVisibleTags(id, raw) {
+  const tags = (panelTicket && panelTicket.id === id ? panelTicket.tags : []) || [];
+  const entered = raw.split(',').map(s => s.trim()).filter(Boolean).filter(x => !isReservedTag(x));
+  editField(id, 'tags', [...entered, ...tags.filter(isReservedTag)]);
+}
+// Set or clear the parent, preserving all non-parent tags. Empty input clears it.
+function setParent(id, raw) {
+  const tags = (panelTicket && panelTicket.id === id ? panelTicket.tags : []) || [];
+  const pid = (raw || '').trim();
+  if (pid === id) { showToast("A ticket can't be its own parent", 'error'); renderTicketPanel(panelTicket); return; }
+  const kept = tags.filter(x => !isReservedTag(x));
+  editField(id, 'tags', pid ? [...kept, PARENT_TAG_PREFIX + pid] : kept);
+}
+
 function renderTicketTable(tickets) {
   const tbody = document.getElementById('ticket-tbody');
   const mode = document.getElementById('filter-sort').value || 'start';
   const byId = new Map((allTickets || []).map(t => [t.id, t]));
+  const kidCount = childCountMap();
 
   if (mode === 'work') {
     const depth = computeWorkOrder(tickets, byId);
@@ -572,7 +612,7 @@ function renderTicketTable(tickets) {
   tbody.innerHTML = tickets.map(t => `
     <tr data-id="${t.id}">
       <td><strong>${t.id}</strong></td>
-      <td>${t.title}${depBadge(t, byId)}</td>
+      <td>${t.title}${depBadge(t, byId)}${kidCount.get(t.id) ? ` <span class="badge child-badge" title="${kidCount.get(t.id)} child ticket(s)">↳ ${kidCount.get(t.id)}</span>` : ''}</td>
       <td>${t.phase || '—'}</td>
       <td>${statusBadge(t.status)}</td>
       <td>${t.assignee ? t.assignee.split('@')[0] : '—'}</td>
@@ -653,6 +693,7 @@ async function openTicketPanel(ticketId) {
 }
 
 function renderTicketPanel(t) {
+  panelTicket = t;
   const content = document.getElementById('panel-content');
   const typeOptions = TYPE_VALUES.map(v =>
     `<option value="${v}" ${t.type===v?'selected':''}>${TYPE_LABELS[v]}</option>`).join('');
@@ -664,7 +705,8 @@ function renderTicketPanel(t) {
     ['Due date', t.due_date || '—'], ['Planned start', t.planned_start_date || '—'],
     ['Actual start', t.actual_start_date || '—'],
     ['Predecessors', t.predecessors.length ? linkifyTicketRefs(t.predecessors.join(', ')) : '—'],
-    ['Tags', `<input class="inline-edit" value="${(t.tags||[]).join(', ')}" onblur="editField('${t.id}','tags',this.value.split(',').map(s=>s.trim()).filter(Boolean))" placeholder="comma separated">`],
+    ['Parent', `${parentIdOf(t) ? linkifyTicketRefs(parentIdOf(t)) + ' ' : ''}<input class="inline-edit" value="${parentIdOf(t) || ''}" onblur="setParent('${t.id}', this.value)" placeholder="parent ticket id" style="max-width:150px">`],
+    ['Tags', `<input class="inline-edit" value="${visibleTags(t).join(', ')}" onblur="setVisibleTags('${t.id}', this.value)" placeholder="comma separated">`],
     ['Phase', `<input class="inline-edit" value="${t.phase||''}" onblur="editField('${t.id}','phase',this.value.trim()||null)" placeholder="e.g. Discovery">`],
   ];
 
@@ -699,6 +741,16 @@ function renderTicketPanel(t) {
     ? `<div style="background:#fff3e0;border-left:4px solid #e65100;padding:8px 12px;margin:8px 0;font-size:13px"><strong>⏩ Force closed</strong>${t.closed_at ? ' on ' + t.closed_at.slice(0,10) : ''}: ${escapeAndLinkify(t.cancellation_reason)}</div>`
     : '';
 
+  const kids = childrenOf(t.id);
+  const kidsDone = kids.filter(isDone).length;
+  const childrenSection = kids.length ? `
+    <div class="panel-section" style="margin-top:16px">
+      <h4>Children <span style="font-size:12px;color:#999;font-weight:normal">(${kids.length}${kidsDone ? ` · ${kidsDone} done` : ''})</span></h4>
+      <ul class="child-list">
+        ${kids.map(c => `<li>${linkifyTicketRefs(c.id)} <span class="child-title">${escapeHtml(c.title)}</span> ${statusBadge(c.status)}</li>`).join('')}
+      </ul>
+    </div>` : '';
+
   content.innerHTML = `
     <div class="panel-section">
       <h4>${t.title} <span class="time-badge">${totalHours.toFixed(2)}h</span></h4>
@@ -708,6 +760,7 @@ function renderTicketPanel(t) {
     <div class="panel-section">
       ${fields.map(([l, v]) => `<div class="field-row"><span class="field-label">${l}</span><span class="field-value">${v}</span></div>`).join('')}
     </div>
+    ${childrenSection}
     <div class="panel-actions">
       ${WORKFLOW_TYPES.includes(t.type) ? `
       <button class="btn-primary" onclick="promoteTicket('${t.id}')">▲ Promote</button>
