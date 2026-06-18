@@ -13,6 +13,24 @@ import (
 
 // GenerateSimpleDashboard returns a self-contained HTML dashboard for pre-baseline view.
 func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName string) string {
+	// Backlog-tagged tickets are out of committed scope — exclude them from every
+	// rollup (count, completion, status mix, table). Surface how many were hidden.
+	backlogCount := 0
+	active := make([]*ticket.Ticket, 0, len(tickets))
+	for _, t := range tickets {
+		if ticket.IsBacklog(t) {
+			backlogCount++
+			continue
+		}
+		active = append(active, t)
+	}
+	tickets = active
+
+	backlogNote := ""
+	if backlogCount > 0 {
+		backlogNote = fmt.Sprintf(`<div style="font-size:11px;color:#999;margin-top:4px">+%d backlog (excluded)</div>`, backlogCount)
+	}
+
 	total := len(tickets)
 	completionPct := 0
 	if total > 0 {
@@ -197,6 +215,7 @@ tr:hover td { background: #f5f5f5; }
     <div class="card">
         <div class="card-value">%d</div>
         <div class="card-label">Tickets</div>
+        %s
     </div>
     <div class="card">
         <div class="card-value" style="color:#66bb6a">%d%%</div>
@@ -255,6 +274,7 @@ async function baselineNow() {
 		projectID,
 		projectID, projectName,
 		total,
+		backlogNote,
 		completionPct,
 		totalHours,
 		len(typeCounts),

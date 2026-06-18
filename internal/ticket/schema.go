@@ -59,6 +59,21 @@ var (
 	}
 )
 
+// BacklogTag marks a ticket as backlog — present in the project but out of
+// committed scope. Backlog tickets are excluded from completion %, the
+// baseline/schedule, and capacity checks. Removing the tag commits the ticket.
+const BacklogTag = "backlog"
+
+// IsBacklog reports whether the ticket carries the backlog tag.
+func IsBacklog(t *Ticket) bool {
+	for _, tag := range t.Tags {
+		if tag == BacklogTag {
+			return true
+		}
+	}
+	return false
+}
+
 // dateRE validates YYYY-MM-DD format.
 var dateRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 

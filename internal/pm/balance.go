@@ -128,6 +128,9 @@ func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 	btsByID := map[string]*balanceTicket{}
 
 	for _, t := range tickets {
+		if ticket.IsBacklog(t) {
+			continue // backlog is out of committed scope — never scheduled
+		}
 		if t.Status == "closed" || t.Status == "complete" {
 			terminal[t.ID] = true
 			// Use the existing due_date or closed_at as their "done" date so

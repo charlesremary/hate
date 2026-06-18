@@ -555,6 +555,8 @@ function computeWorkOrder(tickets, byId) {
 // parent is an ordinary ticket and the link is just a conventionally-named tag.
 const PARENT_TAG_PREFIX = 'parent:';
 function isReservedTag(tag) { return tag.startsWith(PARENT_TAG_PREFIX); }
+const BACKLOG_TAG = 'backlog';
+function isBacklogTicket(t) { return (t.tags || []).includes(BACKLOG_TAG); }
 function visibleTags(t) { return (t.tags || []).filter(x => !isReservedTag(x)); }
 function parentIdOf(t) {
   const tag = (t.tags || []).find(isReservedTag);
@@ -615,7 +617,7 @@ function renderTicketTable(tickets) {
   tbody.innerHTML = tickets.map(t => `
     <tr data-id="${t.id}">
       <td><strong>${t.id}</strong></td>
-      <td>${t.title}${depBadge(t, byId)}${kidCount.get(t.id) ? ` <span class="badge child-badge" title="${kidCount.get(t.id)} child ticket(s)">↳ ${kidCount.get(t.id)}</span>` : ''}</td>
+      <td>${t.title}${isBacklogTicket(t) ? ' <span class="badge backlog-badge">Backlog</span>' : ''}${depBadge(t, byId)}${kidCount.get(t.id) ? ` <span class="badge child-badge" title="${kidCount.get(t.id)} child ticket(s)">↳ ${kidCount.get(t.id)}</span>` : ''}</td>
       <td>${t.phase || '—'}</td>
       <td>${statusBadge(t.status)}</td>
       <td>${t.assignee ? t.assignee.split('@')[0] : '—'}</td>

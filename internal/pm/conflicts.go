@@ -206,6 +206,10 @@ func analyzeTickets(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 	analyzed := 0
 
 	for _, t := range tickets {
+		// Backlog is out of committed scope — not competing for capacity.
+		if ticket.IsBacklog(t) {
+			continue
+		}
 		// Skip terminal tickets — closed work isn't competing for capacity.
 		if t.Status == "closed" || t.Status == "complete" {
 			continue

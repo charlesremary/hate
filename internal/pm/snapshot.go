@@ -275,8 +275,17 @@ func CreateBaselineFromTickets(projectRoot, projectID, projectName, createdBy st
 	if err != nil {
 		return nil, fmt.Errorf("failed to read tickets: %w", err)
 	}
+	// Backlog tickets are out of committed scope — never part of the baseline,
+	// so they don't affect the projected end date, slip, or health.
+	committed := make([]*ticket.Ticket, 0, len(tickets))
+	for _, t := range tickets {
+		if !ticket.IsBacklog(t) {
+			committed = append(committed, t)
+		}
+	}
+	tickets = committed
 	if len(tickets) == 0 {
-		return nil, fmt.Errorf("no tickets to baseline. Create some tickets first")
+		return nil, fmt.Errorf("no committed tickets to baseline (all are backlog). Untag some, or create non-backlog tickets first")
 	}
 
 	// Read config for effort_to_days
