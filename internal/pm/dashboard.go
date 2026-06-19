@@ -937,7 +937,7 @@ const dashboardJS = `
 // ---------------------------------------------------------------------------
 
 // GenerateDashboard returns a complete self-contained HTML string for the PM dashboard.
-func GenerateDashboard(snapshot *Snapshot) string {
+func GenerateDashboard(snapshot *Snapshot, costHTML string) string {
 	health := snapshot.ComputedHealth
 	hcolor := healthColors[health]
 	hlabel := healthLabels[health]
@@ -981,6 +981,8 @@ func GenerateDashboard(snapshot *Snapshot) string {
 <div id="panel-deps" class="panel">
   %s
 </div>
+
+%s
 
 <!-- Resolve slip modal -->
 <div id="resolve-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:center;justify-content:center">
@@ -1032,6 +1034,7 @@ var PROJECT_ID = '%s';
 		snapDate, hcolor, hlabel,
 		statusHTML,
 		depHTML,
+		costHTML,
 		projID,
 		dashboardJS,
 	)

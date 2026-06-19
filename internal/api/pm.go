@@ -230,7 +230,8 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		if err == nil && cfg.ProjectName != "" {
 			projectName = cfg.ProjectName
 		}
-		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName)
+		costHTML := pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
+		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, costHTML)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(html))
@@ -248,7 +249,12 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	html := pm.GenerateDashboard(snapshot)
+	costTickets, err := ticket.ReadAllTickets(root)
+	if err != nil {
+		costTickets = []*ticket.Ticket{}
+	}
+	costHTML := pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))
+	html := pm.GenerateDashboard(snapshot, costHTML)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(html))

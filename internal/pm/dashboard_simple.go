@@ -12,7 +12,7 @@ import (
 )
 
 // GenerateSimpleDashboard returns a self-contained HTML dashboard for pre-baseline view.
-func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName string) string {
+func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName, costHTML string) string {
 	// Backlog-tagged tickets are out of committed scope — exclude them from every
 	// rollup (count, completion, status mix, table). Surface how many were hidden.
 	backlogCount := 0
@@ -234,6 +234,8 @@ tr:hover td { background: #f5f5f5; }
 <div class="status-bar">%s</div>
 <div class="legend">%s</div>
 
+%s
+
 <div class="baseline-section">
     <h3>Ready to Baseline?</h3>
     <p>Baselining locks in the current plan as the schedule to track against. Once set, it cannot be changed.
@@ -280,6 +282,7 @@ async function baselineNow() {
 		len(typeCounts),
 		barSegments.String(),
 		legendItems.String(),
+		costHTML,
 		tableBody,
 		projectID,
 	)
