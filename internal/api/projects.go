@@ -57,6 +57,7 @@ type AppSettingsRequest struct {
 	ProjectsRoot *string                 `json:"projects_root"`
 	Scheduler    *map[string]interface{} `json:"scheduler"`
 	ShowBilling  *bool                   `json:"show_billing"`
+	ShowCosmic   *bool                   `json:"show_cosmic"`
 }
 
 // GitIdentityRequest is the body for POST git-identity.
@@ -375,6 +376,9 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ShowBilling != nil {
 		cfg.ShowBilling = *req.ShowBilling
+	}
+	if req.ShowCosmic != nil {
+		cfg.ShowCosmic = *req.ShowCosmic
 	}
 	if req.Scheduler != nil {
 		sched := *req.Scheduler

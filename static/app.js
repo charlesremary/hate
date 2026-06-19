@@ -259,6 +259,7 @@ let allTickets = [];
 let projectResources = [];
 let currentUser = null;
 let showBilling = false; // Billing tab is hidden unless enabled in Settings.
+let showCosmic = false;  // COSMIC tab (experimental) is hidden unless enabled in Settings.
 
 // ── Status / priority helpers ────────────────────────
 const STATUS_LABELS = {
@@ -421,10 +422,12 @@ function switchTab(tab) {
   document.getElementById('tab-tickets').classList.toggle('hidden', tab !== 'tickets');
   document.getElementById('tab-dashboard').classList.toggle('hidden', tab !== 'dashboard');
   document.getElementById('tab-billing').classList.toggle('hidden', tab !== 'billing');
+  document.getElementById('tab-cosmic').classList.toggle('hidden', tab !== 'cosmic');
 
   if (tab === 'tickets' && currentProject) loadTickets();
   if (tab === 'dashboard' && currentProject) loadDashboard();
   if (tab === 'billing' && currentProject) loadBilling();
+  if (tab === 'cosmic' && currentProject) loadCosmic();
 }
 
 // Show or hide the Billing tab per the app setting. Hidden by default.
@@ -433,6 +436,13 @@ function applyBillingVisibility() {
   if (btn) btn.classList.toggle('hidden', !showBilling);
   // If billing was the active tab and just got hidden, fall back to tickets.
   if (!showBilling && currentTab === 'billing') switchTab('tickets');
+}
+
+// Show or hide the experimental COSMIC tab per the app setting. Hidden by default.
+function applyCosmicVisibility() {
+  const btn = document.querySelector('.tab[data-tab="cosmic"]');
+  if (btn) btn.classList.toggle('hidden', !showCosmic);
+  if (!showCosmic && currentTab === 'cosmic') switchTab('tickets');
 }
 
 // ── Tickets ───────────────────────────────────────────
@@ -1643,6 +1653,7 @@ document.getElementById('btn-settings').addEventListener('click', async () => {
     const cfg = await API.get('/api/projects/settings');
     document.getElementById('settings-projects-root').value = cfg.projects_root || '';
     document.getElementById('show-billing').checked = cfg.show_billing || false;
+    document.getElementById('show-cosmic').checked = cfg.show_cosmic || false;
     document.getElementById('scheduler-enabled').checked = cfg.scheduler?.enabled || false;
     document.getElementById('scheduler-interval').value = cfg.scheduler?.interval_hours || 24;
   } catch (e) { showToast(e.message, 'error'); }
@@ -1698,6 +1709,7 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
   const body = {
     projects_root: document.getElementById('settings-projects-root').value || undefined,
     show_billing: document.getElementById('show-billing').checked,
+    show_cosmic: document.getElementById('show-cosmic').checked,
     scheduler: {
       enabled: document.getElementById('scheduler-enabled').checked,
       interval_hours: parseFloat(document.getElementById('scheduler-interval').value),
@@ -1730,6 +1742,8 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
     showToast('Settings saved');
     showBilling = body.show_billing;
     applyBillingVisibility();
+    showCosmic = body.show_cosmic;
+    applyCosmicVisibility();
     loadProjects();
   } catch (e) { showToast(e.message, 'error'); }
 });
@@ -2016,14 +2030,113 @@ document.getElementById('billing-start').addEventListener('change', loadBilling)
 document.getElementById('billing-end').addEventListener('change', loadBilling);
 document.getElementById('billing-author').addEventListener('change', renderBilling);
 
+// ── COSMIC calibration (experimental) ─────────────────
+const fmtCosmicH = n => (n || 0).toFixed(1);
+const fmtCosmicRate = n => (n == null ? '—' : n.toFixed(2));
+const fmtCosmicPct = n => (n == null ? '—' : Math.round(n) + '%');
+
+async function loadCosmic() {
+  if (!currentProject) return;
+  const el = document.getElementById('cosmic-content');
+  el.innerHTML = '<p style="color:#999;padding:16px">Loading…</p>';
+  try {
+    const rep = await API.get(`/api/projects/${currentProject.id}/cosmic`);
+    renderCosmic(rep);
+  } catch (e) {
+    el.innerHTML = `<p style="color:red;padding:16px">${e.message}</p>`;
+  }
+}
+
+function renderCosmic(rep) {
+  const el = document.getElementById('cosmic-content');
+  const a = rep.aggregate, as = rep.assumed;
+
+  if (!rep.features.length) {
+    el.innerHTML = `
+      <div style="max-width:680px">
+        <h2 style="font-size:18px;margin-bottom:8px">COSMIC calibration <span class="badge backlog-badge">experimental</span></h2>
+        <p style="color:#666;font-size:13px;line-height:1.6">No sized features yet. To calibrate your delivery pace against COSMIC function points:</p>
+        <ol style="color:#666;font-size:13px;line-height:1.8;margin:8px 0 0 18px">
+          <li>Tag a parent ticket <code>cfp:&lt;N&gt;</code> with its COSMIC size — the size lives only on the parent.</li>
+          <li>Make the work items its children (tag them <code>parent:&lt;parent-id&gt;</code>).</li>
+          <li>Tag each child <code>functional</code>, <code>config</code>, or <code>nonfunc</code>, and log hours on it.</li>
+        </ol>
+        <p style="color:#999;font-size:12px;margin-top:12px">Observed functional pace = Σ(functional child hours) ÷ feature CFP.</p>
+      </div>`;
+    return;
+  }
+
+  // Sanity flag when the aggregate rate is wildly off the assumed band.
+  let flag = '';
+  if (a.h_per_cfp != null && (a.h_per_cfp < as.band_low / 4 || a.h_per_cfp > as.band_high * 4)) {
+    flag = `<div style="color:#c62828;font-size:12px;margin-top:8px">⚠ ${a.h_per_cfp.toFixed(2)} h/CFP is far outside the assumed band — verify the CFP counts and that all hours are logged before trusting it.</div>`;
+  }
+  let dq = '';
+  if (a.unclassed_hours > 0) dq += `<div style="color:#e65100;font-size:12px;margin-top:6px">⚠ ${fmtCosmicH(a.unclassed_hours)} h on unclassed children — classify them or the rate is unreliable.</div>`;
+  if (a.parent_hours > 0) dq += `<div style="color:#e65100;font-size:12px;margin-top:6px">⚑ ${fmtCosmicH(a.parent_hours)} h logged on parent tickets — hours belong on children.</div>`;
+
+  const compare = a.h_per_cfp != null && a.h_per_cfp > 0 ? `${(as.band_mid / a.h_per_cfp).toFixed(1)}× under the ${as.band_mid} rate` : '';
+
+  const card = `
+    <div style="background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:20px 24px;max-width:760px;margin-bottom:20px">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#666;margin-bottom:14px">Calibration · ${a.feature_count} sized feature${a.feature_count === 1 ? '' : 's'}</div>
+      <div style="display:flex;gap:40px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:28px;font-weight:700">${fmtCosmicRate(a.h_per_cfp)}<span style="font-size:13px;color:#999;font-weight:400"> h/CFP functional</span></div>
+          <div style="font-size:12px;color:#666;margin-top:3px">median ${fmtCosmicRate(a.h_per_cfp_median)} · range ${fmtCosmicRate(a.h_per_cfp_min)}–${fmtCosmicRate(a.h_per_cfp_max)} · n=${a.n}</div>
+          <div style="font-size:12px;color:#888;margin-top:2px">assumed band ${as.band_low} · ${as.band_mid} · ${as.band_high}${compare ? ` — ${compare}` : ''}</div>
+        </div>
+        <div>
+          <div style="font-size:28px;font-weight:700">${fmtCosmicPct(a.wrap_pct)}<span style="font-size:13px;color:#999;font-weight:400"> wrap</span></div>
+          <div style="font-size:12px;color:#888;margin-top:3px">assumed ${as.wrap_pct}%</div>
+        </div>
+        <div>
+          <div style="font-size:28px;font-weight:700">${a.total_cfp}<span style="font-size:13px;color:#999;font-weight:400"> CFP</span></div>
+          <div style="font-size:12px;color:#888;margin-top:3px">${fmtCosmicH(a.functional_hours)} functional h</div>
+        </div>
+      </div>
+      ${flag}${dq}
+    </div>`;
+
+  const rows = rep.features.map(f => {
+    let warn = '';
+    if (f.unclassed_hours > 0) warn += `<span title="${fmtCosmicH(f.unclassed_hours)} h unclassed" style="color:#e65100">⚠</span> `;
+    if (f.parent_hours > 0) warn += `<span title="${fmtCosmicH(f.parent_hours)} h on parent" style="color:#e65100">⚑</span>`;
+    return `
+    <tr>
+      <td><a class="ticket-ref" href="javascript:void(0)" onclick="openTicketPanel('${f.id}')">${f.id}</a></td>
+      <td>${escapeHtml(f.title)}</td>
+      <td style="text-align:right">${f.cfp}</td>
+      <td style="text-align:right">${fmtCosmicH(f.functional_hours)}</td>
+      <td style="text-align:right">${fmtCosmicH(f.config_hours)}</td>
+      <td style="text-align:right">${fmtCosmicH(f.nonfunc_hours)}</td>
+      <td style="text-align:right;font-weight:600">${fmtCosmicRate(f.h_per_cfp)}</td>
+      <td style="text-align:right">${fmtCosmicPct(f.wrap_pct)}</td>
+      <td>${warn}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = card + `
+    <table class="billing-table">
+      <thead><tr>
+        <th>Feature</th><th>Title</th><th style="text-align:right">CFP</th>
+        <th style="text-align:right">Func h</th><th style="text-align:right">Config h</th><th style="text-align:right">Nonfunc h</th>
+        <th style="text-align:right">h/CFP</th><th style="text-align:right">Wrap</th><th></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
 // ── Init ──────────────────────────────────────────────
-async function initBillingVisibility() {
+async function initTabVisibility() {
   try {
     const cfg = await API.get('/api/projects/settings');
     showBilling = cfg.show_billing || false;
-  } catch (e) { showBilling = false; }
+    showCosmic = cfg.show_cosmic || false;
+  } catch (e) { showBilling = false; showCosmic = false; }
   applyBillingVisibility();
+  applyCosmicVisibility();
 }
 
 loadProjects();
-initBillingVisibility();
+initTabVisibility();

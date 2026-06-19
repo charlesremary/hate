@@ -33,6 +33,8 @@ type AppConfig struct {
 	HiddenProjects []string `json:"hidden_projects"`
 	// ShowBilling controls whether the Billing tab is visible. Hidden by default.
 	ShowBilling bool `json:"show_billing"`
+	// ShowCosmic controls whether the experimental COSMIC tab is visible. Hidden by default.
+	ShowCosmic bool `json:"show_cosmic"`
 }
 
 // ProjectInfo describes a discovered project.
@@ -65,6 +67,7 @@ func defaultConfig() *AppConfig {
 		ExtraProjects:  []string{},
 		HiddenProjects: []string{},
 		ShowBilling:    false,
+		ShowCosmic:     false,
 	}
 }
 
@@ -123,6 +126,10 @@ func LoadConfig() *AppConfig {
 
 	if sb, ok := raw["show_billing"].(bool); ok {
 		cfg.ShowBilling = sb
+	}
+
+	if sc, ok := raw["show_cosmic"].(bool); ok {
+		cfg.ShowCosmic = sc
 	}
 
 	return cfg

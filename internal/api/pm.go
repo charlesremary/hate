@@ -56,6 +56,7 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Patch("/slip/{slipEventId}", resolveSlip)
 	r.Post("/check-conflicts", checkScheduleConflicts)
 	r.Post("/balance", balanceProject)
+	r.Get("/cosmic", getCosmic)
 }
 
 // balanceProject handles POST /api/projects/{projectId}/balance.
