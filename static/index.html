@@ -51,6 +51,7 @@
             <button class="btn-secondary" id="btn-run-snapshot">⟳ Snapshot</button>
             <button class="btn-secondary" id="btn-check-schedule" title="Find tickets that over-allocate someone's daily capacity">✓ Check schedule</button>
             <button class="btn-secondary" id="btn-balance" title="Auto-balance the project to fit everyone's real daily capacity">⚖ Balance</button>
+            <button class="btn-secondary" id="btn-phase-rollup" title="Roll tickets up by phase — effort-weighted % complete, with CSV export">Σ Phases</button>
           </div>
         </header>
 
@@ -680,6 +681,20 @@
           <button class="icon-btn" id="btn-close-balance">✕</button>
         </div>
         <div id="balance-content" style="font-size:13px"></div>
+      </div>
+    </div>
+
+    <!-- Phase rollup modal -->
+    <div id="phase-rollup-modal-overlay" class="hidden">
+      <div id="phase-rollup-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:900px;max-height:85vh;overflow:auto;margin:4% auto">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px">
+          <h3 style="margin:0">Phase rollup — effort-weighted</h3>
+          <span style="display:flex;gap:8px;align-items:center">
+            <button class="btn-secondary" id="btn-phase-rollup-csv" title="Download one row per phase as CSV">⤓ Download CSV</button>
+            <button class="icon-btn" id="btn-close-phase-rollup">✕</button>
+          </span>
+        </div>
+        <div id="phase-rollup-content" style="font-size:13px"></div>
       </div>
     </div>
 

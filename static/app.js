@@ -1119,6 +1119,102 @@ document.getElementById('balance-modal-overlay').addEventListener('click', (e) =
     document.getElementById('balance-modal-overlay').classList.add('hidden');
 });
 
+// ── Phase rollup ─────────────────────────────────────
+let lastPhaseRollup = null;
+
+document.getElementById('btn-phase-rollup').addEventListener('click', async () => {
+  if (!currentProject) return;
+  const btn = document.getElementById('btn-phase-rollup');
+  btn.disabled = true; btn.textContent = 'Σ …';
+  try {
+    const report = await API.get(`/api/projects/${currentProject.id}/phase-rollup`);
+    lastPhaseRollup = report;
+    renderPhaseRollup(report);
+    document.getElementById('phase-rollup-modal-overlay').classList.remove('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
+  finally { btn.disabled = false; btn.textContent = 'Σ Phases'; }
+});
+
+document.getElementById('btn-close-phase-rollup').addEventListener('click', () => {
+  document.getElementById('phase-rollup-modal-overlay').classList.add('hidden');
+});
+document.getElementById('phase-rollup-modal-overlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('phase-rollup-modal-overlay'))
+    document.getElementById('phase-rollup-modal-overlay').classList.add('hidden');
+});
+document.getElementById('btn-phase-rollup-csv').addEventListener('click', () => {
+  if (lastPhaseRollup) downloadPhaseRollupCSV(lastPhaseRollup);
+  else showToast('Open a phase rollup first', 'error');
+});
+
+function pctText(v) { return (v == null ? 0 : v).toFixed(1) + '%'; }
+
+function renderPhaseRollup(report) {
+  const c = document.getElementById('phase-rollup-content');
+  if (!report.phases || !report.phases.length) {
+    c.innerHTML = `<div style="color:#666">No tickets to roll up yet.</div>`;
+    return;
+  }
+  const bar = (v) => {
+    const w = Math.max(0, Math.min(100, v || 0));
+    return `<div style="background:#eee;border-radius:6px;height:8px;width:90px;display:inline-block;vertical-align:middle;overflow:hidden">
+      <div style="background:#2e7d32;height:8px;width:${w}%"></div></div>`;
+  };
+  const rows = report.phases.map(p => {
+    const flags = [];
+    if (p.blocked_count) flags.push(`<span class="badge s-blocked">${p.blocked_count} blocked</span>`);
+    if (!p.effort_based) flags.push(`<span class="badge s-not_started" title="No effort sizes in this phase — % is by ticket count">count-based</span>`);
+    if (p.no_effort_count) flags.push(`<span style="color:#999;font-size:11px" title="Tickets with no effort size (invisible to the effort math)">${p.no_effort_count} unsized</span>`);
+    if (p.cancelled_count) flags.push(`<span style="color:#999;font-size:11px" title="Force-closed / descoped — excluded from %">${p.cancelled_count} descoped</span>`);
+    return `<tr style="border-bottom:1px solid #eee">
+      <td style="padding:6px 8px"><strong>${escapeHtml(p.label)}</strong></td>
+      <td style="padding:6px 8px;white-space:nowrap">${bar(p.percent_complete)} ${pctText(p.percent_complete)}</td>
+      <td style="padding:6px 8px">${p.complete_count}/${p.ticket_count}</td>
+      <td style="padding:6px 8px;white-space:nowrap">${p.done_effort_days}/${p.total_effort_days}d</td>
+      <td style="padding:6px 8px;white-space:nowrap">${p.planned_start || '—'} → ${p.due_date || '—'}</td>
+      <td style="padding:6px 8px">${flags.join(' ')}</td>
+    </tr>`;
+  }).join('');
+  c.innerHTML = `
+    <div style="margin-bottom:10px">Project overall: <strong>${pctText(report.percent_complete)}</strong>
+      <span style="color:#999">— ${report.total_tickets} tickets, ${escapeHtml(report.basis)}</span></div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="text-align:left;border-bottom:2px solid #ddd;color:#555">
+        <th style="padding:6px 8px">Phase</th><th style="padding:6px 8px">Complete</th>
+        <th style="padding:6px 8px">Tickets</th><th style="padding:6px 8px">Effort (done/total)</th>
+        <th style="padding:6px 8px">Dates</th><th style="padding:6px 8px"></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p style="color:#999;font-size:11px;margin-top:10px">Effort-weighted: % = done effort-days ÷ total effort-days.
+      Descoped (force-closed) tickets are excluded; phases with no effort sizes fall back to ticket count.</p>`;
+}
+
+function downloadPhaseRollupCSV(report) {
+  const head = ['phase', 'percent_complete', 'basis', 'tickets_total', 'tickets_complete',
+    'in_progress', 'not_started', 'blocked', 'descoped', 'effort_days_total',
+    'effort_days_done', 'unsized_tickets', 'planned_start', 'due_date'];
+  const esc = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
+  const lines = [head.join(',')];
+  (report.phases || []).forEach(p => {
+    lines.push([
+      esc(p.label), p.percent_complete, p.effort_based ? 'effort' : 'count',
+      p.ticket_count, p.complete_count, p.in_progress_count, p.not_started_count,
+      p.blocked_count, p.cancelled_count, p.total_effort_days, p.done_effort_days,
+      p.no_effort_count, esc(p.planned_start || ''), esc(p.due_date || '')
+    ].join(','));
+  });
+  lines.push([esc('TOTAL'), report.percent_complete, report.basis, report.total_tickets,
+    '', '', '', '', '', '', '', '', '', ''].join(','));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `phase-rollup-${currentProject.id}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('Phase rollup CSV downloaded');
+}
+
 function renderBalancePreview(report) {
   const content = document.getElementById('balance-content');
   if (report.cycle_detected) {

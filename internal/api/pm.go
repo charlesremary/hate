@@ -56,7 +56,35 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Patch("/slip/{slipEventId}", resolveSlip)
 	r.Post("/check-conflicts", checkScheduleConflicts)
 	r.Post("/balance", balanceProject)
+	r.Get("/phase-rollup", getPhaseRollup)
 	r.Get("/cosmic", getCosmic)
+}
+
+// getPhaseRollup handles GET /api/projects/{projectId}/phase-rollup.
+// Pure analysis: groups the current tickets by phase and returns an
+// effort-weighted percent-complete per phase. Nothing is written.
+func getPhaseRollup(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	tickets, err := ticket.ReadAllTickets(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	effortToDays := cfg.EffortToDays
+	if effortToDays == nil {
+		effortToDays = ticket.DefaultEffortToDays
+	}
+	report := pm.PhaseRollup(tickets, effortToDays)
+	respondJSON(w, http.StatusOK, report)
 }
 
 // balanceProject handles POST /api/projects/{projectId}/balance.
