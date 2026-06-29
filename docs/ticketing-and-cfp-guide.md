@@ -154,7 +154,32 @@ abusing `phase` — use the tag.
 
 ---
 
-## 8. Worked example
+## 8. Phases (for the rollup)
+
+Set a **`phase`** on every committed ticket. Phase is the unit the PM **phase
+rollup** groups by (the **Σ Phases** view and its CSV export) — it's how you hand
+a stakeholder "Phase 2 is 40% done" without them ever seeing individual tickets.
+
+- **Use a small, consistent, ordered set of phase names.** Phases are matched by
+  exact string, so `Build`, `build`, and `Building` become three separate phases.
+  Pick one spelling per phase and reuse it on every ticket in that phase.
+- **Number the phases if execution order matters.** The rollup lists phases
+  alphabetically by the phase string, so prefix them to force order:
+  `01 - Discovery`, `02 - Build`, `03 - QA`. (Otherwise `Build` sorts before
+  `Design`.)
+- **Give every ticket an `effort` size too.** The rollup is *effort-weighted*
+  (% = done effort-days ÷ total effort-days). A ticket with no effort is invisible
+  to the percentage, and a phase of entirely unsized tickets falls back to a plain
+  ticket count. Phase **and** effort together are what make the number meaningful.
+- Tickets with no phase land in a **`(no phase)`** bucket — fine for stray items,
+  but don't leave committed work there.
+- Use `phase` only for the work-stage grouping. Don't park out-of-scope work in a
+  phase — that's the `backlog` tag (§7). Descoped/force-closed tickets are excluded
+  from the rollup automatically.
+
+---
+
+## 9. Worked example
 
 A feature with functional size plus a platform dependency:
 
@@ -172,8 +197,10 @@ PROJ-100  "Semantic search over docs"   tags: cfp:18
 
 ---
 
-## 9. Quick checklist before you finish
+## 10. Quick checklist before you finish
 
+- [ ] Every committed ticket has a consistent `phase` (and an `effort` size) so it
+      rolls up cleanly.
 - [ ] Each feature is a parent with children for the work.
 - [ ] `cfp:<N>` is on the parent and nowhere else (integer; only if it has
       functional size).
