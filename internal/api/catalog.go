@@ -6,7 +6,6 @@ package api
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -27,16 +26,6 @@ func RegisterCatalogRoutes(r chi.Router) {
 		r.Delete("/entries/{type}", deleteCatalogEntry)
 	})
 	r.Get("/api/wrap-aggregate", getWrapAggregate)
-
-	r.Route("/api/profiles", func(r chi.Router) {
-		r.Get("/", listProfiles)
-		r.Post("/", createProfile)
-		r.Get("/{name}", getProfile)
-		r.Post("/{name}/recompute", recomputeProfile)
-		r.Delete("/{name}", deleteProfile)
-	})
-
-	r.Post("/api/estimate", postEstimate)
 }
 
 // wrapDataForProjects builds the per-project wrap data for the given project IDs
@@ -77,129 +66,6 @@ func getWrapAggregate(w http.ResponseWriter, r *http.Request) {
 	}
 	projects, _ := wrapDataForProjects(nil)
 	respondJSON(w, http.StatusOK, pm.ComputeWrapAggregate(projects, cat))
-}
-
-// ProfileRequest is the body for POST /api/profiles.
-type ProfileRequest struct {
-	Name           string   `json:"name"`
-	SourceProjects []string `json:"source_projects"`
-}
-
-// listProfiles handles GET /api/profiles.
-func listProfiles(w http.ResponseWriter, r *http.Request) {
-	profiles, err := pm.ListProfiles()
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, profiles)
-}
-
-// getProfile handles GET /api/profiles/{name}.
-func getProfile(w http.ResponseWriter, r *http.Request) {
-	p, err := pm.LoadProfile(urlParam(r, "name"))
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, p)
-}
-
-// createProfile handles POST /api/profiles — pools the named source projects (or
-// all projects, if none given) into a cached profile using the current code
-// constant and catalog.
-func createProfile(w http.ResponseWriter, r *http.Request) {
-	var req ProfileRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	if strings.TrimSpace(req.Name) == "" {
-		respondError(w, http.StatusUnprocessableEntity, "profile name is required")
-		return
-	}
-	if pm.ProfileSlug(req.Name) == "" {
-		respondError(w, http.StatusUnprocessableEntity, "profile name must contain a letter or digit")
-		return
-	}
-	p, err := buildAndSaveProfile(req.Name, req.SourceProjects)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, p)
-}
-
-// recomputeProfile handles POST /api/profiles/{name}/recompute — rebuilds the
-// profile from the current tickets + code constant, keeping its source projects.
-func recomputeProfile(w http.ResponseWriter, r *http.Request) {
-	name := urlParam(r, "name")
-	existing, err := pm.LoadProfile(name)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	p, err := buildAndSaveProfile(existing.Name, existing.SourceProjects)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, p)
-}
-
-// deleteProfile handles DELETE /api/profiles/{name}.
-func deleteProfile(w http.ResponseWriter, r *http.Request) {
-	if err := pm.DeleteProfile(urlParam(r, "name")); err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]string{"deleted": urlParam(r, "name")})
-}
-
-// buildAndSaveProfile pools the source projects and persists the profile.
-func buildAndSaveProfile(name string, sources []string) (pm.Profile, error) {
-	cat, err := catalog.Load()
-	if err != nil {
-		return pm.Profile{}, err
-	}
-	data, resolved := wrapDataForProjects(sources)
-	constant := config.LoadConfig().CodeCFPConstant
-	now := time.Now().UTC().Format(time.RFC3339)
-	p := pm.BuildProfile(name, resolved, data, constant, cat, now)
-	if err := pm.SaveProfile(p); err != nil {
-		return pm.Profile{}, err
-	}
-	return p, nil
-}
-
-// postEstimate handles POST /api/estimate (HATE-y1wn).
-func postEstimate(w http.ResponseWriter, r *http.Request) {
-	var req pm.EstimateRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	var prof *pm.Profile
-	if strings.TrimSpace(req.Profile) != "" {
-		p, err := pm.LoadProfile(req.Profile)
-		if err != nil {
-			respondError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		prof = p
-	}
-	cat, err := catalog.Load()
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	// Fall back to the live aggregate when no profile is chosen.
-	var liveAgg *pm.WrapAggregate
-	if prof == nil {
-		data, _ := wrapDataForProjects(nil)
-		agg := pm.ComputeWrapAggregate(data, cat)
-		liveAgg = &agg
-	}
-	constant := config.LoadConfig().CodeCFPConstant
-	respondJSON(w, http.StatusOK, pm.ComputeEstimate(req, prof, liveAgg, cat, constant))
 }
 
 // getCatalog handles GET /api/catalog — returns the catalog, seeding defaults on
