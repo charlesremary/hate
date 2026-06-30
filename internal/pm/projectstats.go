@@ -1,0 +1,124 @@
+// Copyright 2026 Charles Emary
+// SPDX-License-Identifier: FSL-1.1-Apache-2.0
+
+package pm
+
+import (
+	"sort"
+	"strconv"
+
+	"hate/internal/ticket"
+)
+
+// Per-project stats report ("Generate stats").
+//
+// Informational, not a calibration engine: it reports what THIS project's tickets
+// actually cost, so a human can eyeball it and carry numbers forward to a similar
+// new project by hand. Two cuts:
+//
+//   - Class breakdown (clean, non-overlapping): functional / config / nonfunc /
+//     author / unclassed hours, the code rate (h/CFP), and wrap %. These reconcile
+//     to the total logged hours.
+//   - Tag breakdown: for EVERY tag on the project's tickets — count, total hours,
+//     avg hours/ticket. A ticket has many tags, so these OVERLAP and do NOT sum to
+//     the project total (that's what the class cut is for) — it answers "tickets
+//     tagged X typically cost this much."
+
+// TagStat is the rollup for one tag across the project.
+type TagStat struct {
+	Tag               string  `json:"tag"`
+	Tickets           int     `json:"tickets"`
+	Hours             float64 `json:"hours"`
+	AvgHoursPerTicket float64 `json:"avg_hours_per_ticket"`
+}
+
+// ProjectStats is the full per-project report.
+type ProjectStats struct {
+	// Code / class cut (project-wide, non-overlapping).
+	TotalCFP        int      `json:"total_cfp"`
+	FunctionalHours float64  `json:"functional_hours"`
+	ConfigHours     float64  `json:"config_hours"`
+	NonfuncHours    float64  `json:"nonfunc_hours"`
+	AuthorHours     float64  `json:"author_hours"`
+	UnclassedHours  float64  `json:"unclassed_hours"`
+	HPerCFP         *float64 `json:"h_per_cfp"` // functional ÷ CFP, nil if either is 0
+	WrapPct         *float64 `json:"wrap_pct"`  // (config+nonfunc) ÷ functional, nil if no functional
+
+	// Totals.
+	TotalLoggedHours float64 `json:"total_logged_hours"`
+	TicketsWithHours int     `json:"tickets_with_hours"`
+	TicketCount      int     `json:"ticket_count"`
+
+	// Tag cut (every tag, overlapping), sorted by hours desc then tag.
+	TagStats []TagStat `json:"tag_stats"`
+}
+
+// ComputeProjectStats builds the per-project report from all its tickets.
+func ComputeProjectStats(tickets []*ticket.Ticket) ProjectStats {
+	stats := ProjectStats{TagStats: []TagStat{}, TicketCount: len(tickets)}
+	tagMap := map[string]*TagStat{}
+
+	for _, t := range tickets {
+		h := cosmicLoggedHours(t)
+		stats.TotalLoggedHours += h
+		if h > 0 {
+			stats.TicketsWithHours++
+		}
+
+		// Class cut — project-wide, one class per ticket.
+		switch cosmicClassOf(t.Tags) {
+		case classFunctional:
+			stats.FunctionalHours += h
+		case classConfig:
+			stats.ConfigHours += h
+		case classNonfunc:
+			stats.NonfuncHours += h
+		case classAuthor:
+			stats.AuthorHours += h
+		default:
+			stats.UnclassedHours += h
+		}
+
+		// CFP from cfp: tags (parents).
+		if cfpStr, ok := cosmicTagValue(t.Tags, cfpTagPrefix); ok {
+			if cfp, err := strconv.Atoi(cfpStr); err == nil && cfp > 0 {
+				stats.TotalCFP += cfp
+			}
+		}
+
+		// Tag cut — every tag, overlapping.
+		for _, tag := range t.Tags {
+			ts := tagMap[tag]
+			if ts == nil {
+				ts = &TagStat{Tag: tag}
+				tagMap[tag] = ts
+			}
+			ts.Tickets++
+			ts.Hours += h
+		}
+	}
+
+	if stats.TotalCFP > 0 && stats.FunctionalHours > 0 {
+		v := stats.FunctionalHours / float64(stats.TotalCFP)
+		stats.HPerCFP = &v
+	}
+	if stats.FunctionalHours > 0 {
+		w := (stats.ConfigHours + stats.NonfuncHours) / stats.FunctionalHours * 100
+		stats.WrapPct = &w
+	}
+
+	for _, ts := range tagMap {
+		if ts.Tickets > 0 {
+			ts.AvgHoursPerTicket = ts.Hours / float64(ts.Tickets)
+		}
+		stats.TagStats = append(stats.TagStats, *ts)
+	}
+	sort.SliceStable(stats.TagStats, func(i, j int) bool {
+		if stats.TagStats[i].Hours != stats.TagStats[j].Hours {
+			return stats.TagStats[i].Hours > stats.TagStats[j].Hours
+		}
+		return stats.TagStats[i].Tag < stats.TagStats[j].Tag
+	})
+
+	return stats
+}

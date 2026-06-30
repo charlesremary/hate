@@ -58,6 +58,24 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Post("/balance", balanceProject)
 	r.Get("/phase-rollup", getPhaseRollup)
 	r.Get("/cosmic", getCosmic)
+	r.Get("/stats", getProjectStats)
+}
+
+// getProjectStats handles GET /api/projects/{projectId}/stats — the informational
+// "Generate stats" report: the project's code rate (h/CFP), class breakdown +
+// wrap %, and a per-tag hours breakdown over every tag. Pure analysis.
+func getProjectStats(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	tickets, err := ticket.ReadAllTickets(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, pm.ComputeProjectStats(tickets))
 }
 
 // getPhaseRollup handles GET /api/projects/{projectId}/phase-rollup.
