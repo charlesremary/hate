@@ -15,7 +15,6 @@ func TestComputeProjectStats(t *testing.T) {
 		tkt("c1", []string{"parent:P", "functional"}, 20),     // functional 20h
 		tkt("c2", []string{"parent:P", "config", "wt:flow"}, 4), // config 4h, also tagged flow
 		tkt("c3", []string{"parent:P", "nonfunc"}, 2),         // nonfunc 2h
-		tkt("c4", []string{"parent:P", "author"}, 5),          // authored IaC 5h
 		tkt("c5", []string{"parent:P"}, 1),                    // unclassed 1h
 	}
 
@@ -24,12 +23,12 @@ func TestComputeProjectStats(t *testing.T) {
 	if s.TotalCFP != 10 {
 		t.Errorf("cfp = %d, want 10", s.TotalCFP)
 	}
-	if s.FunctionalHours != 20 || s.ConfigHours != 4 || s.NonfuncHours != 2 || s.AuthorHours != 5 || s.UnclassedHours != 1 {
+	if s.FunctionalHours != 20 || s.ConfigHours != 4 || s.NonfuncHours != 2 || s.UnclassedHours != 1 {
 		t.Errorf("class hours wrong: %+v", s)
 	}
-	// class cut reconciles to total logged hours: 20+4+2+5+1 = 32
-	if s.TotalLoggedHours != 32 {
-		t.Errorf("total logged = %v, want 32", s.TotalLoggedHours)
+	// class cut reconciles to total logged hours: 20+4+2+1 = 27
+	if s.TotalLoggedHours != 27 {
+		t.Errorf("total logged = %v, want 27", s.TotalLoggedHours)
 	}
 	if s.HPerCFP == nil || *s.HPerCFP != 2.0 {
 		t.Errorf("h/CFP = %v, want 2.0", s.HPerCFP)
@@ -37,8 +36,8 @@ func TestComputeProjectStats(t *testing.T) {
 	if s.WrapPct == nil || *s.WrapPct != 100.0*6/20 {
 		t.Errorf("wrap = %v, want 30", s.WrapPct)
 	}
-	if s.TicketsWithHours != 5 {
-		t.Errorf("tickets with hours = %d, want 5", s.TicketsWithHours)
+	if s.TicketsWithHours != 4 {
+		t.Errorf("tickets with hours = %d, want 4", s.TicketsWithHours)
 	}
 
 	// Tag cut: descriptive tags only — structural parent:/cfp:/wtn: excluded.

@@ -1322,7 +1322,7 @@ function renderProjectStats(s) {
         <div style="font-size:12px;color:#888">${s.tickets_with_hours}/${s.ticket_count} tickets with hours</div></div>
     </div>
     <div style="font-size:12px;color:#666;margin:10px 0">Class split (non-overlapping):
-      functional ${fmtH(s.functional_hours)} · config ${fmtH(s.config_hours)} · nonfunc ${fmtH(s.nonfunc_hours)} · author ${fmtH(s.author_hours)} · unclassed ${fmtH(s.unclassed_hours)}</div>
+      functional ${fmtH(s.functional_hours)} · config ${fmtH(s.config_hours)} · nonfunc ${fmtH(s.nonfunc_hours)} · unclassed ${fmtH(s.unclassed_hours)}</div>
     <h4 style="margin:14px 0 6px">Hours by tag</h4>
     <p style="color:#999;font-size:11px;margin:0 0 8px">Descriptive tags only (structural <code>parent:</code>/<code>cfp:</code> links excluded). A ticket has several tags, so these overlap and do NOT sum to the total — use the class split for that. "Tickets tagged X typically cost avg h."</p>
     <table style="width:100%;border-collapse:collapse">
@@ -1344,7 +1344,6 @@ function downloadProjectStatsCSV(s) {
   lines.push(['summary', 'functional_hours', s.functional_hours].join(','));
   lines.push(['summary', 'config_hours', s.config_hours].join(','));
   lines.push(['summary', 'nonfunc_hours', s.nonfunc_hours].join(','));
-  lines.push(['summary', 'author_hours', s.author_hours].join(','));
   lines.push(['summary', 'unclassed_hours', s.unclassed_hours].join(','));
   lines.push(['summary', 'total_logged_hours', s.total_logged_hours].join(','));
   lines.push('');
@@ -2301,7 +2300,7 @@ function renderCosmic(rep) {
         <ol style="color:#666;font-size:13px;line-height:1.8;margin:8px 0 0 18px">
           <li>Tag a parent ticket <code>cfp:&lt;N&gt;</code> with its COSMIC size — the size lives only on the parent.</li>
           <li>Make the work items its children (tag them <code>parent:&lt;parent-id&gt;</code>).</li>
-          <li>Tag each child <code>functional</code>, <code>config</code>, <code>nonfunc</code>, or <code>author</code> (authored IaC, 0 CFP), and log hours on it.</li>
+          <li>Tag each child <code>functional</code>, <code>config</code>, or <code>nonfunc</code>, and log hours on it.</li>
         </ol>
         <p style="color:#999;font-size:12px;margin-top:12px">Observed functional pace = Σ(functional child hours) ÷ feature CFP.</p>
       </div>`;
@@ -2316,8 +2315,6 @@ function renderCosmic(rep) {
   let dq = '';
   if (a.unclassed_hours > 0) dq += `<div style="color:#e65100;font-size:12px;margin-top:6px">⚠ ${fmtCosmicH(a.unclassed_hours)} h on unclassed children — classify them or the rate is unreliable.</div>`;
   if (a.parent_hours > 0) dq += `<div style="color:#e65100;font-size:12px;margin-top:6px">⚑ ${fmtCosmicH(a.parent_hours)} h logged on parent tickets — hours belong on children.</div>`;
-  const iac = rep.suspected_iac_config || [];
-  if (iac.length) dq += `<div style="color:#e65100;font-size:12px;margin-top:6px">⚠ ${iac.length} config ticket${iac.length === 1 ? '' : 's'} look like authored IaC — reclass as <code>author</code>: ${iac.map(x => escapeHtml(x.id)).join(', ')}</div>`;
 
   const compare = a.h_per_cfp != null && a.h_per_cfp > 0 ? `${(as.band_mid / a.h_per_cfp).toFixed(1)}× under the ${as.band_mid} rate` : '';
 

@@ -56,7 +56,6 @@ type ProjectStats struct {
 	FunctionalHours float64  `json:"functional_hours"`
 	ConfigHours     float64  `json:"config_hours"`
 	NonfuncHours    float64  `json:"nonfunc_hours"`
-	AuthorHours     float64  `json:"author_hours"`
 	UnclassedHours  float64  `json:"unclassed_hours"`
 	HPerCFP         *float64 `json:"h_per_cfp"` // functional ÷ CFP, nil if either is 0
 	WrapPct         *float64 `json:"wrap_pct"`  // (config+nonfunc) ÷ functional, nil if no functional
@@ -90,8 +89,6 @@ func ComputeProjectStats(tickets []*ticket.Ticket) ProjectStats {
 			stats.ConfigHours += h
 		case classNonfunc:
 			stats.NonfuncHours += h
-		case classAuthor:
-			stats.AuthorHours += h
 		default:
 			stats.UnclassedHours += h
 		}

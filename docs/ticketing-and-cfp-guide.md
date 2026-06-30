@@ -248,29 +248,16 @@ Every unit of work is one of:
 
 | Activity | What it is | Cost | Class tag |
 |---|---|---|---|
-| **author** | Generate code / IaC — the agent does it | ~constant | `functional` (CFP-bearing) or `author` (0-CFP, e.g. IaC) |
-| **operate** | Deploy, run, validate, troubleshoot | variable (catalogued) | `nonfunc` |
-| **configure** | Console / manual click-ops | variable (catalogued) | `config` |
+| **author** | Generate code — the agent does it | ~constant | `functional` |
+| **operate** | Deploy, run, validate, troubleshoot | variable | `nonfunc` |
+| **configure** | Console / manual click-ops & platform/infra setup | variable | `config` |
 
-`author` is the constant slice; **operate + configure are "wrap"** — the variable
-cost. This is the same split as the COSMIC `wrap %` (numerator = config + nonfunc;
-`author` hours are *not* wrap and are excluded from the h/CFP denominator).
+`author` (the CFP-bearing code) is the constant slice; **operate + configure are
+"wrap"** — the variable cost. This is the same split as the COSMIC `wrap %`
+(numerator = config + nonfunc).
 
-### ⚠ Authored IaC is `author`, NOT `configure`
-
-The single most important rule, and the easiest to get wrong:
-
-- **Writing IaC** (CDK, CloudFormation, Terraform, YAML) is **authored code** →
-  tag it **`author`** (0-CFP authored artifact). It's cheap and agent-generated;
-  its hours sit in their own bucket, out of both the h/CFP denominator and the wrap.
-  (Use `functional` only for code that bears real CFP — data movements.)
-- **Clicking in a console** (create a Connect instance, build a Lex bot, author a
-  contact flow) is **configure** → tag it `config` **and** give it a `wt:<type>`.
-
-A ticket titled `CDK: DynamoDB tables` is authoring, not configure — tag it
-`author`, never `config`/`wt:`. Conflating the two pollutes both the code constant
-and the wrap rates. The COSMIC tab flags config tickets whose titles look like IaC
-so you can reclass them.
+Infrastructure-as-code (CDK, CloudFormation, Terraform, YAML) is platform setup —
+tag it `config` (0 CFP, per §5), like any other managed-service/platform work.
 
 ### Tagging wrap deliverables
 
@@ -294,4 +281,4 @@ every tag** — "tickets tagged `X` typically cost this much" — with a CSV exp
 It's informational: read one project's stats and carry the numbers forward to a
 similar new project **by hand**. There's no automatic cross-project calibration
 (deliberately — it doesn't generalize across domains). Keep the tagging clean
-(consistent tag names, IaC stays `author`) and the numbers stay meaningful.
+(consistent tag names, one class per child) and the numbers stay meaningful.
