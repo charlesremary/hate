@@ -2209,7 +2209,7 @@ function renderCosmic(rep) {
         <ol style="color:#666;font-size:13px;line-height:1.8;margin:8px 0 0 18px">
           <li>Tag a parent ticket <code>cfp:&lt;N&gt;</code> with its COSMIC size — the size lives only on the parent.</li>
           <li>Make the work items its children (tag them <code>parent:&lt;parent-id&gt;</code>).</li>
-          <li>Tag each child <code>functional</code>, <code>config</code>, or <code>nonfunc</code>, and log hours on it.</li>
+          <li>Tag each child <code>functional</code>, <code>config</code>, <code>nonfunc</code>, or <code>author</code> (authored IaC, 0 CFP), and log hours on it.</li>
         </ol>
         <p style="color:#999;font-size:12px;margin-top:12px">Observed functional pace = Σ(functional child hours) ÷ feature CFP.</p>
       </div>`;
@@ -2224,6 +2224,8 @@ function renderCosmic(rep) {
   let dq = '';
   if (a.unclassed_hours > 0) dq += `<div style="color:#e65100;font-size:12px;margin-top:6px">⚠ ${fmtCosmicH(a.unclassed_hours)} h on unclassed children — classify them or the rate is unreliable.</div>`;
   if (a.parent_hours > 0) dq += `<div style="color:#e65100;font-size:12px;margin-top:6px">⚑ ${fmtCosmicH(a.parent_hours)} h logged on parent tickets — hours belong on children.</div>`;
+  const iac = rep.suspected_iac_config || [];
+  if (iac.length) dq += `<div style="color:#e65100;font-size:12px;margin-top:6px">⚠ ${iac.length} config ticket${iac.length === 1 ? '' : 's'} look like authored IaC — reclass as <code>author</code>: ${iac.map(x => escapeHtml(x.id)).join(', ')}</div>`;
 
   const compare = a.h_per_cfp != null && a.h_per_cfp > 0 ? `${(as.band_mid / a.h_per_cfp).toFixed(1)}× under the ${as.band_mid} rate` : '';
 
@@ -2260,6 +2262,7 @@ function renderCosmic(rep) {
       <td style="text-align:right">${fmtCosmicH(f.functional_hours)}</td>
       <td style="text-align:right">${fmtCosmicH(f.config_hours)}</td>
       <td style="text-align:right">${fmtCosmicH(f.nonfunc_hours)}</td>
+      <td style="text-align:right">${fmtCosmicH(f.author_hours)}</td>
       <td style="text-align:right;font-weight:600">${fmtCosmicRate(f.h_per_cfp)}</td>
       <td style="text-align:right">${fmtCosmicPct(f.wrap_pct)}</td>
       <td>${warn}</td>
@@ -2270,7 +2273,7 @@ function renderCosmic(rep) {
     <table class="billing-table">
       <thead><tr>
         <th>Feature</th><th>Title</th><th style="text-align:right">CFP</th>
-        <th style="text-align:right">Func h</th><th style="text-align:right">Config h</th><th style="text-align:right">Nonfunc h</th>
+        <th style="text-align:right">Func h</th><th style="text-align:right">Config h</th><th style="text-align:right">Nonfunc h</th><th style="text-align:right">Author h</th>
         <th style="text-align:right">h/CFP</th><th style="text-align:right">Wrap</th><th></th>
       </tr></thead>
       <tbody>${rows}</tbody>

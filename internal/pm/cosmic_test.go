@@ -28,8 +28,11 @@ func TestComputeCosmic(t *testing.T) {
 		tkt("c3", []string{"parent:P", "config"}, 6),              // config 6h
 		tkt("c4", []string{"parent:P", "nonfunc"}, 4),             // nonfunc 4h
 		tkt("c5", []string{"parent:P"}, 2),                        // unclassed 2h
+		tkt("c6", []string{"parent:P", "author"}, 5),              // authored IaC 5h — 0-CFP bucket
+		tkt("c7", []string{"parent:P", "config"}, 1),              // CDK: stack — IaC-in-config flag
 		tkt("orphan", []string{"functional"}, 99),                 // no parent — ignored
 	}
+	tickets[7].Title = "CDK: networking stack" // c7 title triggers the IaC heuristic
 
 	rep := ComputeCosmic(tickets)
 
@@ -43,14 +46,21 @@ func TestComputeCosmic(t *testing.T) {
 	if !approx(f.FunctionalHours, 30) {
 		t.Errorf("functional = %v, want 30", f.FunctionalHours)
 	}
-	if !approx(f.ConfigHours, 6) || !approx(f.NonfuncHours, 4) || !approx(f.UnclassedHours, 2) {
+	if !approx(f.ConfigHours, 7) || !approx(f.NonfuncHours, 4) || !approx(f.UnclassedHours, 2) {
 		t.Errorf("class hours = config %v nonfunc %v unclassed %v", f.ConfigHours, f.NonfuncHours, f.UnclassedHours)
 	}
-	if f.HPerCFP == nil || !approx(*f.HPerCFP, 3.0) {
-		t.Errorf("h/CFP = %v, want 3.0", f.HPerCFP)
+	if !approx(f.AuthorHours, 5) {
+		t.Errorf("author hours = %v, want 5", f.AuthorHours)
 	}
-	if f.WrapPct == nil || !approx(*f.WrapPct, 100.0*10/30) {
-		t.Errorf("wrap = %v, want 33.33", f.WrapPct)
+	if f.HPerCFP == nil || !approx(*f.HPerCFP, 3.0) {
+		t.Errorf("h/CFP = %v, want 3.0 (author excluded from denominator)", f.HPerCFP)
+	}
+	// wrap = (config + nonfunc) / functional — author is NOT wrap, NOT in the denominator
+	if f.WrapPct == nil || !approx(*f.WrapPct, 100.0*11/30) {
+		t.Errorf("wrap = %v, want %v", f.WrapPct, 100.0*11/30)
+	}
+	if len(rep.SuspectedIaCConfig) != 1 || rep.SuspectedIaCConfig[0].ID != "c7" {
+		t.Errorf("suspected IaC-in-config = %+v, want [c7]", rep.SuspectedIaCConfig)
 	}
 
 	a := rep.Aggregate

@@ -4,6 +4,7 @@
 package pm
 
 import (
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,7 +33,16 @@ const (
 	classFunctional = "functional"
 	classConfig     = "config"
 	classNonfunc    = "nonfunc"
+	// classAuthor (HATE-bqh6) is agent-authored code/artifacts with ~0 CFP — IaC
+	// (CDK/CloudFormation/Terraform), YAML, glue. It's the "author" activity like
+	// functional, but carries no CFP to price it by, so its hours are tracked in
+	// their own bucket instead of polluting the config/nonfunc wrap.
+	classAuthor = "author"
 )
+
+// iacInConfigRE flags config-classed children whose titles look like authored IaC
+// — the conflation HATE-bqh6 fixes. Suggestion only, surfaced as a data-quality hint.
+var iacInConfigRE = regexp.MustCompile(`(?i)\b(cdk|cloudformation|cfn|terraform|iac)\b`)
 
 // CosmicAssumed holds the borrowed-industry knobs we're trying to replace with
 // our own measured numbers.
@@ -52,6 +62,7 @@ type CosmicFeature struct {
 	FunctionalHours float64  `json:"functional_hours"`
 	ConfigHours     float64  `json:"config_hours"`
 	NonfuncHours    float64  `json:"nonfunc_hours"`
+	AuthorHours     float64  `json:"author_hours"` // 0-CFP authored artifacts (IaC) — not wrap
 	UnclassedHours  float64  `json:"unclassed_hours"`
 	ParentHours     float64  `json:"parent_hours"` // hours mistakenly on the parent
 	TotalHours      float64  `json:"total_hours"`
@@ -66,6 +77,7 @@ type CosmicAggregate struct {
 	FunctionalHours float64  `json:"functional_hours"`
 	ConfigHours     float64  `json:"config_hours"`
 	NonfuncHours    float64  `json:"nonfunc_hours"`
+	AuthorHours     float64  `json:"author_hours"`
 	UnclassedHours  float64  `json:"unclassed_hours"`
 	ParentHours     float64  `json:"parent_hours"`
 	HPerCFP         *float64 `json:"h_per_cfp"`        // Σ functional ÷ Σ cfp
@@ -76,11 +88,21 @@ type CosmicAggregate struct {
 	WrapPct         *float64 `json:"wrap_pct"`
 }
 
+// CosmicIaCFlag points at a config-classed child that looks like authored IaC and
+// should probably be reclassed `author` (HATE-bqh6).
+type CosmicIaCFlag struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
 // CosmicReport is the full calibration payload.
 type CosmicReport struct {
 	Features  []CosmicFeature `json:"features"`
 	Aggregate CosmicAggregate `json:"aggregate"`
 	Assumed   CosmicAssumed   `json:"assumed"`
+	// SuspectedIaCConfig lists config children whose titles look like authored IaC
+	// — a hint to reclass them `author` so they don't inflate the wrap.
+	SuspectedIaCConfig []CosmicIaCFlag `json:"suspected_iac_config"`
 }
 
 func cosmicTagValue(tags []string, prefix string) (string, bool) {
@@ -95,7 +117,7 @@ func cosmicTagValue(tags []string, prefix string) (string, bool) {
 func cosmicClassOf(tags []string) string {
 	for _, t := range tags {
 		switch t {
-		case classFunctional, classConfig, classNonfunc:
+		case classFunctional, classConfig, classNonfunc, classAuthor:
 			return t
 		}
 	}
@@ -120,12 +142,13 @@ func ComputeCosmic(tickets []*ticket.Ticket) CosmicReport {
 	}
 
 	report := CosmicReport{
-		Features: []CosmicFeature{},
-		Assumed:  CosmicAssumed{BandLow: 8, BandMid: 12, BandHigh: 18, WrapPct: 60},
+		Features:           []CosmicFeature{},
+		Assumed:            CosmicAssumed{BandLow: 8, BandMid: 12, BandHigh: 18, WrapPct: 60},
+		SuspectedIaCConfig: []CosmicIaCFlag{},
 	}
 
 	var rates []float64
-	var aggF, aggC, aggN, aggU, aggP float64
+	var aggF, aggC, aggN, aggA, aggU, aggP float64
 	var totalCFP int
 
 	for _, t := range tickets {
@@ -145,14 +168,19 @@ func ComputeCosmic(tickets []*ticket.Ticket) CosmicReport {
 				f.FunctionalHours += h
 			case classConfig:
 				f.ConfigHours += h
+				if iacInConfigRE.MatchString(c.Title) {
+					report.SuspectedIaCConfig = append(report.SuspectedIaCConfig, CosmicIaCFlag{ID: c.ID, Title: c.Title})
+				}
 			case classNonfunc:
 				f.NonfuncHours += h
+			case classAuthor:
+				f.AuthorHours += h
 			default:
 				f.UnclassedHours += h
 			}
 			f.ChildCount++
 		}
-		f.TotalHours = f.FunctionalHours + f.ConfigHours + f.NonfuncHours + f.UnclassedHours
+		f.TotalHours = f.FunctionalHours + f.ConfigHours + f.NonfuncHours + f.AuthorHours + f.UnclassedHours
 		if f.FunctionalHours > 0 {
 			r := f.FunctionalHours / float64(cfp)
 			f.HPerCFP = &r
@@ -166,6 +194,7 @@ func ComputeCosmic(tickets []*ticket.Ticket) CosmicReport {
 		aggF += f.FunctionalHours
 		aggC += f.ConfigHours
 		aggN += f.NonfuncHours
+		aggA += f.AuthorHours
 		aggU += f.UnclassedHours
 		aggP += f.ParentHours
 	}
@@ -176,6 +205,7 @@ func ComputeCosmic(tickets []*ticket.Ticket) CosmicReport {
 		FunctionalHours: aggF,
 		ConfigHours:     aggC,
 		NonfuncHours:    aggN,
+		AuthorHours:     aggA,
 		UnclassedHours:  aggU,
 		ParentHours:     aggP,
 		N:               len(rates),
