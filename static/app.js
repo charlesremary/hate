@@ -2214,7 +2214,9 @@ function renderCosmic(rep) {
           <li>Tag each child <code>functional</code>, <code>config</code>, <code>nonfunc</code>, or <code>author</code> (authored IaC, 0 CFP), and log hours on it.</li>
         </ol>
         <p style="color:#999;font-size:12px;margin-top:12px">Observed functional pace = Σ(functional child hours) ÷ feature CFP.</p>
-      </div>`;
+      </div>
+      <div id="estimator-section" style="margin-top:32px"></div>`;
+    renderEstimator();
     return;
   }
 
@@ -2279,27 +2281,227 @@ function renderCosmic(rep) {
         <th style="text-align:right">h/CFP</th><th style="text-align:right">Wrap</th><th></th>
       </tr></thead>
       <tbody>${rows}</tbody>
-    </table>`;
+    </table>
+    <div id="estimator-section" style="margin-top:32px"></div>`;
+  renderEstimator();
+}
+
+// ── Wrap estimator (HATE-y1wn engine, HATE-4ze3 UI) ───────────────────
+let estimatorProfiles = [];   // saved profiles for the apply-profile picker
+let estimatorCatalog = null;  // catalog entries for the BoM type picker
+let estimatorItems = [{ type: '', count: 1 }]; // BoM rows
+let estimatorResult = null;
+
+async function ensureEstimatorData() {
+  const [profs, cat] = await Promise.all([
+    API.get('/api/profiles').catch(() => []),
+    API.get('/api/catalog').catch(() => ({ entries: [] })),
+  ]);
+  estimatorProfiles = profs || [];
+  estimatorCatalog = cat || { entries: [] };
+}
+
+async function renderEstimator() {
+  const host = document.getElementById('estimator-section');
+  if (!host) return;
+  if (!estimatorCatalog) await ensureEstimatorData();
+  host.innerHTML = estimatorHtml();
+}
+
+function estimatorTypeOptions(selected) {
+  const entries = (estimatorCatalog && estimatorCatalog.entries) || [];
+  let html = `<option value="">— type —</option>`;
+  entries.forEach(e => {
+    html += `<option value="${escapeHtml(e.type)}" ${e.type === selected ? 'selected' : ''}>${escapeHtml(e.label)} (${escapeHtml(e.unit)})</option>`;
+  });
+  return html;
+}
+
+function estimatorHtml() {
+  const profOpts = `<option value="">Live aggregate (all projects)</option>` +
+    estimatorProfiles.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('');
+  const itemRows = estimatorItems.map((it, i) => `
+    <div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
+      <select onchange="estimatorItems[${i}].type=this.value" style="flex:1">${estimatorTypeOptions(it.type)}</select>
+      <input type="number" min="0" step="1" value="${it.count}" onchange="estimatorItems[${i}].count=parseFloat(this.value)||0" style="width:70px" title="count">
+      <a href="javascript:void(0)" onclick="estimatorRemoveItem(${i})" style="color:#c62828" title="remove">✕</a>
+    </div>`).join('');
+
+  return `
+    <div style="max-width:760px">
+      <h2 style="font-size:18px;margin-bottom:4px">Wrap estimator <span class="badge backlog-badge">experimental</span></h2>
+      <p style="color:#666;font-size:13px;margin-bottom:14px">code = CFP × constant · wrap = Σ(count × hours/unit) · reported as a range that widens on thin samples.</p>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">
+        <label style="font-size:13px">Profile<br><select id="est-profile" style="min-width:220px">${profOpts}</select></label>
+        <label style="font-size:13px">Platform<br><input id="est-platform" placeholder="e.g. connect" style="width:140px"></label>
+        <label style="font-size:13px">Code CFP<br><input id="est-cfp" type="number" min="0" step="1" value="0" style="width:100px"></label>
+      </div>
+      <div style="font-size:13px;color:#666;margin-bottom:6px">Bill of materials</div>
+      <div id="est-items">${itemRows}</div>
+      <div style="margin:8px 0 16px"><a href="javascript:void(0)" onclick="estimatorAddItem()">+ add deliverable</a></div>
+      <button class="btn-primary" onclick="runEstimate()">Estimate</button>
+      <div id="est-result" style="margin-top:18px">${estimatorResult ? estimatorResultHtml(estimatorResult) : ''}</div>
+    </div>`;
+}
+
+function estimatorAddItem() {
+  syncEstimatorItemsFromDom(); // persist current selections before re-render
+  estimatorItems.push({ type: '', count: 1 });
+  rerenderEstimatorKeepingInputs();
+}
+
+function estimatorRemoveItem(i) {
+  syncEstimatorItemsFromDom();
+  estimatorItems.splice(i, 1);
+  if (!estimatorItems.length) estimatorItems.push({ type: '', count: 1 });
+  rerenderEstimatorKeepingInputs();
+}
+
+// Re-render the form body but preserve the top inputs (profile/platform/cfp).
+function rerenderEstimatorKeepingInputs() {
+  const prof = document.getElementById('est-profile')?.value || '';
+  const plat = document.getElementById('est-platform')?.value || '';
+  const cfp = document.getElementById('est-cfp')?.value || '0';
+  document.getElementById('estimator-section').innerHTML = estimatorHtml();
+  document.getElementById('est-profile').value = prof;
+  document.getElementById('est-platform').value = plat;
+  document.getElementById('est-cfp').value = cfp;
+}
+
+function syncEstimatorItemsFromDom() {
+  const selects = document.querySelectorAll('#est-items select');
+  const counts = document.querySelectorAll('#est-items input');
+  estimatorItems = Array.from(selects).map((s, i) => ({
+    type: s.value,
+    count: parseFloat(counts[i]?.value) || 0,
+  }));
+}
+
+async function runEstimate() {
+  syncEstimatorItemsFromDom();
+  const body = {
+    profile: document.getElementById('est-profile').value || '',
+    platform: document.getElementById('est-platform').value.trim(),
+    cfp: parseInt(document.getElementById('est-cfp').value, 10) || 0,
+    items: estimatorItems.filter(it => it.type && it.count > 0),
+  };
+  try {
+    estimatorResult = await API.post('/api/estimate', body);
+    document.getElementById('est-result').innerHTML = estimatorResultHtml(estimatorResult);
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+function estimatorResultHtml(r) {
+  const fmt = x => x.toFixed(2);
+  const lines = (r.wrap_lines || []).map(l => `
+    <tr>
+      <td><code>${escapeHtml(l.type)}</code></td>
+      <td>${l.count}</td>
+      <td style="text-align:right">${fmt(l.hours_per_unit)}</td>
+      <td>${escapeHtml(l.source)}${l.source === 'measured' ? ` <span style="color:#999">N=${l.n}</span>` : ''}</td>
+      <td style="text-align:right">${fmt(l.likely)}</td>
+      <td style="text-align:right;color:#999">${fmt(l.low)}–${fmt(l.high)}</td>
+    </tr>`).join('');
+  const warns = (r.warnings || []).map(wn => `<div style="color:#e65100;font-size:12px;margin-top:4px">⚠ ${escapeHtml(wn)}</div>`).join('');
+  return `
+    <div style="background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#666">Estimate${r.profile_name ? ' · ' + escapeHtml(r.profile_name) : ' · live aggregate'}</div>
+      <div style="font-size:30px;font-weight:700;margin:6px 0">${fmt(r.total.likely)} h <span style="font-size:14px;color:#999;font-weight:400">(${fmt(r.total.low)} – ${fmt(r.total.high)})</span></div>
+      <div style="font-size:13px;color:#666;margin-bottom:12px">code ${fmt(r.code_hours.likely)} h (CFP ${r.cfp} × ${r.code_constant}) · wrap ${fmt(r.wrap_hours.likely)} h</div>
+      <table class="billing-table">
+        <thead><tr><th>Type</th><th>Count</th><th style="text-align:right">h/unit</th><th>Source</th><th style="text-align:right">Likely</th><th style="text-align:right">Range</th></tr></thead>
+        <tbody>${lines || '<tr><td colspan="6" style="color:#999">No wrap items.</td></tr>'}</tbody>
+      </table>
+      ${warns}
+    </div>`;
 }
 
 // ── Catalog (org-level wrap-deliverable catalog, HATE-k0gf) ───────────
 let catalogData = null;     // last-loaded catalog
 let catalogEditType = null; // type currently being edited, or null for "add new"
 
-let wrapAggData = null; // last-loaded measured aggregate (HATE-2b1x)
+let wrapAggData = null;   // last-loaded measured aggregate (HATE-2b1x)
+let profilesData = null;  // last-loaded calibration profiles (HATE-h4ad)
+let allProjectsForProfile = []; // project list for the profile source picker
 
 async function loadCatalog() {
   const el = document.getElementById('catalog-content');
   el.innerHTML = '<p style="color:#999;padding:16px">Loading…</p>';
   try {
-    [catalogData, wrapAggData] = await Promise.all([
+    [catalogData, wrapAggData, profilesData, allProjectsForProfile] = await Promise.all([
       API.get('/api/catalog'),
       API.get('/api/wrap-aggregate').catch(() => null),
+      API.get('/api/profiles').catch(() => []),
+      API.get('/api/projects').catch(() => []),
     ]);
     renderCatalog();
   } catch (e) {
     el.innerHTML = `<p style="color:red;padding:16px">${e.message}</p>`;
   }
+}
+
+// Calibration profiles UI (HATE-h4ad).
+function renderProfilesSection() {
+  const profs = profilesData || [];
+  const rows = profs.map(p => `
+    <tr>
+      <td><strong>${escapeHtml(p.name)}</strong></td>
+      <td>${(p.source_projects || []).map(escapeHtml).join(', ') || '<span style="color:#999">all</span>'}</td>
+      <td style="text-align:right">${(p.rates || []).length}</td>
+      <td style="text-align:right">${p.code_constant}</td>
+      <td style="color:#999;font-size:12px">${(p.computed_at || '').replace('T', ' ').replace('Z', '')}</td>
+      <td style="white-space:nowrap">
+        <a href="javascript:void(0)" onclick='recomputeProfile(${JSON.stringify(p.name)})'>recompute</a>
+        &nbsp;·&nbsp;
+        <a href="javascript:void(0)" style="color:#c62828" onclick='deleteProfile(${JSON.stringify(p.name)})'>delete</a>
+      </td>
+    </tr>`).join('');
+  const projChecks = (allProjectsForProfile || []).map(p =>
+    `<label style="display:inline-block;margin-right:12px;font-weight:normal"><input type="checkbox" class="prof-src" value="${escapeHtml(p.id)}"> ${escapeHtml(p.id)}</label>`).join('');
+  return `
+    <h3 style="font-size:14px;margin:24px 0 8px">Calibration profiles</h3>
+    <p style="color:#666;font-size:13px;margin-bottom:8px">A cached snapshot of pooled wrap rates + the code constant for a set of projects — the estimator's input. Recompute to refresh from current tickets.</p>
+    <table class="billing-table" style="margin-bottom:16px">
+      <thead><tr><th>Name</th><th>Sources</th><th style="text-align:right">Rates</th><th style="text-align:right">Constant</th><th>Computed</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6" style="color:#999">No profiles yet.</td></tr>'}</tbody>
+    </table>
+    <div style="background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:16px 20px;max-width:640px">
+      <div style="font-weight:600;margin-bottom:10px">New profile</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <input id="prof-name" placeholder="Profile name, e.g. IVR (Connect)" style="flex:1">
+      </div>
+      <div style="font-size:13px;margin-bottom:6px;color:#666">Source projects (none = all):</div>
+      <div style="margin-bottom:12px">${projChecks || '<span style="color:#999">No projects</span>'}</div>
+      <button class="btn-primary" onclick="createProfile()">Build profile</button>
+    </div>`;
+}
+
+async function createProfile() {
+  const name = document.getElementById('prof-name').value.trim();
+  if (!name) { showToast('Profile name required', 'error'); return; }
+  const sources = Array.from(document.querySelectorAll('.prof-src:checked')).map(c => c.value);
+  try {
+    await API.post('/api/profiles', { name, source_projects: sources });
+    showToast('Profile built');
+    await loadCatalog();
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function recomputeProfile(name) {
+  try {
+    await API.post(`/api/profiles/${encodeURIComponent(name)}/recompute`);
+    showToast('Profile recomputed');
+    await loadCatalog();
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function deleteProfile(name) {
+  if (!confirm(`Delete profile “${name}”?`)) return;
+  try {
+    await API.delete(`/api/profiles/${encodeURIComponent(name)}`);
+    showToast('Profile deleted');
+    await loadCatalog();
+  } catch (e) { showToast(e.message, 'error'); }
 }
 
 // Measured-rates table (HATE-2b1x): hours-per-unit by (platform, type) pooled
@@ -2407,6 +2609,8 @@ function renderCatalog() {
           <button onclick="catalogResetForm()" id="cat-cancel" style="display:none">Cancel</button>
         </div>
       </div>
+
+      ${renderProfilesSection()}
     </div>`;
 
   // Re-populate the form if we're mid-edit (re-render keeps the edit state).
