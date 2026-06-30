@@ -120,6 +120,24 @@ they calibrate as "hours per unit" instead.
 - If it's a recurring deliverable type you want to estimate later, also give the
   **parent** a `type:` tag (§6).
 
+**What "wrap" is.** The COSMIC view reports a **wrap %** built from these buckets:
+
+```
+wrap % = (config hours + nonfunc hours) ÷ functional hours × 100
+```
+
+It's the effort spent *around* the functional code — platform/managed-service
+setup and non-functional work — as a share of the functional hours. **Wrap = 60%**
+means every 10h of functional work carried another 6h of config + non-functional
+work. (It's blank for a feature with no functional hours yet — nothing to divide
+by.)
+
+The dashboard ships with an *assumed* 60% wrap (and the borrowed 8 / 12 / 18
+h-per-CFP band); the whole point of classing hours cleanly is to **replace that
+assumption with your project's measured wrap**. Blend config hours into
+`functional` and the wrap number becomes meaningless — which is why every child
+gets exactly one class and hours never land on the parent (§3).
+
 ---
 
 ## 6. Deliverable types for cost carry-forward (`type:`)
