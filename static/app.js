@@ -1324,7 +1324,7 @@ function renderProjectStats(s) {
     <div style="font-size:12px;color:#666;margin:10px 0">Class split (non-overlapping):
       functional ${fmtH(s.functional_hours)} · config ${fmtH(s.config_hours)} · nonfunc ${fmtH(s.nonfunc_hours)} · author ${fmtH(s.author_hours)} · unclassed ${fmtH(s.unclassed_hours)}</div>
     <h4 style="margin:14px 0 6px">Hours by tag</h4>
-    <p style="color:#999;font-size:11px;margin:0 0 8px">Every tag on the project. A ticket has several tags, so these overlap and do NOT sum to the total — use the class split for that. "Tickets tagged X typically cost avg h."</p>
+    <p style="color:#999;font-size:11px;margin:0 0 8px">Descriptive tags only (structural <code>parent:</code>/<code>cfp:</code> links excluded). A ticket has several tags, so these overlap and do NOT sum to the total — use the class split for that. "Tickets tagged X typically cost avg h."</p>
     <table style="width:100%;border-collapse:collapse">
       <thead><tr style="text-align:left;border-bottom:2px solid #ddd;color:#555">
         <th style="padding:5px 8px">Tag</th><th style="padding:5px 8px;text-align:right">Tickets</th>

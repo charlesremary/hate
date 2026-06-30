@@ -6,9 +6,24 @@ package pm
 import (
 	"sort"
 	"strconv"
+	"strings"
 
 	"hate/internal/ticket"
 )
+
+// structuralTagPrefixes are plumbing tags that link/size tickets rather than
+// describe the work — excluded from the hours-by-tag breakdown (they're pure
+// noise there: one parent: per feature, cfp: on zero-hour parents).
+var structuralTagPrefixes = []string{parentTagPrefix, cfpTagPrefix, "wtn:"}
+
+func isStructuralTag(tag string) bool {
+	for _, p := range structuralTagPrefixes {
+		if strings.HasPrefix(tag, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // Per-project stats report ("Generate stats").
 //
@@ -19,10 +34,12 @@ import (
 //   - Class breakdown (clean, non-overlapping): functional / config / nonfunc /
 //     author / unclassed hours, the code rate (h/CFP), and wrap %. These reconcile
 //     to the total logged hours.
-//   - Tag breakdown: for EVERY tag on the project's tickets — count, total hours,
-//     avg hours/ticket. A ticket has many tags, so these OVERLAP and do NOT sum to
-//     the project total (that's what the class cut is for) — it answers "tickets
-//     tagged X typically cost this much."
+//   - Tag breakdown: for every DESCRIPTIVE tag on the project's tickets — count,
+//     total hours, avg hours/ticket. Structural plumbing tags (parent:/cfp:/wtn:)
+//     are excluded — they're per-ticket links/sizes, not work categories, and just
+//     drown out the signal. A ticket has many tags, so these OVERLAP and do NOT sum
+//     to the project total (that's the class cut) — it answers "tickets tagged X
+//     typically cost this much."
 
 // TagStat is the rollup for one tag across the project.
 type TagStat struct {
@@ -86,8 +103,11 @@ func ComputeProjectStats(tickets []*ticket.Ticket) ProjectStats {
 			}
 		}
 
-		// Tag cut — every tag, overlapping.
+		// Tag cut — descriptive tags only (structural plumbing excluded), overlapping.
 		for _, tag := range t.Tags {
+			if isStructuralTag(tag) {
+				continue
+			}
 			ts := tagMap[tag]
 			if ts == nil {
 				ts = &TagStat{Tag: tag}

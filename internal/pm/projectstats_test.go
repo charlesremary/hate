@@ -41,13 +41,16 @@ func TestComputeProjectStats(t *testing.T) {
 		t.Errorf("tickets with hours = %d, want 5", s.TicketsWithHours)
 	}
 
-	// Tag cut: every tag present; "parent:P" spans all 5 children (32h), top by hours.
+	// Tag cut: descriptive tags only — structural parent:/cfp:/wtn: excluded.
 	byTag := map[string]TagStat{}
 	for _, ts := range s.TagStats {
 		byTag[ts.Tag] = ts
 	}
-	if byTag["parent:P"].Tickets != 5 || byTag["parent:P"].Hours != 32 {
-		t.Errorf("parent:P tag = %+v, want 5 tickets / 32h", byTag["parent:P"])
+	if _, ok := byTag["parent:P"]; ok {
+		t.Errorf("structural parent: tag should be excluded from the breakdown")
+	}
+	if _, ok := byTag["cfp:10"]; ok {
+		t.Errorf("structural cfp: tag should be excluded from the breakdown")
 	}
 	if byTag["wt:flow"].Tickets != 1 || byTag["wt:flow"].Hours != 4 {
 		t.Errorf("wt:flow tag = %+v, want 1 ticket / 4h", byTag["wt:flow"])
