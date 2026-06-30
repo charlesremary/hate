@@ -2352,9 +2352,7 @@ function renderCosmic(rep) {
       <td>${escapeHtml(f.title)}</td>
       <td style="text-align:right">${f.cfp}</td>
       <td style="text-align:right">${fmtCosmicH(f.functional_hours)}</td>
-      <td style="text-align:right">${fmtCosmicH(f.config_hours)}</td>
-      <td style="text-align:right">${fmtCosmicH(f.nonfunc_hours)}</td>
-      <td style="text-align:right">${fmtCosmicH(f.author_hours)}</td>
+      <td style="text-align:right">${fmtCosmicH(f.config_hours + f.nonfunc_hours)}</td>
       <td style="text-align:right;font-weight:600">${fmtCosmicRate(f.h_per_cfp)}</td>
       <td style="text-align:right">${fmtCosmicPct(f.wrap_pct)}</td>
       <td>${warn}</td>
@@ -2365,7 +2363,7 @@ function renderCosmic(rep) {
     <table class="billing-table">
       <thead><tr>
         <th>Feature</th><th>Title</th><th style="text-align:right">CFP</th>
-        <th style="text-align:right">Func h</th><th style="text-align:right">Config h</th><th style="text-align:right">Nonfunc h</th><th style="text-align:right">Author h</th>
+        <th style="text-align:right">Func h</th><th style="text-align:right">Wrap h</th>
         <th style="text-align:right">h/CFP</th><th style="text-align:right">Wrap</th><th></th>
       </tr></thead>
       <tbody>${rows}</tbody>
