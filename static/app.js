@@ -1804,6 +1804,7 @@ document.getElementById('btn-settings').addEventListener('click', async () => {
     document.getElementById('settings-projects-root').value = cfg.projects_root || '';
     document.getElementById('show-billing').checked = cfg.show_billing || false;
     document.getElementById('show-cosmic').checked = cfg.show_cosmic || false;
+    document.getElementById('code-cfp-constant').value = cfg.code_cfp_constant ?? '';
     document.getElementById('scheduler-enabled').checked = cfg.scheduler?.enabled || false;
     document.getElementById('scheduler-interval').value = cfg.scheduler?.interval_hours || 24;
   } catch (e) { showToast(e.message, 'error'); }
@@ -1860,6 +1861,7 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
     projects_root: document.getElementById('settings-projects-root').value || undefined,
     show_billing: document.getElementById('show-billing').checked,
     show_cosmic: document.getElementById('show-cosmic').checked,
+    code_cfp_constant: parseFloat(document.getElementById('code-cfp-constant').value) || undefined,
     scheduler: {
       enabled: document.getElementById('scheduler-enabled').checked,
       interval_hours: parseFloat(document.getElementById('scheduler-interval').value),

@@ -135,6 +135,10 @@
           </label>
           <label><input type="checkbox" id="show-billing"> Show Billing tab</label>
           <label><input type="checkbox" id="show-cosmic"> Show COSMIC tab (experimental)</label>
+          <label>Code constant (h/CFP)
+            <input type="number" id="code-cfp-constant" min="0" step="0.001" placeholder="0.015">
+            <span style="font-size:12px;color:#999;display:block">Author-code price for the wrap estimator. 0.015 is an unvalidated seed — check the measured h/CFP spread in the COSMIC tab.</span>
+          </label>
           <fieldset>
             <legend>Scheduler</legend>
             <label><input type="checkbox" id="scheduler-enabled"> Enable automatic snapshots</label>
