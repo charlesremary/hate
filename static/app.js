@@ -423,11 +423,13 @@ function switchTab(tab) {
   document.getElementById('tab-dashboard').classList.toggle('hidden', tab !== 'dashboard');
   document.getElementById('tab-billing').classList.toggle('hidden', tab !== 'billing');
   document.getElementById('tab-cosmic').classList.toggle('hidden', tab !== 'cosmic');
+  document.getElementById('tab-catalog').classList.toggle('hidden', tab !== 'catalog');
 
   if (tab === 'tickets' && currentProject) loadTickets();
   if (tab === 'dashboard' && currentProject) loadDashboard();
   if (tab === 'billing' && currentProject) loadBilling();
   if (tab === 'cosmic' && currentProject) loadCosmic();
+  if (tab === 'catalog') loadCatalog(); // org-level — no project required
 }
 
 // Show or hide the Billing tab per the app setting. Hidden by default.
@@ -438,11 +440,14 @@ function applyBillingVisibility() {
   if (!showBilling && currentTab === 'billing') switchTab('tickets');
 }
 
-// Show or hide the experimental COSMIC tab per the app setting. Hidden by default.
+// Show or hide the experimental COSMIC + Catalog tabs per the app setting. Hidden
+// by default. The wrap catalog rides the same experimental gate as COSMIC.
 function applyCosmicVisibility() {
   const btn = document.querySelector('.tab[data-tab="cosmic"]');
   if (btn) btn.classList.toggle('hidden', !showCosmic);
-  if (!showCosmic && currentTab === 'cosmic') switchTab('tickets');
+  const catBtn = document.querySelector('.tab[data-tab="catalog"]');
+  if (catBtn) catBtn.classList.toggle('hidden', !showCosmic);
+  if (!showCosmic && (currentTab === 'cosmic' || currentTab === 'catalog')) switchTab('tickets');
 }
 
 // ── Tickets ───────────────────────────────────────────
@@ -567,7 +572,13 @@ const PARENT_TAG_PREFIX = 'parent:';
 function isReservedTag(tag) { return tag.startsWith(PARENT_TAG_PREFIX); }
 const BACKLOG_TAG = 'backlog';
 function isBacklogTicket(t) { return (t.tags || []).includes(BACKLOG_TAG); }
-function visibleTags(t) { return (t.tags || []).filter(x => !isReservedTag(x)); }
+// Wrap-type tags (HATE-qjz4): `wt:<type>` names a catalog deliverable archetype;
+// `wtn:<N>` is the unit count on the ticket (batch-and-count; default 1). Managed
+// by the Wrap-type picklist, so they're hidden from the free-text Tags editor.
+function isWrapTag(tag) { return tag.startsWith('wt:') || tag.startsWith('wtn:'); }
+function wrapTypeOf(t) { const tag = (t.tags || []).find(x => x.startsWith('wt:')); return tag ? tag.slice(3).trim() : ''; }
+function wrapCountOf(t) { const tag = (t.tags || []).find(x => x.startsWith('wtn:')); const n = tag ? parseInt(tag.slice(4), 10) : 1; return (n && n > 0) ? n : 1; }
+function visibleTags(t) { return (t.tags || []).filter(x => !isReservedTag(x) && !isWrapTag(x)); }
 function parentIdOf(t) {
   const tag = (t.tags || []).find(isReservedTag);
   return tag ? tag.slice(PARENT_TAG_PREFIX.length).trim() : null;
@@ -586,11 +597,50 @@ function childCountMap() {
 // preserve the *other* category of tags when one category is edited.
 let panelTicket = null;
 
-// Edit visible (non-parent) tags, preserving the parent tag.
+// Edit visible (non-parent, non-wrap) tags, preserving the parent + wrap tags.
 function setVisibleTags(id, raw) {
   const tags = (panelTicket && panelTicket.id === id ? panelTicket.tags : []) || [];
-  const entered = raw.split(',').map(s => s.trim()).filter(Boolean).filter(x => !isReservedTag(x));
-  editField(id, 'tags', [...entered, ...tags.filter(isReservedTag)]);
+  const entered = raw.split(',').map(s => s.trim()).filter(Boolean).filter(x => !isReservedTag(x) && !isWrapTag(x));
+  editField(id, 'tags', [...entered, ...tags.filter(x => isReservedTag(x) || isWrapTag(x))]);
+}
+
+// Set or clear the wrap-deliverable type + unit count, preserving all other tags.
+function setWrapType(id, type, count) {
+  const tags = (panelTicket && panelTicket.id === id ? panelTicket.tags : []) || [];
+  const kept = tags.filter(x => !isWrapTag(x));
+  type = (type || '').trim();
+  if (type) {
+    kept.push('wt:' + type);
+    const n = parseInt(count, 10);
+    if (n && n > 1) kept.push('wtn:' + n);
+  }
+  editField(id, 'tags', kept);
+}
+
+// Lazily load the org-level catalog so the picklist has options even if the
+// Catalog tab was never opened.
+async function ensureCatalog() {
+  if (!catalogData) {
+    try { catalogData = await API.get('/api/catalog'); }
+    catch (e) { catalogData = { entries: [] }; }
+  }
+  return catalogData;
+}
+
+// Build the wrap-type <select>, grouped by activity, marking `selected`.
+function wrapTypeOptions(selected) {
+  const entries = (catalogData && catalogData.entries) || [];
+  const byAct = {};
+  entries.forEach(e => { (byAct[e.activity] = byAct[e.activity] || []).push(e); });
+  let html = `<option value="">— none —</option>`;
+  Object.keys(byAct).sort().forEach(act => {
+    html += `<optgroup label="${escapeHtml(act)}">`;
+    byAct[act].forEach(e => {
+      html += `<option value="${escapeHtml(e.type)}" ${e.type === selected ? 'selected' : ''}>${escapeHtml(e.label)} (${escapeHtml(e.unit)})</option>`;
+    });
+    html += `</optgroup>`;
+  });
+  return html;
 }
 // Set or clear the parent, preserving all non-parent tags. Empty input clears it.
 function setParent(id, raw) {
@@ -733,7 +783,10 @@ async function openTicketPanel(ticketId) {
   document.getElementById('panel-content').innerHTML = '<p style="color:#999;padding:16px">Loading…</p>';
 
   try {
-    const t = await API.get(`/api/projects/${currentProject.id}/tickets/${ticketId}`);
+    const [t] = await Promise.all([
+      API.get(`/api/projects/${currentProject.id}/tickets/${ticketId}`),
+      ensureCatalog(),
+    ]);
     renderTicketPanel(t);
   } catch (e) {
     document.getElementById('panel-content').innerHTML = `<p style="color:red">${e.message}</p>`;
@@ -755,6 +808,7 @@ function renderTicketPanel(t) {
     ['Predecessors', t.predecessors.length ? linkifyTicketRefs(t.predecessors.join(', ')) : '—'],
     ['Parent', `${parentIdOf(t) ? linkifyTicketRefs(parentIdOf(t)) + ' ' : ''}<input class="inline-edit" value="${parentIdOf(t) || ''}" onblur="setParent('${t.id}', this.value)" placeholder="parent ticket id" style="max-width:150px">`],
     ['Tags', `<input class="inline-edit" value="${visibleTags(t).join(', ')}" onblur="setVisibleTags('${t.id}', this.value)" placeholder="comma separated">`],
+    ['Wrap type', `<select class="inline-edit" id="wt-select-${t.id}" onchange="setWrapType('${t.id}', this.value, document.getElementById('wtn-${t.id}').value)" style="max-width:200px">${wrapTypeOptions(wrapTypeOf(t))}</select> ×<input id="wtn-${t.id}" class="inline-edit" type="number" min="1" value="${wrapCountOf(t)}" style="max-width:56px" title="units on this ticket" onchange="setWrapType('${t.id}', document.getElementById('wt-select-${t.id}').value, this.value)"> <span style="color:#999;font-size:12px">units</span>`],
     ['Phase', `<input class="inline-edit" value="${t.phase||''}" onblur="editField('${t.id}','phase',this.value.trim()||null)" placeholder="e.g. Discovery">`],
   ];
 
@@ -2221,6 +2275,198 @@ function renderCosmic(rep) {
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+}
+
+// ── Catalog (org-level wrap-deliverable catalog, HATE-k0gf) ───────────
+let catalogData = null;     // last-loaded catalog
+let catalogEditType = null; // type currently being edited, or null for "add new"
+
+let wrapAggData = null; // last-loaded measured aggregate (HATE-2b1x)
+
+async function loadCatalog() {
+  const el = document.getElementById('catalog-content');
+  el.innerHTML = '<p style="color:#999;padding:16px">Loading…</p>';
+  try {
+    [catalogData, wrapAggData] = await Promise.all([
+      API.get('/api/catalog'),
+      API.get('/api/wrap-aggregate').catch(() => null),
+    ]);
+    renderCatalog();
+  } catch (e) {
+    el.innerHTML = `<p style="color:red;padding:16px">${e.message}</p>`;
+  }
+}
+
+// Measured-rates table (HATE-2b1x): hours-per-unit by (platform, type) pooled
+// across projects, compared against the catalog seed. Computed from tickets — not
+// stored.
+function renderWrapMeasured() {
+  const a = wrapAggData;
+  if (!a || !a.rates || !a.rates.length) {
+    return `<p style="color:#999;font-size:13px;margin-bottom:24px">No measured wrap data yet — tag tickets with a wrap type and log hours.</p>`;
+  }
+  const rows = a.rates.map(r => {
+    const avg = r.avg_hours_per_unit != null ? r.avg_hours_per_unit.toFixed(3) : '—';
+    const seed = r.seed_hours != null ? r.seed_hours.toFixed(2) : '—';
+    const thin = r.tickets < 3 ? ` <span title="thin sample" style="color:#e65100">⚠</span>` : '';
+    let delta = '';
+    if (r.avg_hours_per_unit != null && r.seed_hours != null && r.seed_hours > 0) {
+      const x = r.avg_hours_per_unit / r.seed_hours;
+      const col = (x >= 2 || x <= 0.5) ? '#c62828' : '#666';
+      delta = `<span style="color:${col}">${x.toFixed(1)}×</span>`;
+    }
+    const orphan = r.in_catalog ? '' : ` <span title="no catalog entry" style="color:#c62828">orphan</span>`;
+    return `<tr>
+      <td>${escapeHtml(r.platform)}</td>
+      <td><code>${escapeHtml(r.type)}</code>${orphan}</td>
+      <td><span class="badge">${escapeHtml(r.activity || '?')}</span></td>
+      <td style="text-align:right">${r.tickets}${thin}</td>
+      <td style="text-align:right">${r.units}</td>
+      <td style="text-align:right">${r.hours.toFixed(2)}</td>
+      <td style="text-align:right;font-weight:600">${avg}</td>
+      <td style="text-align:right;color:#999">${seed}</td>
+      <td style="text-align:right">${delta}</td>
+    </tr>`;
+  }).join('');
+  return `
+    <div style="font-size:13px;color:#666;margin-bottom:6px">
+      Measured hours-per-unit · pooled across projects · ${a.total_units} units / ${a.total_hours.toFixed(2)} h
+      ${a.orphan_types && a.orphan_types.length ? ` · <span style="color:#c62828">orphan tags: ${a.orphan_types.map(escapeHtml).join(', ')}</span>` : ''}
+    </div>
+    <table class="billing-table" style="margin-bottom:28px">
+      <thead><tr>
+        <th>Platform</th><th>Type</th><th>Activity</th>
+        <th style="text-align:right">Tickets</th><th style="text-align:right">Units</th>
+        <th style="text-align:right">Hours</th><th style="text-align:right">Avg/unit</th>
+        <th style="text-align:right">Seed</th><th style="text-align:right">vs seed</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderCatalog() {
+  const el = document.getElementById('catalog-content');
+  const c = catalogData || { entries: [] };
+  const rows = (c.entries || []).map(e => `
+    <tr>
+      <td><code>${escapeHtml(e.type)}</code></td>
+      <td>${escapeHtml(e.label)}</td>
+      <td><span class="badge">${escapeHtml(e.activity)}</span></td>
+      <td>${escapeHtml(e.unit)}</td>
+      <td style="text-align:right">${(e.seed_hours ?? 0)}</td>
+      <td style="color:#666;font-size:12px">${escapeHtml(e.description || '')}</td>
+      <td style="white-space:nowrap">
+        <a href="javascript:void(0)" onclick='catalogEdit(${JSON.stringify(e.type)})'>edit</a>
+        &nbsp;·&nbsp;
+        <a href="javascript:void(0)" style="color:#c62828" onclick='catalogDelete(${JSON.stringify(e.type)})'>delete</a>
+      </td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <div style="max-width:920px">
+      <h2 style="font-size:18px;margin-bottom:4px">Wrap catalog <span class="badge backlog-badge">experimental</span></h2>
+      <p style="color:#666;font-size:13px;line-height:1.6;margin-bottom:16px">
+        Org-level controlled vocabulary of platform-agnostic wrap deliverables. Definitions only —
+        measured hours-per-unit are computed from tagged tickets, not stored here.
+        See <code>docs/wrap-catalog-data-model.md</code>.
+      </p>
+
+      <h3 style="font-size:14px;margin:8px 0 8px">Measured rates</h3>
+      ${renderWrapMeasured()}
+
+      <h3 style="font-size:14px;margin:8px 0 8px">Catalog definitions</h3>
+      <table class="billing-table" style="margin-bottom:24px">
+        <thead><tr>
+          <th>Type</th><th>Label</th><th>Activity</th><th>Unit</th>
+          <th style="text-align:right">Seed h</th><th>Description</th><th></th>
+        </tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" style="color:#999">No entries.</td></tr>'}</tbody>
+      </table>
+
+      <div style="background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:16px 20px;max-width:560px">
+        <div id="catalog-form-title" style="font-weight:600;margin-bottom:12px">Add deliverable type</div>
+        <div style="display:grid;grid-template-columns:120px 1fr;gap:8px 12px;align-items:center;font-size:13px">
+          <label>Type</label><input id="cat-type" placeholder="kebab-case, e.g. flow">
+          <label>Label</label><input id="cat-label" placeholder="Human label">
+          <label>Activity</label>
+          <select id="cat-activity">
+            <option value="configure">configure</option>
+            <option value="operate">operate</option>
+          </select>
+          <label>Unit</label><input id="cat-unit" placeholder="e.g. flow">
+          <label>Seed hours</label><input id="cat-seed" type="number" step="0.25" min="0" value="0.25">
+          <label>Description</label><input id="cat-desc" placeholder="Optional">
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px">
+          <button class="btn-primary" onclick="catalogSave()">Save</button>
+          <button onclick="catalogResetForm()" id="cat-cancel" style="display:none">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+
+  // Re-populate the form if we're mid-edit (re-render keeps the edit state).
+  if (catalogEditType) {
+    const e = (c.entries || []).find(x => x.type === catalogEditType);
+    if (e) fillCatalogForm(e);
+  }
+}
+
+function fillCatalogForm(e) {
+  document.getElementById('cat-type').value = e.type || '';
+  document.getElementById('cat-label').value = e.label || '';
+  document.getElementById('cat-activity').value = e.activity || 'configure';
+  document.getElementById('cat-unit').value = e.unit || '';
+  document.getElementById('cat-seed').value = e.seed_hours ?? 0;
+  document.getElementById('cat-desc').value = e.description || '';
+  document.getElementById('catalog-form-title').textContent = `Edit “${e.type}”`;
+  document.getElementById('cat-cancel').style.display = '';
+}
+
+function catalogEdit(type) {
+  catalogEditType = type;
+  const e = (catalogData.entries || []).find(x => x.type === type);
+  if (e) fillCatalogForm(e);
+}
+
+function catalogResetForm() {
+  catalogEditType = null;
+  renderCatalog();
+}
+
+async function catalogSave() {
+  const body = {
+    type: document.getElementById('cat-type').value.trim(),
+    label: document.getElementById('cat-label').value.trim(),
+    activity: document.getElementById('cat-activity').value,
+    unit: document.getElementById('cat-unit').value.trim(),
+    seed_hours: parseFloat(document.getElementById('cat-seed').value) || 0,
+    description: document.getElementById('cat-desc').value.trim(),
+  };
+  try {
+    if (catalogEditType) {
+      await API.put(`/api/catalog/entries/${encodeURIComponent(catalogEditType)}`, body);
+      showToast('Entry updated');
+    } else {
+      await API.post('/api/catalog/entries', body);
+      showToast('Entry added');
+    }
+    catalogEditType = null;
+    await loadCatalog();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function catalogDelete(type) {
+  if (!confirm(`Delete catalog entry “${type}”?`)) return;
+  try {
+    await API.delete(`/api/catalog/entries/${encodeURIComponent(type)}`);
+    showToast('Entry deleted');
+    if (catalogEditType === type) catalogEditType = null;
+    await loadCatalog();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
 }
 
 // ── Init ──────────────────────────────────────────────
