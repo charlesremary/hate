@@ -52,6 +52,7 @@
             <button class="btn-secondary" id="btn-check-schedule" title="Find tickets that over-allocate someone's daily capacity">✓ Check schedule</button>
             <button class="btn-secondary" id="btn-balance" title="Auto-balance the project to fit everyone's real daily capacity">⚖ Balance</button>
             <button class="btn-secondary" id="btn-phase-rollup" title="Roll tickets up by phase — effort-weighted % complete, with CSV export">Σ Phases</button>
+            <button class="btn-secondary" id="btn-project-stats" title="Code rate (h/CFP), wrap %, and hours by tag — informational, with CSV export">📊 Stats</button>
           </div>
         </header>
 
@@ -707,6 +708,20 @@
           </span>
         </div>
         <div id="phase-rollup-content" style="font-size:13px"></div>
+      </div>
+    </div>
+
+    <!-- Project stats modal -->
+    <div id="project-stats-modal-overlay" class="hidden">
+      <div id="project-stats-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:900px;max-height:85vh;overflow:auto;margin:4% auto">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px">
+          <h3 style="margin:0">Project stats</h3>
+          <span style="display:flex;gap:8px;align-items:center">
+            <button class="btn-secondary" id="btn-project-stats-csv" title="Download the per-tag breakdown as CSV">⤓ Download CSV</button>
+            <button class="icon-btn" id="btn-close-project-stats">✕</button>
+          </span>
+        </div>
+        <div id="project-stats-content" style="font-size:13px"></div>
       </div>
     </div>
 
