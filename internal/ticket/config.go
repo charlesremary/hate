@@ -72,6 +72,10 @@ type ProjectConfig struct {
 	// open. While closed, ticket-write endpoints reject mutations and the
 	// project is filtered out of the sidebar by default.
 	ClosedAt string `json:"closed_at,omitempty"`
+	// Platform is the wrap-calibration dimension (HATE-b376): wrap rates are keyed
+	// (platform, deliverable-type). One platform per project for v1; lower-cased,
+	// e.g. "connect", "genesys", "web". Empty means uncalibrated.
+	Platform string `json:"platform,omitempty"`
 }
 
 // IsClosed reports whether the project's ClosedAt field is set.
