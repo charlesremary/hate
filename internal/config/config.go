@@ -35,16 +35,7 @@ type AppConfig struct {
 	ShowBilling bool `json:"show_billing"`
 	// ShowCosmic controls whether the experimental COSMIC tab is visible. Hidden by default.
 	ShowCosmic bool `json:"show_cosmic"`
-	// CodeCFPConstant is the author-code price in hours per CFP (HATE-pz8j) — the
-	// constant that replaces the borrowed 8/12/18 band for the code slice. The
-	// 0.015 default is the thesis *seed*, NOT a validated number (see HATE-xd99:
-	// measured functional h/CFP runs 0.06–0.17 with high variance). Treat it as a
-	// configurable knob and read it next to the measured COSMIC spread.
-	CodeCFPConstant float64 `json:"code_cfp_constant"`
 }
-
-// DefaultCodeCFPConstant is the thesis seed for the author-code rate (h/CFP).
-const DefaultCodeCFPConstant = 0.015
 
 // ProjectInfo describes a discovered project.
 type ProjectInfo struct {
@@ -73,11 +64,10 @@ func defaultConfig() *AppConfig {
 			IntervalHours: 24,
 			Projects:      "all",
 		},
-		ExtraProjects:   []string{},
-		HiddenProjects:  []string{},
-		ShowBilling:     false,
-		ShowCosmic:      false,
-		CodeCFPConstant: DefaultCodeCFPConstant,
+		ExtraProjects:  []string{},
+		HiddenProjects: []string{},
+		ShowBilling:    false,
+		ShowCosmic:     false,
 	}
 }
 
@@ -140,10 +130,6 @@ func LoadConfig() *AppConfig {
 
 	if sc, ok := raw["show_cosmic"].(bool); ok {
 		cfg.ShowCosmic = sc
-	}
-
-	if cc, ok := raw["code_cfp_constant"].(float64); ok && cc > 0 {
-		cfg.CodeCFPConstant = cc
 	}
 
 	return cfg

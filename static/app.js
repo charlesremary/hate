@@ -1896,7 +1896,6 @@ document.getElementById('btn-settings').addEventListener('click', async () => {
     document.getElementById('settings-projects-root').value = cfg.projects_root || '';
     document.getElementById('show-billing').checked = cfg.show_billing || false;
     document.getElementById('show-cosmic').checked = cfg.show_cosmic || false;
-    document.getElementById('code-cfp-constant').value = cfg.code_cfp_constant ?? '';
     document.getElementById('scheduler-enabled').checked = cfg.scheduler?.enabled || false;
     document.getElementById('scheduler-interval').value = cfg.scheduler?.interval_hours || 24;
   } catch (e) { showToast(e.message, 'error'); }
@@ -1953,7 +1952,6 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
     projects_root: document.getElementById('settings-projects-root').value || undefined,
     show_billing: document.getElementById('show-billing').checked,
     show_cosmic: document.getElementById('show-cosmic').checked,
-    code_cfp_constant: parseFloat(document.getElementById('code-cfp-constant').value) || undefined,
     scheduler: {
       enabled: document.getElementById('scheduler-enabled').checked,
       interval_hours: parseFloat(document.getElementById('scheduler-interval').value),
@@ -2378,68 +2376,15 @@ function renderCosmic(rep) {
 let catalogData = null;     // last-loaded catalog
 let catalogEditType = null; // type currently being edited, or null for "add new"
 
-let wrapAggData = null;   // last-loaded measured aggregate (HATE-2b1x)
-
 async function loadCatalog() {
   const el = document.getElementById('catalog-content');
   el.innerHTML = '<p style="color:#999;padding:16px">Loading…</p>';
   try {
-    [catalogData, wrapAggData] = await Promise.all([
-      API.get('/api/catalog'),
-      API.get('/api/wrap-aggregate').catch(() => null),
-    ]);
+    catalogData = await API.get('/api/catalog');
     renderCatalog();
   } catch (e) {
     el.innerHTML = `<p style="color:red;padding:16px">${e.message}</p>`;
   }
-}
-
-
-// Measured-rates table (HATE-2b1x): hours-per-unit by (platform, type) pooled
-// across projects, compared against the catalog seed. Computed from tickets — not
-// stored.
-function renderWrapMeasured() {
-  const a = wrapAggData;
-  if (!a || !a.rates || !a.rates.length) {
-    return `<p style="color:#999;font-size:13px;margin-bottom:24px">No measured wrap data yet — tag tickets with a wrap type and log hours.</p>`;
-  }
-  const rows = a.rates.map(r => {
-    const avg = r.avg_hours_per_unit != null ? r.avg_hours_per_unit.toFixed(3) : '—';
-    const seed = r.seed_hours != null ? r.seed_hours.toFixed(2) : '—';
-    const thin = r.tickets < 3 ? ` <span title="thin sample" style="color:#e65100">⚠</span>` : '';
-    let delta = '';
-    if (r.avg_hours_per_unit != null && r.seed_hours != null && r.seed_hours > 0) {
-      const x = r.avg_hours_per_unit / r.seed_hours;
-      const col = (x >= 2 || x <= 0.5) ? '#c62828' : '#666';
-      delta = `<span style="color:${col}">${x.toFixed(1)}×</span>`;
-    }
-    const orphan = r.in_catalog ? '' : ` <span title="no catalog entry" style="color:#c62828">orphan</span>`;
-    return `<tr>
-      <td>${escapeHtml(r.platform)}</td>
-      <td><code>${escapeHtml(r.type)}</code>${orphan}</td>
-      <td><span class="badge">${escapeHtml(r.activity || '?')}</span></td>
-      <td style="text-align:right">${r.tickets}${thin}</td>
-      <td style="text-align:right">${r.units}</td>
-      <td style="text-align:right">${r.hours.toFixed(2)}</td>
-      <td style="text-align:right;font-weight:600">${avg}</td>
-      <td style="text-align:right;color:#999">${seed}</td>
-      <td style="text-align:right">${delta}</td>
-    </tr>`;
-  }).join('');
-  return `
-    <div style="font-size:13px;color:#666;margin-bottom:6px">
-      Measured hours-per-unit · pooled across projects · ${a.total_units} units / ${a.total_hours.toFixed(2)} h
-      ${a.orphan_types && a.orphan_types.length ? ` · <span style="color:#c62828">orphan tags: ${a.orphan_types.map(escapeHtml).join(', ')}</span>` : ''}
-    </div>
-    <table class="billing-table" style="margin-bottom:28px">
-      <thead><tr>
-        <th>Platform</th><th>Type</th><th>Activity</th>
-        <th style="text-align:right">Tickets</th><th style="text-align:right">Units</th>
-        <th style="text-align:right">Hours</th><th style="text-align:right">Avg/unit</th>
-        <th style="text-align:right">Seed</th><th style="text-align:right">vs seed</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
 }
 
 function renderCatalog() {
@@ -2464,13 +2409,10 @@ function renderCatalog() {
     <div style="max-width:920px">
       <h2 style="font-size:18px;margin-bottom:4px">Wrap catalog <span class="badge backlog-badge">experimental</span></h2>
       <p style="color:#666;font-size:13px;line-height:1.6;margin-bottom:16px">
-        Org-level controlled vocabulary of platform-agnostic wrap deliverables. Definitions only —
-        measured hours-per-unit are computed from tagged tickets, not stored here.
-        See <code>docs/wrap-catalog-data-model.md</code>.
+        Org-level, optional list of suggested wrap-deliverable tags — drives the
+        wrap-type picklist on tickets. Edit freely; projects can use any tag, in or
+        out of this list. See <code>docs/wrap-catalog-data-model.md</code>.
       </p>
-
-      <h3 style="font-size:14px;margin:8px 0 8px">Measured rates</h3>
-      ${renderWrapMeasured()}
 
       <h3 style="font-size:14px;margin:8px 0 8px">Catalog definitions</h3>
       <table class="billing-table" style="margin-bottom:24px">

@@ -277,20 +277,21 @@ so you can reclass them.
 A wrap ticket (a `config`/`nonfunc` child) that maps to a repeatable console/operate
 deliverable also gets:
 
-- `wt:<type>` — the **archetype** from the org catalog (the Catalog tab, or
-  `GET /api/catalog`): `flow`, `bot`, `prompt`, `queue`, `knowledge-base`,
-  `knowledge-article`, `instance`, `number`, `deploy`, `deploy-troubleshoot`,
-  `smoke-validate`, … Use the picklist in the ticket panel — don't free-type it.
+- `wt:<type>` — a **wrap-deliverable tag**. The Catalog tab offers a small,
+  optional list of domain-neutral suggestions (`deploy`, `deploy-troubleshoot`,
+  `smoke-validate`, `managed-service-setup`, `integration-wiring`, `manual-step`)
+  via a picklist, but you can use **any tag** that describes the deliverable
+  (`flow`, `bot`, … for an IVR). Reuse the same tag names across projects so the
+  numbers line up.
 - `wtn:<N>` — optional unit count when one ticket covers N small units
   (batch-and-count; default 1).
 
-The **platform** is set once per project (`.tkt/config.json` → `platform`, e.g.
-`connect`), not per ticket — wrap rates are keyed `(platform, type)`.
-
 ### What you get
 
-The Catalog tab's **Measured rates** (and `GET /api/wrap-aggregate`) pool every
-`wt:`-tagged ticket across projects into **hours-per-unit by (platform, type)**
-with a sample size, compared against the catalog seed. That measured number — not
-a borrowed constant — is what the estimator calibrates from. Keep the tagging
-clean (one `wt:` per wrap deliverable, IaC stays `author`) or the rates lie.
+The per-project **Stats** button (next to Σ Phases) reports this project's
+**code rate** (h/CFP), the **class split** + **wrap %**, and **hours grouped by
+every tag** — "tickets tagged `X` typically cost this much" — with a CSV export.
+It's informational: read one project's stats and carry the numbers forward to a
+similar new project **by hand**. There's no automatic cross-project calibration
+(deliberately — it doesn't generalize across domains). Keep the tagging clean
+(consistent tag names, IaC stays `author`) and the numbers stay meaningful.

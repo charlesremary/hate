@@ -10,14 +10,11 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hate/internal/catalog"
-	"hate/internal/config"
-	"hate/internal/pm"
-	"hate/internal/ticket"
 )
 
-// RegisterCatalogRoutes registers the org-level wrap-catalog API (HATE-k0gf) and
-// the org-level wrap aggregation (HATE-2b1x). Both are org-level (shared across
-// projects), so they live above /api/projects/{id}.
+// RegisterCatalogRoutes registers the org-level wrap-catalog API (HATE-k0gf) — a
+// shared, optional suggested-tag vocabulary. It's org-level, so it lives above
+// /api/projects/{id}.
 func RegisterCatalogRoutes(r chi.Router) {
 	r.Route("/api/catalog", func(r chi.Router) {
 		r.Get("/", getCatalog)
@@ -25,47 +22,6 @@ func RegisterCatalogRoutes(r chi.Router) {
 		r.Put("/entries/{type}", updateCatalogEntry)
 		r.Delete("/entries/{type}", deleteCatalogEntry)
 	})
-	r.Get("/api/wrap-aggregate", getWrapAggregate)
-}
-
-// wrapDataForProjects builds the per-project wrap data for the given project IDs
-// (platform + tickets). An empty/nil id list means every project. Returns the
-// data plus the IDs actually resolved.
-func wrapDataForProjects(ids []string) ([]pm.WrapProjectData, []string) {
-	want := map[string]bool{}
-	for _, id := range ids {
-		want[id] = true
-	}
-	var data []pm.WrapProjectData
-	var resolved []string
-	for _, p := range config.ListProjects() {
-		if len(want) > 0 && !want[p.ID] {
-			continue
-		}
-		cfg, err := ticket.ReadConfig(p.Path)
-		if err != nil {
-			continue
-		}
-		tickets, err := ticket.ReadAllTickets(p.Path)
-		if err != nil {
-			continue
-		}
-		data = append(data, pm.WrapProjectData{Platform: cfg.Platform, Tickets: tickets})
-		resolved = append(resolved, p.ID)
-	}
-	return data, resolved
-}
-
-// getWrapAggregate handles GET /api/wrap-aggregate — pools wrap-tagged tickets
-// across every project into measured hours-per-unit by (platform, type).
-func getWrapAggregate(w http.ResponseWriter, r *http.Request) {
-	cat, err := catalog.Load()
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	projects, _ := wrapDataForProjects(nil)
-	respondJSON(w, http.StatusOK, pm.ComputeWrapAggregate(projects, cat))
 }
 
 // getCatalog handles GET /api/catalog — returns the catalog, seeding defaults on

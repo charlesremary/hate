@@ -54,11 +54,10 @@ type ResourceRequest struct {
 
 // AppSettingsRequest matches the Python AppSettingsRequest model.
 type AppSettingsRequest struct {
-	ProjectsRoot    *string                 `json:"projects_root"`
-	Scheduler       *map[string]interface{} `json:"scheduler"`
-	ShowBilling     *bool                   `json:"show_billing"`
-	ShowCosmic      *bool                   `json:"show_cosmic"`
-	CodeCFPConstant *float64                `json:"code_cfp_constant"`
+	ProjectsRoot *string                 `json:"projects_root"`
+	Scheduler    *map[string]interface{} `json:"scheduler"`
+	ShowBilling  *bool                   `json:"show_billing"`
+	ShowCosmic   *bool                   `json:"show_cosmic"`
 }
 
 // GitIdentityRequest is the body for POST git-identity.
@@ -380,9 +379,6 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ShowCosmic != nil {
 		cfg.ShowCosmic = *req.ShowCosmic
-	}
-	if req.CodeCFPConstant != nil && *req.CodeCFPConstant > 0 {
-		cfg.CodeCFPConstant = *req.CodeCFPConstant
 	}
 	if req.Scheduler != nil {
 		sched := *req.Scheduler

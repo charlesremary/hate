@@ -1,14 +1,11 @@
 // Copyright 2026 Charles Emary
 // SPDX-License-Identifier: FSL-1.1-Apache-2.0
 
-// Package catalog persists the org-level wrap-deliverable catalog — the
-// controlled vocabulary of platform-agnostic archetypes the wrap-based estimator
-// is built on. See docs/wrap-catalog-data-model.md (HATE-b376) for the model.
-//
-// The catalog holds DEFINITIONS ONLY (type, label, activity, unit, description,
-// seed_hours). Measured hours-per-unit are computed live from tagged tickets
-// (HATE-2b1x) and cached only in profiles (HATE-h4ad) — never stored here — so the
-// tickets stay the single source of truth and the catalog can't drift.
+// Package catalog persists an org-level, OPTIONAL suggested-tag vocabulary of
+// domain-neutral wrap deliverables. It drives the wrap-type picklist on tickets;
+// projects may use any tag, in or out of this list. The per-project stats report
+// groups by whatever tags actually appear, so the catalog is a convenience, not a
+// requirement. See docs/wrap-catalog-data-model.md (HATE-b376) for background.
 package catalog
 
 import (
@@ -261,23 +258,20 @@ func DeleteEntry(typ string) (*Catalog, error) {
 	return c, nil
 }
 
-// SeedCatalog returns the default controlled vocabulary (docs/wrap-catalog-data-model.md §2).
+// SeedCatalog returns the default suggested-tag vocabulary. These are
+// domain-neutral wrap deliverables that apply across project types — IVR, audit,
+// web app, data pipeline, etc. Domain-specific deliverables (an IVR's flow/bot/
+// prompt, say) are added per-org by editing the catalog; they're not seeded here.
 func SeedCatalog() *Catalog {
 	return &Catalog{
 		SchemaVersion: SchemaVersion,
 		Entries: []CatalogEntry{
 			{Type: "deploy", Label: "Deploy", Activity: ActivityOperate, Unit: "stack", SeedHours: 0.5, Description: "Run IaC, watch rollout, confirm resources."},
 			{Type: "deploy-troubleshoot", Label: "Deploy troubleshoot", Activity: ActivityOperate, Unit: "incident", SeedHours: 0.75, Description: "Failed deploys, perms, limits — the variance bucket."},
-			{Type: "smoke-validate", Label: "Smoke validate", Activity: ActivityOperate, Unit: "scenario", SeedHours: 0.5, Description: "Connect: place test calls; web: click the happy path."},
-			{Type: "flow", Label: "Contact / Architect flow", Activity: ActivityConfigure, Unit: "flow", SeedHours: 0.75, Description: "Author a routing/contact flow in the console."},
-			{Type: "bot", Label: "Bot / NLU", Activity: ActivityConfigure, Unit: "bot", SeedHours: 1.5, Description: "Lex / Dialogflow / Genesys NLU."},
-			{Type: "prompt", Label: "Voice prompt", Activity: ActivityConfigure, Unit: "prompt", SeedHours: 0.25, Description: "Voice prompt authoring/upload."},
-			{Type: "queue", Label: "Queue", Activity: ActivityConfigure, Unit: "queue", SeedHours: 0.25, Description: "Routing/queue config."},
-			{Type: "integration-wiring", Label: "Integration wiring", Activity: ActivityConfigure, Unit: "hookup", SeedHours: 0.25, Description: "Console wiring of a fn/service."},
-			{Type: "knowledge-base", Label: "Knowledge base", Activity: ActivityConfigure, Unit: "KB", SeedHours: 0.5, Description: "Stand up + sync + verify."},
-			{Type: "knowledge-article", Label: "Knowledge article", Activity: ActivityConfigure, Unit: "article", SeedHours: 0.25, Description: "Author + ingest."},
-			{Type: "instance", Label: "Instance", Activity: ActivityConfigure, Unit: "instance", SeedHours: 0.5, Description: "Connect instance / Genesys org."},
-			{Type: "number", Label: "Telephony number", Activity: ActivityConfigure, Unit: "number", SeedHours: 0.25, Description: "Claim/port telephony."},
+			{Type: "smoke-validate", Label: "Smoke validate", Activity: ActivityOperate, Unit: "scenario", SeedHours: 0.5, Description: "Exercise the happy path and confirm it works."},
+			{Type: "managed-service-setup", Label: "Managed-service setup", Activity: ActivityConfigure, Unit: "service", SeedHours: 0.5, Description: "Stand up + configure a managed/cloud service in the console."},
+			{Type: "integration-wiring", Label: "Integration wiring", Activity: ActivityConfigure, Unit: "hookup", SeedHours: 0.25, Description: "Console wiring between services."},
+			{Type: "manual-step", Label: "Manual step", Activity: ActivityConfigure, Unit: "step", SeedHours: 0.25, Description: "An irreducible manual/console action with no IaC equivalent."},
 		},
 	}
 }
