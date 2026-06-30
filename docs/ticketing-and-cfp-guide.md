@@ -66,6 +66,8 @@ AMPL-7k3x  "Onboarding revamp"        tags: cfp:42          ← parent (size liv
 | `config` | child | Platform/managed-service setup. 0 CFP. Tracked as hours. |
 | `nonfunc` | child | Non-functional work (perf, security, hardening). 0 CFP. Hours. |
 | `type:<name>` | parent | Deliverable type for cost rollup, e.g. `type:kb-article`. |
+| `wt:<type>` | child (wrap) | Wrap-deliverable archetype from the catalog (§11), e.g. `wt:flow`. |
+| `wtn:<N>` | child (wrap) | Unit count on a wrap ticket (batch-and-count; default 1). |
 | `backlog` | any | Out of committed scope — excluded from completion %, schedule, capacity. |
 
 Rules that keep the data clean:
@@ -228,3 +230,63 @@ PROJ-100  "Semantic search over docs"   tags: cfp:18
 - [ ] Platform/managed-service work is `config` (0 CFP), not invented CFP.
 - [ ] Recurring deliverables have a `type:<name>` on the parent.
 - [ ] Anything not committed is tagged `backlog`.
+- [ ] Wrap deliverables (console/operate work) carry a `wt:<type>` from the catalog (§11).
+
+---
+
+## 11. Wrap-based calibration (experimental)
+
+This layers on top of the CFP/COSMIC model above. The thesis (see
+[`future-wrap-based-estimation.md`](./future-wrap-based-estimation.md) and the
+settled model in [`wrap-catalog-data-model.md`](./wrap-catalog-data-model.md)):
+agentic coding **inverts the cost model** — generated code is a near-constant per
+CFP, so the variable cost is the **wrap** around it.
+
+### The three activities
+
+Every unit of work is one of:
+
+| Activity | What it is | Cost | Class tag today |
+|---|---|---|---|
+| **author** | Generate code / IaC — the agent does it | ~constant (priced by CFP) | `functional` |
+| **operate** | Deploy, run, validate, troubleshoot | variable (catalogued) | `nonfunc` |
+| **configure** | Console / manual click-ops | variable (catalogued) | `config` |
+
+`author` is the constant slice; **operate + configure are "wrap"** — the variable
+cost. This is the same split as the COSMIC `wrap %` (numerator = config + nonfunc).
+
+### ⚠ Authored IaC is `author`, NOT `configure`
+
+The single most important rule, and the easiest to get wrong:
+
+- **Writing IaC** (CDK, CloudFormation, Terraform, YAML) is **authored code** →
+  tag it `functional` (author). It's cheap and agent-generated.
+- **Clicking in a console** (create a Connect instance, build a Lex bot, author a
+  contact flow) is **configure** → tag it `config` **and** give it a `wt:<type>`.
+
+A ticket titled `CDK: DynamoDB tables` is authoring, not configure — do **not**
+tag it `config`/`wt:`. Conflating the two pollutes both the code constant and the
+wrap rates. (This is the conflation HATE-bqh6 tracks.)
+
+### Tagging wrap deliverables
+
+A wrap ticket (a `config`/`nonfunc` child) that maps to a repeatable console/operate
+deliverable also gets:
+
+- `wt:<type>` — the **archetype** from the org catalog (the Catalog tab, or
+  `GET /api/catalog`): `flow`, `bot`, `prompt`, `queue`, `knowledge-base`,
+  `knowledge-article`, `instance`, `number`, `deploy`, `deploy-troubleshoot`,
+  `smoke-validate`, … Use the picklist in the ticket panel — don't free-type it.
+- `wtn:<N>` — optional unit count when one ticket covers N small units
+  (batch-and-count; default 1).
+
+The **platform** is set once per project (`.tkt/config.json` → `platform`, e.g.
+`connect`), not per ticket — wrap rates are keyed `(platform, type)`.
+
+### What you get
+
+The Catalog tab's **Measured rates** (and `GET /api/wrap-aggregate`) pool every
+`wt:`-tagged ticket across projects into **hours-per-unit by (platform, type)**
+with a sample size, compared against the catalog seed. That measured number — not
+a borrowed constant — is what the estimator calibrates from. Keep the tagging
+clean (one `wt:` per wrap deliverable, IaC stays `author`) or the rates lie.
