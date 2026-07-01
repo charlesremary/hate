@@ -58,6 +58,7 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Post("/balance", balanceProject)
 	r.Get("/phase-rollup", getPhaseRollup)
 	r.Get("/cosmic", getCosmic)
+	r.Put("/cosmic-estimate", updateCosmicEstimate)
 }
 
 // getPhaseRollup handles GET /api/projects/{projectId}/phase-rollup.

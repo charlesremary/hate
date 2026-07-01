@@ -72,10 +72,12 @@ type ProjectConfig struct {
 	// open. While closed, ticket-write endpoints reject mutations and the
 	// project is filtered out of the sidebar by default.
 	ClosedAt string `json:"closed_at,omitempty"`
-	// Platform is the wrap-calibration dimension (HATE-b376): wrap rates are keyed
-	// (platform, deliverable-type). One platform per project for v1; lower-cased,
-	// e.g. "connect", "genesys", "web". Empty means uncalibrated.
-	Platform string `json:"platform,omitempty"`
+	// EstimateHPerCFP / EstimateWrapPct hold the manual "initial estimate" inputs
+	// for the COSMIC tab: a borrowed code rate (hours per CFP) and wrap %, used to
+	// project total project hours from the total CFP before actuals exist. nil =
+	// unset (no estimate entered yet).
+	EstimateHPerCFP *float64 `json:"estimate_h_per_cfp,omitempty"`
+	EstimateWrapPct *float64 `json:"estimate_wrap_pct,omitempty"`
 }
 
 // IsClosed reports whether the project's ClosedAt field is set.

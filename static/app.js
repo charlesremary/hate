@@ -2211,7 +2211,7 @@ function renderCosmic(rep) {
     </tr>`;
   }).join('');
 
-  el.innerHTML = card + `
+  el.innerHTML = card + renderCosmicEstimate(rep) + `
     <table class="billing-table">
       <thead><tr>
         <th>Feature</th><th>Title</th><th style="text-align:right">CFP</th>
@@ -2220,6 +2220,49 @@ function renderCosmic(rep) {
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+}
+
+// Manual initial-estimate block: borrowed h/CFP + wrap % × total CFP → projected
+// project hours, shown against actual-so-far. Inputs persist per project.
+function renderCosmicEstimate(rep) {
+  const e = rep.estimate || {}, a = rep.aggregate;
+  const hpc = e.h_per_cfp != null ? e.h_per_cfp : '';
+  const wp = e.wrap_pct != null ? e.wrap_pct : '';
+  const actual = a.functional_hours + a.config_hours + a.nonfunc_hours;
+  const hasEst = e.h_per_cfp != null && e.total_hours > 0;
+  const pctOfEst = (hasEst && actual > 0) ? `${(100 * actual / e.total_hours).toFixed(0)}% of estimate` : 'no hours logged yet';
+  const projected = hasEst ? `
+      <div style="display:flex;gap:40px;flex-wrap:wrap;margin-top:14px">
+        <div><div style="font-size:28px;font-weight:700">${fmtCosmicH(e.total_hours)}<span style="font-size:13px;color:#999;font-weight:400"> h estimated</span></div>
+          <div style="font-size:12px;color:#666;margin-top:3px">code ${fmtCosmicH(e.code_hours)} + wrap ${fmtCosmicH(e.wrap_hours)}</div></div>
+        <div><div style="font-size:28px;font-weight:700">${fmtCosmicH(actual)}<span style="font-size:13px;color:#999;font-weight:400"> h actual so far</span></div>
+          <div style="font-size:12px;color:#666;margin-top:3px">${pctOfEst}</div></div>
+      </div>`
+    : `<div style="font-size:12px;color:#999;margin-top:10px">Enter a code rate (and wrap %) from a comparable delivered project to project this one's total hours from its ${e.total_cfp} CFP.</div>`;
+  return `
+    <div style="background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:20px 24px;max-width:760px;margin-bottom:20px">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#666;margin-bottom:12px">Initial estimate · ${e.total_cfp} CFP</div>
+      <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
+        <label style="font-size:13px">h/CFP<br><input id="est-hpercfp" type="number" step="0.001" min="0" value="${hpc}" placeholder="e.g. 0.17" style="width:110px"></label>
+        <label style="font-size:13px">wrap %<br><input id="est-wrappct" type="number" step="1" min="0" value="${wp}" placeholder="e.g. 35" style="width:90px"></label>
+        <button class="btn-primary" onclick="saveCosmicEstimate()">Save estimate</button>
+      </div>
+      ${projected}
+    </div>`;
+}
+
+async function saveCosmicEstimate() {
+  const hpcRaw = document.getElementById('est-hpercfp').value.trim();
+  const wpRaw = document.getElementById('est-wrappct').value.trim();
+  const body = {
+    h_per_cfp: hpcRaw === '' ? null : parseFloat(hpcRaw),
+    wrap_pct: wpRaw === '' ? null : parseFloat(wpRaw),
+  };
+  try {
+    await API.put(`/api/projects/${currentProject.id}/cosmic-estimate`, body);
+    showToast('Estimate saved');
+    loadCosmic();
+  } catch (e) { showToast(e.message, 'error'); }
 }
 
 // ── Init ──────────────────────────────────────────────

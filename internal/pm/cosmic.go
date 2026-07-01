@@ -76,11 +76,42 @@ type CosmicAggregate struct {
 	WrapPct         *float64 `json:"wrap_pct"`
 }
 
+// CosmicEstimate is the manual initial-estimate projection: from the total CFP and
+// a borrowed code rate (h/CFP) + wrap %, the projected project hours. The inputs
+// are persisted per-project; the hours are computed. Inputs are nil until set.
+type CosmicEstimate struct {
+	HPerCFP    *float64 `json:"h_per_cfp"`  // input: borrowed code rate
+	WrapPct    *float64 `json:"wrap_pct"`   // input: borrowed wrap %
+	TotalCFP   int      `json:"total_cfp"`  // from the project's cfp: tags
+	CodeHours  float64  `json:"code_hours"` // totalCFP × h/CFP
+	WrapHours  float64  `json:"wrap_hours"` // codeHours × wrap%
+	TotalHours float64  `json:"total_hours"`
+}
+
+// BuildCosmicEstimate projects hours from total CFP and the borrowed rates.
+// With no h/CFP set, the hours stay zero (nothing to project from).
+func BuildCosmicEstimate(totalCFP int, hPerCFP, wrapPct *float64) CosmicEstimate {
+	e := CosmicEstimate{HPerCFP: hPerCFP, WrapPct: wrapPct, TotalCFP: totalCFP}
+	if hPerCFP != nil && *hPerCFP > 0 {
+		e.CodeHours = float64(totalCFP) * *hPerCFP
+		w := 0.0
+		if wrapPct != nil && *wrapPct > 0 {
+			w = *wrapPct
+		}
+		e.WrapHours = e.CodeHours * w / 100
+		e.TotalHours = e.CodeHours + e.WrapHours
+	}
+	return e
+}
+
 // CosmicReport is the full calibration payload.
 type CosmicReport struct {
 	Features  []CosmicFeature `json:"features"`
 	Aggregate CosmicAggregate `json:"aggregate"`
 	Assumed   CosmicAssumed   `json:"assumed"`
+	// Estimate is the manual initial-estimate projection (inputs persisted on the
+	// project). Populated by the API handler, which has the config.
+	Estimate CosmicEstimate `json:"estimate"`
 }
 
 func cosmicTagValue(tags []string, prefix string) (string, bool) {
