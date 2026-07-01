@@ -168,7 +168,20 @@ func ComputeCosmic(tickets []*ticket.Ticket) CosmicReport {
 		if err != nil || cfp <= 0 {
 			continue
 		}
-		f := CosmicFeature{ID: t.ID, Title: t.Title, CFP: cfp, ParentHours: cosmicLoggedHours(t)}
+		f := CosmicFeature{ID: t.ID, Title: t.Title, CFP: cfp}
+		// Self-contained feature: the sized ticket's OWN hours count by its own
+		// class tag (a "feature of one" — no children required). A cfp ticket with
+		// hours but no class is still flagged as parent_hours (genuinely mis-logged).
+		switch selfHours := cosmicLoggedHours(t); cosmicClassOf(t.Tags) {
+		case classFunctional:
+			f.FunctionalHours += selfHours
+		case classConfig:
+			f.ConfigHours += selfHours
+		case classNonfunc:
+			f.NonfuncHours += selfHours
+		default:
+			f.ParentHours += selfHours
+		}
 		for _, c := range childrenByParent[t.ID] {
 			h := cosmicLoggedHours(c)
 			switch cosmicClassOf(c.Tags) {

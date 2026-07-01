@@ -862,6 +862,19 @@ total      = code + wrap</pre>
               <option value="xl">XL</option>
             </select></label>
             <label>Due date <input type="date" id="nt-due-date"></label>
+            <details id="nt-sizing" style="margin-top:6px">
+              <summary style="cursor:pointer;font-size:13px;color:#555">Sizing (COSMIC) — optional</summary>
+              <div style="padding:8px 0 2px">
+                <label>Class <select id="nt-class">
+                  <option value="">— none —</option>
+                  <option value="functional">functional (code)</option>
+                  <option value="config">config (setup / IaC)</option>
+                  <option value="nonfunc">nonfunc (deploy / validate / hardening)</option>
+                </select></label>
+                <label>CFP (function points) <input type="number" id="nt-cfp" min="1" step="1" placeholder="only if this has functional size"></label>
+                <p style="font-size:11px;color:#999;margin:2px 0 0">A ticket can stand alone: give it a class, and a CFP if it has functional size. Only decompose into a parent + children for a big feature.</p>
+              </div>
+            </details>
           </div>
           <label>Assignee <select id="nt-assignee"><option value="">Unassigned</option></select></label>
           <div id="nt-fields-meeting" class="hidden">
@@ -870,7 +883,8 @@ total      = code + wrap</pre>
           <div id="nt-fields-time" class="hidden">
             <label>Hours <input type="number" id="nt-hours" step="0.25" min="0.25" placeholder="1.5"></label>
           </div>
-          <label>Phase <input type="text" id="nt-phase" placeholder="e.g. Discovery, Sprint 1, Phase 2"></label>
+          <label>Phase <input type="text" id="nt-phase" list="nt-phase-list" placeholder="Pick an existing phase or type a new one"></label>
+          <datalist id="nt-phase-list"></datalist>
           <div class="form-actions">
             <button type="submit" class="btn-primary">Create</button>
             <button type="button" class="btn-secondary" id="btn-cancel-ticket">Cancel</button>

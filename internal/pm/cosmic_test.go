@@ -79,3 +79,29 @@ func TestComputeCosmicEmptyAndInvalid(t *testing.T) {
 		t.Errorf("expected nil aggregate rate, got %v", rep.Aggregate.HPerCFP)
 	}
 }
+
+func TestComputeCosmicSelfContained(t *testing.T) {
+	// A "feature of one": sized ticket carries its own class + hours, no children.
+	tickets := []*ticket.Ticket{
+		tkt("solo", []string{"cfp:4", "functional"}, 8), // 8h functional on the sized ticket itself
+	}
+	rep := ComputeCosmic(tickets)
+	if len(rep.Features) != 1 {
+		t.Fatalf("expected 1 feature, got %d", len(rep.Features))
+	}
+	f := rep.Features[0]
+	if !approx(f.FunctionalHours, 8) {
+		t.Errorf("self functional = %v, want 8", f.FunctionalHours)
+	}
+	if !approx(f.ParentHours, 0) {
+		t.Errorf("classed self-hours should NOT be flagged as parent_hours, got %v", f.ParentHours)
+	}
+	if f.HPerCFP == nil || !approx(*f.HPerCFP, 2.0) {
+		t.Errorf("h/CFP = %v, want 2.0 (8h ÷ 4 CFP from the ticket itself)", f.HPerCFP)
+	}
+	// A cfp ticket with hours but NO class is still flagged.
+	rep2 := ComputeCosmic([]*ticket.Ticket{tkt("bad", []string{"cfp:4"}, 5)})
+	if !approx(rep2.Features[0].ParentHours, 5) {
+		t.Errorf("unclassed hours on a sized ticket should flag parent_hours, got %v", rep2.Features[0].ParentHours)
+	}
+}

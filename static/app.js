@@ -1517,6 +1517,10 @@ document.getElementById('btn-sync').addEventListener('click', async () => {
 
 // ── New ticket modal ─────────────────────────────────
 document.getElementById('btn-new-ticket').addEventListener('click', () => {
+  // Populate the phase picker with phases already used in this project (type-or-pick).
+  const phases = [...new Set((allTickets || []).map(t => t.phase).filter(Boolean))].sort();
+  const dl = document.getElementById('nt-phase-list');
+  dl.innerHTML = phases.map(p => `<option value="${escapeHtml(p)}"></option>`).join('');
   document.getElementById('modal-overlay').classList.remove('hidden');
   document.getElementById('nt-title').focus();
 });
@@ -1591,12 +1595,23 @@ document.getElementById('new-ticket-form').addEventListener('submit', async (e) 
   }
   const phaseVal = document.getElementById('nt-phase').value.trim();
   if (phaseVal) body.phase = phaseVal;
+  // COSMIC sizing (optional, standard types only) → tags. A self-contained ticket
+  // can carry both a class and a CFP size; either is optional.
+  if (!isAuto) {
+    const tags = [];
+    const cfp = parseInt(document.getElementById('nt-cfp').value, 10);
+    if (Number.isFinite(cfp) && cfp > 0) tags.push(`cfp:${cfp}`);
+    const cls = document.getElementById('nt-class').value;
+    if (cls) tags.push(cls);
+    if (tags.length) body.tags = tags;
+  }
   try {
     const ticket = await API.post(`/api/projects/${currentProject.id}/tickets`, body);
     const msg = isAuto && body.hours ? `Created ${ticket.id} — ${body.hours}h logged` : `Created ${ticket.id}`;
     showToast(msg);
     document.getElementById('modal-overlay').classList.add('hidden');
     document.getElementById('new-ticket-form').reset();
+    document.getElementById('nt-sizing').open = false;
     document.getElementById('nt-type').dispatchEvent(new Event('change'));
     loadTickets();
   } catch (e) { showToast(e.message, 'error'); }
