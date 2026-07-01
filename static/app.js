@@ -727,6 +727,7 @@ document.getElementById('filter-sort').addEventListener('change', (e) => {
 
 // ── Ticket detail panel ──────────────────────────────
 async function openTicketPanel(ticketId) {
+  pendingPromoteAfterLog = null; // scope any gated-promote intent to one panel session
   const panel = document.getElementById('ticket-panel');
   panel.classList.remove('hidden');
   document.getElementById('panel-ticket-id').textContent = ticketId;
@@ -952,13 +953,33 @@ function formatBytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// When a promote is gated for missing time, remember the intent so the next
+// successful time log on that ticket auto-retries the promote.
+let pendingPromoteAfterLog = null;
+
 async function promoteTicket(id) {
   try {
-    const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/promote?author=${encodeURIComponent(currentUser?.email || '')}`);
-    showToast(`${id} → ${t.status}`);
-    renderTicketPanel(t);
+    const r = await fetch(`/api/projects/${currentProject.id}/tickets/${id}/promote?author=${encodeURIComponent(currentUser?.email || '')}`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) {
+      if (data.needs_time_log) { promptTimeToPromote(id, data.detail); return; }
+      throw new Error(data.detail || r.statusText);
+    }
+    showToast(`${id} → ${data.status}`);
+    renderTicketPanel(data);
     loadTickets();
   } catch (e) { showToast(e.message, 'error'); }
+}
+
+// Gated promote: pop the log-time box focused on the description, and arm an
+// auto-promote for once the time is logged.
+function promptTimeToPromote(id, detail) {
+  pendingPromoteAfterLog = id;
+  const box = document.getElementById(`time-box-${id}`);
+  if (box) box.classList.remove('hidden');
+  const desc = document.getElementById(`time-desc-${id}`);
+  if (desc) desc.focus();
+  showToast(detail || 'Log time (with a description) to promote', 'error');
 }
 
 async function demoteTicket(id) {
@@ -1037,6 +1058,11 @@ async function submitTimeEntry(id) {
     const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/time`, { date, hours, description: desc, author: currentUser?.email || '' });
     showToast(`Logged ${hours}h`);
     renderTicketPanel(t);
+    // If this log was to satisfy a gated promote, finish the promote now.
+    if (pendingPromoteAfterLog === id) {
+      pendingPromoteAfterLog = null;
+      promoteTicket(id);
+    }
   } catch (e) { showToast(e.message, 'error'); }
 }
 

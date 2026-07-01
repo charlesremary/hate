@@ -8,6 +8,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -470,6 +471,14 @@ func handlePromoteTicket(w http.ResponseWriter, r *http.Request) {
 	author := r.URL.Query().Get("author")
 	tk, err := ticket.Promote(root, ticketID, author)
 	if err != nil {
+		if errors.Is(err, ticket.ErrNeedsTimeLog) {
+			// Distinct signal so the UI pops the log-time form instead of just erroring.
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+				"detail":         err.Error(),
+				"needs_time_log": true,
+			})
+			return
+		}
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}

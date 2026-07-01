@@ -5,6 +5,7 @@ package ticket
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -327,6 +328,44 @@ func resolvePrevious(t *Ticket) string {
 	return "not_started"
 }
 
+// ErrNeedsTimeLog is returned by Promote when leaving a work status without any
+// time (with a description) logged since entering it. The API surfaces this as a
+// distinct signal so the UI can pop the log-time form.
+var ErrNeedsTimeLog = errors.New("log time (with a description) for this work before promoting")
+
+// workStatuses are the statuses where actual work happens — you can't promote out
+// of one without logging time for that work first. Always on, no bypass except
+// force-close (which skips the workflow entirely, with a recorded reason).
+var workStatuses = map[string]bool{
+	"in_progress": true,
+	"qa_testing":  true,
+	"rework":      true,
+}
+
+// statusEnteredAt returns the ISO timestamp the ticket entered its current status
+// (the most recent status_changed activity into it), falling back to created_at.
+func statusEnteredAt(t *Ticket) string {
+	suffix := "-> " + t.Status
+	for i := len(t.Activity) - 1; i >= 0; i-- {
+		a := t.Activity[i]
+		if a.Action == "status_changed" && strings.HasSuffix(a.Detail, suffix) {
+			return a.Timestamp
+		}
+	}
+	return t.CreatedAt
+}
+
+// hasTimeLoggedSince reports whether any described, non-zero time entry was logged
+// at/after the given ISO timestamp. ISO 8601 UTC strings compare lexically.
+func hasTimeLoggedSince(t *Ticket, since string) bool {
+	for _, te := range t.TimeEntries {
+		if te.Hours > 0 && strings.TrimSpace(te.Description) != "" && te.LoggedAt >= since {
+			return true
+		}
+	}
+	return false
+}
+
 // Promote moves a ticket to the next status in its type's workflow.
 func Promote(repoRoot, ticketID, author string) (*Ticket, error) {
 	t, err := ReadTicket(repoRoot, ticketID)
@@ -342,6 +381,12 @@ func Promote(repoRoot, ticketID, author string) (*Ticket, error) {
 	current := t.Status
 	if Contains(TerminalStatuses, current) {
 		return nil, fmt.Errorf("Cannot promote from '%s' -- terminal status", current)
+	}
+
+	// Gate: leaving a work status requires time (with a description) logged since
+	// entering it — so the calibration data can't go missing. force-close bypasses.
+	if workStatuses[current] && !hasTimeLoggedSince(t, statusEnteredAt(t)) {
+		return nil, ErrNeedsTimeLog
 	}
 
 	nextStatus, ok := wf.Promote[current]
