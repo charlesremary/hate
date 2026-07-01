@@ -228,47 +228,28 @@ PROJ-100  "Semantic search over docs"   tags: cfp:18
 - [ ] Platform/managed-service work is `config` (0 CFP), not invented CFP.
 - [ ] Recurring deliverables have a `type:<name>` on the parent.
 - [ ] Anything not committed is tagged `backlog`.
-- [ ] Wrap deliverables optionally carry a consistent descriptive tag (§11) so they group in the Stats report.
+- [ ] Class every child `functional` (code) / `config` / `nonfunc` — config + nonfunc = wrap (§11).
 
 ---
 
-## 11. Wrap-based calibration (experimental)
+## 11. Wrap-based calibration
 
-This layers on top of the CFP/COSMIC model above. The thesis (see
-[`future-wrap-based-estimation.md`](./future-wrap-based-estimation.md) and the
-settled model in [`wrap-catalog-data-model.md`](./wrap-catalog-data-model.md)):
-agentic coding **inverts the cost model** — generated code is a near-constant per
-CFP, so the variable cost is the **wrap** around it.
+Layers on the CFP/COSMIC model above (see
+[`future-wrap-based-estimation.md`](./future-wrap-based-estimation.md) for the
+thesis): agentic coding **inverts the cost model** — generated code is a
+near-constant per CFP, so the variable cost is the **wrap** around it.
 
-### The three activities
+The whole model in one line: **`functional` = code, `config` + `nonfunc` = wrap.**
 
-Every unit of work is one of:
+| Class tag | Is | Cost |
+|---|---|---|
+| `functional` | code — the agent authors it | ~constant per CFP |
+| `config` | console / manual / platform setup (incl. IaC) | variable (wrap) |
+| `nonfunc` | deploy, run, validate, troubleshoot, hardening | variable (wrap) |
 
-| Activity | What it is | Cost | Class tag |
-|---|---|---|---|
-| **author** | Generate code — the agent does it | ~constant | `functional` |
-| **operate** | Deploy, run, validate, troubleshoot | variable | `nonfunc` |
-| **configure** | Console / manual click-ops & platform/infra setup | variable | `config` |
-
-`author` (the CFP-bearing code) is the constant slice; **operate + configure are
-"wrap"** — the variable cost. This is the same split as the COSMIC `wrap %`
-(numerator = config + nonfunc).
-
-Infrastructure-as-code (CDK, CloudFormation, Terraform, YAML) is platform setup —
-tag it `config` (0 CFP, per §5), like any other managed-service/platform work.
-
-### Tagging wrap deliverables
-
-Optionally, a wrap ticket (a `config`/`nonfunc` child) can carry a plain
-descriptive tag naming the kind of deliverable — e.g. `deploy`, `smoke-validate`,
-`flow`, `bot`. There's no controlled vocabulary or picklist; just reuse the same
-tag names across projects so the Stats report's hours-by-tag lines up. Any tag
-works — the report groups by whatever's there.
-
-### What you get
-
-The **COSMIC tab** shows, per feature, the **code rate** (h/CFP) and the
-**wrap %** (= config + nonfunc ÷ functional). Read those off a delivered project
-and carry them forward to a similar new one **by hand** — there's no automatic
-cross-project calibration (deliberately; it doesn't generalize across domains).
-Keep the tagging clean (one class per child) and the numbers stay meaningful.
+The **COSMIC tab** reports both numbers per feature: the **code rate** (h/CFP)
+and the **wrap %** (= (config + nonfunc) ÷ functional) — e.g. 0.17 h/CFP, 35%
+wrap. To estimate a new project, read those off a similar delivered one and
+extrapolate by hand; there's no automatic cross-project calibration (it doesn't
+generalize across domains). Keep one class tag per child and the numbers stay
+meaningful.
