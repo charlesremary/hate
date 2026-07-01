@@ -186,7 +186,8 @@
             <a href="#help-time">4. Logging time &amp; billing</a>
             <a href="#help-predecessors">5. Predecessors</a>
             <a href="#help-pm">6. For Project Managers</a>
-            <a href="#help-team">7. Team &amp; Identity</a>
+            <a href="#help-cosmic">7. Sizing &amp; estimating (COSMIC)</a>
+            <a href="#help-team">8. Team &amp; Identity</a>
           </nav>
 
           <!-- 0 -->
@@ -411,6 +412,16 @@
               <li><span class="badge s-closed">Closed</span> is <strong>terminal</strong> for every
                 type — a closed ticket cannot be promoted or demoted.</li>
             </ul>
+
+            <h3>Logging time to promote</h3>
+            <p>You can't promote a ticket out of a <strong>work status</strong>
+              (<span class="badge s-in_progress">In Progress</span>, QA testing, or rework) without a
+              time entry — <strong>with a description</strong> — logged since it entered that status.
+              Promote with nothing logged and hate pops the log-time box for you, then finishes the
+              promotion once you've saved it. Starting work and the final close don't require it, and
+              <strong>Force close</strong> bypasses it entirely. This is <strong>always on</strong>:
+              it's what keeps the COSMIC calibration (§7) honest — the hours behind every rate are
+              guaranteed to be there, and every phase transition records what was actually done.</p>
           </section>
 
           <!-- 4 -->
@@ -618,8 +629,96 @@
           </section>
 
           <!-- 7 -->
+          <section id="help-cosmic">
+            <h2>7. Sizing &amp; estimating (COSMIC)</h2>
+            <p>hate can size features in <strong>COSMIC function points (CFP)</strong> and use them,
+              together with the hours you log, to measure how long work actually takes — and then to
+              estimate a new project before you've built it. It all lives on the experimental
+              <strong>COSMIC</strong> tab (enable it under ⚙ Settings → <em>Show COSMIC tab</em>).</p>
+
+            <h3>What a function point is</h3>
+            <p>A COSMIC function point measures <strong>functional size</strong> — the
+              <em>data movements</em> a piece of functionality makes across a boundary, counted as
+              <strong>Entry</strong>, <strong>Exit</strong>, <strong>Read</strong>, and
+              <strong>Write</strong>. It is deliberately <strong>not</strong> a measure of effort,
+              lines of code, or compute — just size. A small read operation (a command in, a lookup,
+              a response out) is about 3 CFP whatever language it's written in.</p>
+            <p>The rule that keeps counts honest — <strong>"is your code in the loop?"</strong>:</p>
+            <ul>
+              <li><strong>A human clicks a console, or a managed service does the work</strong> →
+                your code isn't in the loop → <strong>0 CFP</strong>. (Clicking "Create knowledge
+                base" in a cloud console is real effort but zero functional size — track it as hours,
+                not CFP.)</li>
+              <li><strong>Your code triggers it programmatically</strong> → a <strong>few CFP</strong>
+                for the command and its response — never for the compute the service runs.</li>
+            </ul>
+
+            <h3>How you tag it</h3>
+            <p>Model a feature as a <strong>parent ticket</strong> that carries the size, with
+              <strong>child tickets</strong> doing the work and logging the hours:</p>
+            <ul>
+              <li>The <strong>parent</strong> gets <code>cfp:&lt;N&gt;</code> — the feature's size.
+                Size lives on the parent <em>only</em>; never copy it to a child, or it
+                double-counts. Don't log hours on the parent.</li>
+              <li>Each <strong>child</strong> gets <code>parent:&lt;parent-id&gt;</code> and exactly
+                one <strong>class</strong> tag, and is where hours are logged:
+                <ul>
+                  <li><code>functional</code> — the code (the part CFP measures).</li>
+                  <li><code>config</code> — console / manual / platform setup, including IaC (0 CFP).</li>
+                  <li><code>nonfunc</code> — deploy, run, validate, troubleshoot, hardening (0 CFP).</li>
+                </ul>
+              </li>
+            </ul>
+            <p>The one line to remember: <strong><code>functional</code> = code,
+              <code>config</code> + <code>nonfunc</code> = wrap</strong> (the variable work around the
+              code).</p>
+
+            <div class="help-callout" style="background:#f4f6f8;border-left:4px solid #607d8b;padding:12px 16px;margin:12px 0;border-radius:4px">
+              <p style="margin:0 0 6px"><strong>Simple example — a <code>lookup_caller</code> feature.</strong></p>
+              <p style="margin:0 0 6px">The op takes an identifier in (<em>Entry</em>), reads the
+                caller record from the store (<em>Read</em>), and returns it (<em>Exit</em>) →
+                <strong>3 CFP</strong>.</p>
+              <pre style="margin:0;font-size:12px;white-space:pre-wrap">PROJ-100  "lookup_caller"           tags: cfp:3          ← parent (size only)
+  PROJ-101  "handler + DynamoDB read" tags: parent:PROJ-100, functional   (log hours here)
+  PROJ-102  "provision the table"     tags: parent:PROJ-100, config       (0 CFP, hours)</pre>
+              <p style="margin:6px 0 0">Functional pace = PROJ-101's hours ÷ 3 CFP. The table
+                provisioning is wrap, not size.</p>
+            </div>
+
+            <h3>The COSMIC panel</h3>
+            <p>The COSMIC tab rolls this up. Per feature it shows CFP, <strong>Func h</strong> (code
+              hours), <strong>Wrap h</strong> (config + nonfunc), the <strong>h/CFP</strong> rate, and
+              <strong>Wrap %</strong>. The card at the top is the project aggregate — the numbers you
+              actually calibrate from:</p>
+            <ul>
+              <li><strong>h/CFP</strong> = Σ functional hours ÷ Σ CFP — your <em>measured code rate</em>.</li>
+              <li><strong>Wrap %</strong> = (config + nonfunc) ÷ functional — the variable work around
+                the code, as a share of it.</li>
+            </ul>
+            <p>These emerge from the hours you log as work happens, so they get more trustworthy the
+              more you deliver. Data-quality flags call out hours on unclassed children or logged on a
+              parent, which would skew the rate. Because promotion now requires logged time (see
+              §3), the hours behind these numbers can't quietly go missing.</p>
+
+            <h3>The estimate block — bidding a new project</h3>
+            <p>On a new project you have no actuals yet, but once its features are tagged with
+              <code>cfp:</code> you know the total size. The <strong>Initial estimate</strong> block on
+              the COSMIC tab turns that into an hours estimate: enter an <strong>h/CFP</strong> and a
+              <strong>wrap %</strong> borrowed from a comparable <em>delivered</em> project (read them
+              off that project's COSMIC card), and it projects:</p>
+            <pre style="margin:0 0 8px;font-size:12px;white-space:pre-wrap">code hours = total CFP × h/CFP
+wrap hours = code hours × wrap %
+total      = code + wrap</pre>
+            <p>It shows the projected total next to <strong>actual hours logged so far</strong>, so as
+              the project runs you watch the estimate and reality converge. The two inputs are
+              <strong>saved on the project</strong>, so it's a recorded estimate — your initial bid —
+              not a throwaway calculation. That's the loop: measure a delivered project, borrow its
+              rates, and bid the next one on evidence instead of gut.</p>
+          </section>
+
+          <!-- 8 -->
           <section id="help-team">
-            <h2>7. Team &amp; Identity</h2>
+            <h2>8. Team &amp; Identity</h2>
             <p>The <strong>👤 Team</strong> button in the project header opens one dialog with two
               distinct parts. They're related, so it helps to keep the difference straight:</p>
 
