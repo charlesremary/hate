@@ -267,10 +267,8 @@ works — the report groups by whatever's there.
 
 ### What you get
 
-The per-project **Stats** button (next to Σ Phases) reports this project's
-**code rate** (h/CFP), the **class split** + **wrap %**, and **hours grouped by
-every tag** — "tickets tagged `X` typically cost this much" — with a CSV export.
-It's informational: read one project's stats and carry the numbers forward to a
-similar new project **by hand**. There's no automatic cross-project calibration
-(deliberately — it doesn't generalize across domains). Keep the tagging clean
-(consistent tag names, one class per child) and the numbers stay meaningful.
+The **COSMIC tab** shows, per feature, the **code rate** (h/CFP) and the
+**wrap %** (= config + nonfunc ÷ functional). Read those off a delivered project
+and carry them forward to a similar new one **by hand** — there's no automatic
+cross-project calibration (deliberately; it doesn't generalize across domains).
+Keep the tagging clean (one class per child) and the numbers stay meaningful.
