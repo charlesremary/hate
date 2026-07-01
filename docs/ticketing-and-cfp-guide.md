@@ -66,8 +66,6 @@ AMPL-7k3x  "Onboarding revamp"        tags: cfp:42          ← parent (size liv
 | `config` | child | Platform/managed-service setup. 0 CFP. Tracked as hours. |
 | `nonfunc` | child | Non-functional work (perf, security, hardening). 0 CFP. Hours. |
 | `type:<name>` | parent | Deliverable type for cost rollup, e.g. `type:kb-article`. |
-| `wt:<type>` | child (wrap) | Wrap-deliverable archetype from the catalog (§11), e.g. `wt:flow`. |
-| `wtn:<N>` | child (wrap) | Unit count on a wrap ticket (batch-and-count; default 1). |
 | `backlog` | any | Out of committed scope — excluded from completion %, schedule, capacity. |
 
 Rules that keep the data clean:
@@ -230,7 +228,7 @@ PROJ-100  "Semantic search over docs"   tags: cfp:18
 - [ ] Platform/managed-service work is `config` (0 CFP), not invented CFP.
 - [ ] Recurring deliverables have a `type:<name>` on the parent.
 - [ ] Anything not committed is tagged `backlog`.
-- [ ] Wrap deliverables (console/operate work) carry a `wt:<type>` from the catalog (§11).
+- [ ] Wrap deliverables optionally carry a consistent descriptive tag (§11) so they group in the Stats report.
 
 ---
 
@@ -261,17 +259,11 @@ tag it `config` (0 CFP, per §5), like any other managed-service/platform work.
 
 ### Tagging wrap deliverables
 
-A wrap ticket (a `config`/`nonfunc` child) that maps to a repeatable console/operate
-deliverable also gets:
-
-- `wt:<type>` — a **wrap-deliverable tag**. The Catalog tab offers a small,
-  optional list of domain-neutral suggestions (`deploy`, `deploy-troubleshoot`,
-  `smoke-validate`, `managed-service-setup`, `integration-wiring`, `manual-step`)
-  via a picklist, but you can use **any tag** that describes the deliverable
-  (`flow`, `bot`, … for an IVR). Reuse the same tag names across projects so the
-  numbers line up.
-- `wtn:<N>` — optional unit count when one ticket covers N small units
-  (batch-and-count; default 1).
+Optionally, a wrap ticket (a `config`/`nonfunc` child) can carry a plain
+descriptive tag naming the kind of deliverable — e.g. `deploy`, `smoke-validate`,
+`flow`, `bot`. There's no controlled vocabulary or picklist; just reuse the same
+tag names across projects so the Stats report's hours-by-tag lines up. Any tag
+works — the report groups by whatever's there.
 
 ### What you get
 
