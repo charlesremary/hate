@@ -19,7 +19,7 @@
       <div class="sidebar-actions">
         <button class="btn-secondary" id="btn-new-project">+ New Project</button>
         <button class="btn-secondary" id="btn-open-project">Open Existing…</button>
-        <button class="btn-secondary" id="btn-manage-projects">Manage Tracked…</button>
+        <button class="btn-secondary" id="btn-manage-projects">Project List</button>
         <label class="toggle-label" style="display:flex;gap:6px;align-items:center;padding:6px 8px 0;font-size:12px;color:#999">
           <input type="checkbox" id="filter-show-closed-projects"> Show closed projects
         </label>
@@ -36,7 +36,7 @@
       </div>
       <div id="project-view" class="hidden">
         <div id="project-closed-banner" class="hidden" style="background:#fff3e0;border-left:4px solid #e65100;padding:8px 14px;margin:0;font-size:13px">
-          🔒 <strong>This project is closed</strong> <span id="project-closed-date" style="color:#999"></span>. Ticket changes are blocked — reopen the project under <em>Manage Tracked…</em> to make changes.
+          🔒 <strong>This project is closed</strong> <span id="project-closed-date" style="color:#999"></span>. Ticket changes are blocked — reopen the project under <em>Project List</em> to make changes.
         </div>
         <header class="project-header">
           <div>
@@ -579,7 +579,7 @@
 
             <h3>Closing a project</h3>
             <p>When a project is finished — or paused indefinitely — open
-              <strong>Manage Tracked…</strong> in the sidebar and click <strong>Close</strong>. A
+              <strong>Project List</strong> in the sidebar and click <strong>Close</strong>. A
               closed project is <strong>read-only</strong>: you cannot add, edit, promote, demote,
               block, comment on, log time on, or delete tickets, and you cannot change a ticket's
               predecessors. Everything stays viewable — open tickets, the dashboard, the baseline,
@@ -984,8 +984,8 @@ total      = code + wrap</pre>
     <!-- Manage tracked projects modal -->
     <div id="manage-projects-modal-overlay" class="hidden">
       <div id="manage-projects-modal">
-        <h3>Manage Tracked Projects</h3>
-        <p style="font-size:12px;color:#999;margin-bottom:12px">Removing a project hides it from the sidebar — the folder on disk is left untouched. Restore it any time.</p>
+        <h3>Project List</h3>
+        <p style="font-size:12px;color:#999;margin-bottom:12px">Hiding a project removes it from the sidebar — the folder on disk is left untouched. Switch it back to Show any time.</p>
         <div id="manage-projects-list"></div>
         <div class="form-actions">
           <button type="button" class="btn-secondary" id="btn-close-manage-projects">Close</button>

@@ -1963,34 +1963,38 @@ async function renderManageProjects() {
   const container = document.getElementById('manage-projects-list');
   container.innerHTML = '<p style="color:#999;font-size:13px">Loading…</p>';
   try {
-    // Always pull closed projects too so they can be reopened from this modal.
+    // Every project in one list: shown (tracked) and hidden together, each with
+    // a Show / Hide toggle reflecting its current visibility.
     const [active, hidden] = await Promise.all([
       API.get('/api/projects'),
       API.get('/api/projects/hidden'),
     ]);
-    const row = (p, trackAction, trackLabel) => {
+    const all = [
+      ...active.map(p => ({ ...p, hidden: false })),
+      ...hidden.map(p => ({ ...p, hidden: true })),
+    ].sort((a, b) => a.name.localeCompare(b.name));
+
+    const row = (p) => {
       const closeAction = p.closed_at
         ? `<button class="btn-secondary" onclick="reopenProjectFromManage('${p.id}')">Reopen</button>`
         : `<button class="btn-secondary" onclick="closeProjectFromManage('${p.id}', '${p.name.replace(/'/g, "\\'")}')">Close</button>`;
       const closedTag = p.closed_at ? `<span style="color:#e65100;font-size:12px;margin-left:6px">🔒 closed ${p.closed_at}</span>` : '';
+      const ep = encodeURIComponent(p.path);
+      const vis = `<span class="vis-toggle">
+            <label><input type="radio" name="vis-${p.id}" ${!p.hidden ? 'checked' : ''} onchange="setProjectVisibility('${ep}', false)"> Show</label>
+            <label><input type="radio" name="vis-${p.id}" ${p.hidden ? 'checked' : ''} onchange="setProjectVisibility('${ep}', true)"> Hide</label>
+          </span>`;
       return `
         <tr>
           <td><strong>${p.name}</strong>${closedTag}<div class="mp-path">${p.path}</div></td>
-          <td style="white-space:nowrap">
-            ${closeAction}
-            <button class="btn-secondary" onclick="${trackAction}('${encodeURIComponent(p.path)}')">${trackLabel}</button>
-          </td>
+          <td style="white-space:nowrap">${closeAction}</td>
+          <td style="white-space:nowrap">${vis}</td>
         </tr>`;
     };
-    let html = '<h4 class="mp-heading">Tracked</h4>';
-    html += active.length
-      ? `<table class="manage-projects-table"><tbody>${active.map(p => row(p, 'hideProjectFromTracking', 'Remove')).join('')}</tbody></table>`
-      : '<p style="color:#999;font-size:13px">No tracked projects.</p>';
-    if (hidden.length) {
-      html += '<h4 class="mp-heading">Removed from tracking</h4>';
-      html += `<table class="manage-projects-table"><tbody>${hidden.map(p => row(p, 'restoreProjectToTracking', 'Restore')).join('')}</tbody></table>`;
-    }
-    container.innerHTML = html;
+
+    container.innerHTML = all.length
+      ? `<table class="manage-projects-table"><tbody>${all.map(row).join('')}</tbody></table>`
+      : '<p style="color:#999;font-size:13px">No projects.</p>';
   } catch (e) {
     container.innerHTML = `<p style="color:red">${e.message}</p>`;
   }
@@ -2023,30 +2027,25 @@ async function reopenProjectFromManage(projectId) {
   } catch (e) { showToast(e.message, 'error'); }
 }
 
-async function hideProjectFromTracking(encodedPath) {
+// Toggle a project's sidebar visibility from the Project List. hidden=true hides
+// it from the sidebar (folder untouched); hidden=false shows it again.
+async function setProjectVisibility(encodedPath, hidden) {
   const path = decodeURIComponent(encodedPath);
   try {
-    await API.post('/api/projects/hide', { path });
-    showToast('Removed from tracking');
-    // If the project being removed is the one currently open, drop to the welcome view.
-    if (currentProject && currentProject.path === path) {
+    await API.post(hidden ? '/api/projects/hide' : '/api/projects/unhide', { path });
+    showToast(hidden ? 'Project hidden' : 'Project shown');
+    // If we just hid the currently open project, drop to the welcome view.
+    if (hidden && currentProject && currentProject.path === path) {
       currentProject = null;
       document.getElementById('project-view').classList.add('hidden');
       document.getElementById('welcome').classList.remove('hidden');
     }
     renderManageProjects();
     loadProjects();
-  } catch (e) { showToast(e.message, 'error'); }
-}
-
-async function restoreProjectToTracking(encodedPath) {
-  const path = decodeURIComponent(encodedPath);
-  try {
-    await API.post('/api/projects/unhide', { path });
-    showToast('Restored to tracking');
-    renderManageProjects();
-    loadProjects();
-  } catch (e) { showToast(e.message, 'error'); }
+  } catch (e) {
+    showToast(e.message, 'error');
+    renderManageProjects(); // revert the radio to the true state on failure
+  }
 }
 
 // ── Help ──────────────────────────────────────────────
