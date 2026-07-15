@@ -256,11 +256,17 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg, err := ticket.ReadConfig(root)
 		projectName := projectID
-		if err == nil && cfg.ProjectName != "" {
-			projectName = cfg.ProjectName
+		var effortToDays map[string]int
+		if err == nil {
+			if cfg.ProjectName != "" {
+				projectName = cfg.ProjectName
+			}
+			effortToDays = cfg.EffortToDays
 		}
-		costHTML := pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
-		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, costHTML)
+		reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, effortToDays)) +
+			pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(tickets, effortToDays)) +
+			pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
+		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, reportsHTML)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(html))
@@ -282,8 +288,14 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		costTickets = []*ticket.Ticket{}
 	}
-	costHTML := pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))
-	html := pm.GenerateDashboard(snapshot, costHTML)
+	var effortToDays map[string]int
+	if cfg, err := ticket.ReadConfig(root); err == nil {
+		effortToDays = cfg.EffortToDays
+	}
+	reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, effortToDays)) +
+		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, effortToDays)) +
+		pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))
+	html := pm.GenerateDashboard(snapshot, reportsHTML)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(html))
