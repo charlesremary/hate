@@ -5,6 +5,7 @@ package api
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -774,7 +775,7 @@ func getEffortToDays(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := make(map[string]int, len(ticket.DefaultEffortToDays))
+	out := make(map[string]float64, len(ticket.DefaultEffortToDays))
 	for k, v := range ticket.DefaultEffortToDays {
 		out[k] = v
 	}
@@ -798,7 +799,7 @@ func updateEffortToDays(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		EffortToDays map[string]int `json:"effort_to_days"`
+		EffortToDays map[string]float64 `json:"effort_to_days"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -807,18 +808,20 @@ func updateEffortToDays(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "effort_to_days is required")
 		return
 	}
-	cleaned := make(map[string]int, len(req.EffortToDays))
+	cleaned := make(map[string]float64, len(req.EffortToDays))
 	for k, v := range req.EffortToDays {
 		key := strings.ToLower(strings.TrimSpace(k))
 		if !validEffortSizes[key] {
 			respondError(w, http.StatusBadRequest, "unknown effort size: "+k)
 			return
 		}
-		if v < 1 {
-			respondError(w, http.StatusBadRequest, "value for "+key+" must be >= 1")
+		if v < 0.25 {
+			respondError(w, http.StatusBadRequest, "value for "+key+" must be >= 0.25")
 			return
 		}
-		cleaned[key] = v
+		// Snap to the nearest quarter-day so stored values stay on the grid
+		// regardless of floating-point jitter from the client.
+		cleaned[key] = math.Round(v*4) / 4
 	}
 	cfg, err := ticket.ReadConfig(root)
 	if err != nil {

@@ -1866,13 +1866,14 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
     if (currentProject && !document.getElementById('effort-sizing-inputs').classList.contains('hidden')) {
       const effortToDays = {};
       for (const k of ['xs','s','m','l','xl']) {
-        const v = parseInt(document.getElementById(`effort-${k}`).value, 10);
-        if (Number.isFinite(v) && v >= 1) effortToDays[k] = v;
+        // Effort sizing supports quarter-day granularity — snap to the nearest 0.25.
+        const raw = parseFloat(document.getElementById(`effort-${k}`).value);
+        if (Number.isFinite(raw) && raw >= 0.25) effortToDays[k] = Math.round(raw * 4) / 4;
       }
       if (Object.keys(effortToDays).length === 5) {
         await API.put(`/api/projects/${currentProject.id}/effort-to-days`, { effort_to_days: effortToDays });
       } else {
-        showToast('Effort sizing not saved — all five sizes need a value ≥ 1', 'error');
+        showToast('Effort sizing not saved — all five sizes need a value ≥ 0.25', 'error');
         return;
       }
     }

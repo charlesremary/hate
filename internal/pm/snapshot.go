@@ -6,6 +6,7 @@ package pm
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -289,7 +290,7 @@ func CreateBaselineFromTickets(projectRoot, projectID, projectName, createdBy st
 	}
 
 	// Read config for effort_to_days
-	effortToDays := map[string]int{"xs": 1, "s": 2, "m": 3, "l": 5, "xl": 8}
+	effortToDays := map[string]float64{"xs": 1, "s": 2, "m": 3, "l": 5, "xl": 8}
 	cfg, err := ticket.ReadConfig(projectRoot)
 	if err == nil && cfg.EffortToDays != nil {
 		effortToDays = cfg.EffortToDays
@@ -310,11 +311,17 @@ func CreateBaselineFromTickets(projectRoot, projectID, projectName, createdBy st
 			plannedStartStr = *t.PlannedStartDate
 		}
 
-		// Determine planned days from effort or default
+		// Determine planned days from effort or default. Effort-days may be
+		// fractional (quarter-day granularity), but the baseline schedules on
+		// whole calendar days (AddDate / business-day loops), so round to the
+		// nearest day, floored at 1 so a sized ticket always spans a day.
 		plannedDays := 5
 		if t.Effort != nil && *t.Effort != "" {
 			if d, ok := effortToDays[*t.Effort]; ok {
-				plannedDays = d
+				plannedDays = int(math.Round(d))
+				if plannedDays < 1 {
+					plannedDays = 1
+				}
 			}
 		}
 
@@ -382,14 +389,14 @@ func CreateBaselineFromTickets(projectRoot, projectID, projectName, createdBy st
 	}
 
 	baseline := &Baseline{
-		CreatedDate: todayStr,
-		CreatedBy:   createdBy,
-		ProjectID:   projectID,
-		ProjectName: projectName,
-		ProjectType: "ad-hoc",
+		CreatedDate:  todayStr,
+		CreatedBy:    createdBy,
+		ProjectID:    projectID,
+		ProjectName:  projectName,
+		ProjectType:  "ad-hoc",
 		PlannedStart: projectStart,
-		PlannedEnd:  projectEnd,
-		Tasks:       baselineTasks,
+		PlannedEnd:   projectEnd,
+		Tasks:        baselineTasks,
 	}
 
 	// Write baseline

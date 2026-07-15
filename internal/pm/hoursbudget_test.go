@@ -22,7 +22,7 @@ func TestComputeHoursBudget(t *testing.T) {
 	cancel := "descoped"
 
 	tickets := []*ticket.Ticket{
-		{ID: "A", Effort: &m, Status: "complete", TimeEntries: te(30)}, // proj 24, spent 30
+		{ID: "A", Effort: &m, Status: "complete", TimeEntries: te(30)},   // proj 24, spent 30
 		{ID: "B", Effort: &s, Status: "in_progress", TimeEntries: te(5)}, // proj 16, spent 5
 		{ID: "C", Effort: &xs, Status: "not_started"},                    // proj 8, spent 0
 		{ID: "D", Status: "in_progress", TimeEntries: te(7)},             // unsized: spent 7, no proj
@@ -103,8 +103,8 @@ func TestEstimateVarianceSortOrder(t *testing.T) {
 	m, l := "m", "l" // 24h, 40h
 
 	tickets := []*ticket.Ticket{
-		{ID: "SMALL_OVER", Effort: &m, Status: "complete", TimeEntries: te(26)}, // +2
-		{ID: "BIG_OVER", Effort: &m, Status: "complete", TimeEntries: te(40)},   // +16
+		{ID: "SMALL_OVER", Effort: &m, Status: "complete", TimeEntries: te(26)},  // +2
+		{ID: "BIG_OVER", Effort: &m, Status: "complete", TimeEntries: te(40)},    // +16
 		{ID: "SMALL_UNDER", Effort: &m, Status: "complete", TimeEntries: te(22)}, // -2
 		{ID: "BIG_UNDER", Effort: &l, Status: "complete", TimeEntries: te(10)},   // -30
 	}

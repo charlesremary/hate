@@ -57,17 +57,17 @@ type TypeWorkflow struct {
 // per ticket type (see TypeWorkflows). Any "workflow" block in an older config
 // file is simply ignored on read and dropped on the next write.
 type ProjectConfig struct {
-	SchemaVersion string         `json:"schema_version"`
-	Client        string         `json:"client"`
-	ProjectName   string         `json:"project_name"`
-	ProjectID     string         `json:"project_id"`
-	Prefix        string         `json:"prefix"`
-	NextSequence  int            `json:"next_sequence,omitempty"` // Legacy, kept for backward compat
-	EffortToDays  map[string]int `json:"effort_to_days"`
-	Repos         []string       `json:"repos"`
-	AutoPush      bool           `json:"auto_push"`
-	Resources     []Resource     `json:"resources"`
-	GitIdentityV  *GitIdentity   `json:"git_identity,omitempty"`
+	SchemaVersion string             `json:"schema_version"`
+	Client        string             `json:"client"`
+	ProjectName   string             `json:"project_name"`
+	ProjectID     string             `json:"project_id"`
+	Prefix        string             `json:"prefix"`
+	NextSequence  int                `json:"next_sequence,omitempty"` // Legacy, kept for backward compat
+	EffortToDays  map[string]float64 `json:"effort_to_days"`
+	Repos         []string           `json:"repos"`
+	AutoPush      bool               `json:"auto_push"`
+	Resources     []Resource         `json:"resources"`
+	GitIdentityV  *GitIdentity       `json:"git_identity,omitempty"`
 	// ClosedAt is the ISO date (YYYY-MM-DD) the project was closed. Empty means
 	// open. While closed, ticket-write endpoints reject mutations and the
 	// project is filtered out of the sidebar by default.
@@ -85,8 +85,9 @@ func (c *ProjectConfig) IsClosed() bool {
 	return c != nil && c.ClosedAt != ""
 }
 
-// DefaultEffortToDays maps effort sizes to estimated days.
-var DefaultEffortToDays = map[string]int{
+// DefaultEffortToDays maps effort sizes to estimated days. Values are days and
+// may be fractional in quarter-day increments (0.25, 0.5, ...).
+var DefaultEffortToDays = map[string]float64{
 	"xs": 1,
 	"s":  2,
 	"m":  3,
@@ -170,7 +171,7 @@ func DefaultConfig(client, projectName, projectID, prefix string) *ProjectConfig
 	if prefix == "" {
 		prefix = "TKT"
 	}
-	etd := make(map[string]int)
+	etd := make(map[string]float64)
 	for k, v := range DefaultEffortToDays {
 		etd[k] = v
 	}

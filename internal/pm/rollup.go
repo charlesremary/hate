@@ -22,9 +22,9 @@ type PhaseProgress struct {
 	BlockedCount    int `json:"blocked_count"`
 	CancelledCount  int `json:"cancelled_count"` // force-closed / descoped; excluded from %
 
-	TotalEffortDays int `json:"total_effort_days"` // sum of effort-days in scope
-	DoneEffortDays  int `json:"done_effort_days"`  // effort-days of complete tickets
-	NoEffortCount   int `json:"no_effort_count"`   // in-scope tickets with no effort size
+	TotalEffortDays float64 `json:"total_effort_days"` // sum of effort-days in scope
+	DoneEffortDays  float64 `json:"done_effort_days"`  // effort-days of complete tickets
+	NoEffortCount   int     `json:"no_effort_count"`   // in-scope tickets with no effort size
 
 	PercentComplete float64 `json:"percent_complete"` // 0..100
 	EffortBased     bool    `json:"effort_based"`     // false → % fell back to ticket count
@@ -71,7 +71,7 @@ func isComplete(t *ticket.Ticket) bool {
 //     (EffortBased=false) rather than reporting a misleading zero.
 //
 // The algorithm is read-only.
-func PhaseRollup(tickets []*ticket.Ticket, effortToDays map[string]int) RollupReport {
+func PhaseRollup(tickets []*ticket.Ticket, effortToDays map[string]float64) RollupReport {
 	byPhase := map[string]*PhaseProgress{}
 	earliest := map[string]string{}
 	latest := map[string]string{}
@@ -138,7 +138,8 @@ func PhaseRollup(tickets []*ticket.Ticket, effortToDays map[string]int) RollupRe
 	}
 
 	var phases []PhaseProgress
-	var projTotalEffort, projDoneEffort, projTotalTickets, projDoneTickets int
+	var projTotalEffort, projDoneEffort float64
+	var projTotalTickets, projDoneTickets int
 	for phase, p := range byPhase {
 		p.PlannedStart = earliest[phase]
 		p.DueDate = latest[phase]

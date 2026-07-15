@@ -13,13 +13,13 @@ import (
 
 // BalanceChange is one ticket's proposed (or applied) date change.
 type BalanceChange struct {
-	TicketID    string `json:"ticket_id"`
-	Title       string `json:"title"`
-	Assignee    string `json:"assignee"`
-	OldStart    string `json:"old_start"`
-	OldDue      string `json:"old_due"`
-	NewStart    string `json:"new_start"`
-	NewDue      string `json:"new_due"`
+	TicketID    string  `json:"ticket_id"`
+	Title       string  `json:"title"`
+	Assignee    string  `json:"assignee"`
+	OldStart    string  `json:"old_start"`
+	OldDue      string  `json:"old_due"`
+	NewStart    string  `json:"new_start"`
+	NewDue      string  `json:"new_due"`
 	HoursNeeded float64 `json:"hours_needed"`
 }
 
@@ -32,14 +32,14 @@ type BalanceSkip struct {
 
 // BalanceReport is the full output of BalanceProject.
 type BalanceReport struct {
-	Algorithm        string          `json:"algorithm"`
-	OriginalEndDate  string          `json:"original_end_date"`  // latest old due across affected tickets
-	ProposedEndDate  string          `json:"proposed_end_date"`  // latest new due across affected tickets
-	TicketsAffected  int             `json:"tickets_affected"`
-	Changes          []BalanceChange `json:"changes"`
-	Skipped          []BalanceSkip   `json:"skipped"`
-	CycleDetected    bool            `json:"cycle_detected"`
-	CycleTicketIDs   []string        `json:"cycle_ticket_ids,omitempty"`
+	Algorithm       string          `json:"algorithm"`
+	OriginalEndDate string          `json:"original_end_date"` // latest old due across affected tickets
+	ProposedEndDate string          `json:"proposed_end_date"` // latest new due across affected tickets
+	TicketsAffected int             `json:"tickets_affected"`
+	Changes         []BalanceChange `json:"changes"`
+	Skipped         []BalanceSkip   `json:"skipped"`
+	CycleDetected   bool            `json:"cycle_detected"`
+	CycleTicketIDs  []string        `json:"cycle_ticket_ids,omitempty"`
 }
 
 // balanceTicket is the algorithm's internal state per ticket.
@@ -52,7 +52,7 @@ type balanceTicket struct {
 	newStart       time.Time
 	newDue         time.Time
 	priorityRank   int // lower = higher priority
-	effortDays     int
+	effortDays     float64
 }
 
 // priorityRank for sort: critical=0, high=1, medium=2, low=3, unknown=4.
@@ -100,7 +100,7 @@ func alignToWeekday(d time.Time) time.Time {
 //
 // Returns a report with proposed changes; the caller decides whether to apply
 // them. The algorithm itself is read-only.
-func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, effortToDays map[string]int, projectStart time.Time) BalanceReport {
+func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, effortToDays map[string]float64, projectStart time.Time) BalanceReport {
 	if projectStart.IsZero() {
 		projectStart = time.Now().UTC()
 	}
@@ -122,7 +122,7 @@ func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 	}
 
 	// Partition tickets: schedulable vs terminal vs skipped-with-reason.
-	terminal := map[string]bool{}      // ticket IDs that are closed/complete — treat as already-done predecessors
+	terminal := map[string]bool{}         // ticket IDs that are closed/complete — treat as already-done predecessors
 	terminalDue := map[string]time.Time{} // their effective "due" date for predecessor satisfaction
 	bts := []*balanceTicket{}
 	btsByID := map[string]*balanceTicket{}
@@ -166,7 +166,7 @@ func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 			})
 			continue
 		}
-		hours := float64(days) * HoursPerDay
+		hours := days * HoursPerDay
 		// Filter predecessors to those that actually exist in our set.
 		preds := []string{}
 		for _, pid := range t.Predecessors {

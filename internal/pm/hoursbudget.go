@@ -19,12 +19,12 @@ import (
 
 // estimateHours returns a ticket's projected hours from its effort size, or 0
 // when the ticket carries no effort size.
-func estimateHours(t *ticket.Ticket, effortToDays map[string]int) float64 {
+func estimateHours(t *ticket.Ticket, effortToDays map[string]float64) float64 {
 	effort := ""
 	if t.Effort != nil {
 		effort = *t.Effort
 	}
-	return float64(effortDaysFor(effort, effortToDays)) * HoursPerDay
+	return effortDaysFor(effort, effortToDays) * HoursPerDay
 }
 
 // inHoursScope reports whether a ticket counts toward the committed hours
@@ -53,7 +53,7 @@ type HoursBudget struct {
 
 // ComputeHoursBudget sums projected (effort-based) and spent (logged) hours
 // across a project's committed tickets.
-func ComputeHoursBudget(tickets []*ticket.Ticket, effortToDays map[string]int) HoursBudget {
+func ComputeHoursBudget(tickets []*ticket.Ticket, effortToDays map[string]float64) HoursBudget {
 	var b HoursBudget
 	for _, t := range tickets {
 		if !inHoursScope(t) {
@@ -162,7 +162,7 @@ type EstimateVariance struct {
 }
 
 // ComputeEstimateVariance builds the over/under-the-budget report.
-func ComputeEstimateVariance(tickets []*ticket.Ticket, effortToDays map[string]int) EstimateVariance {
+func ComputeEstimateVariance(tickets []*ticket.Ticket, effortToDays map[string]float64) EstimateVariance {
 	var v EstimateVariance
 	for _, t := range tickets {
 		if !inHoursScope(t) {

@@ -18,16 +18,16 @@ const HoursPerDay = 8.0
 type ConflictTicket struct {
 	TicketID  string  `json:"ticket_id"`
 	Title     string  `json:"title"`
-	Hours     float64 `json:"hours"`        // hours this ticket contributes on the conflict day
-	StartDate string  `json:"start_date"`   // planned_start_date
-	DueDate   string  `json:"due_date"`     // due_date
+	Hours     float64 `json:"hours"`      // hours this ticket contributes on the conflict day
+	StartDate string  `json:"start_date"` // planned_start_date
+	DueDate   string  `json:"due_date"`   // due_date
 }
 
 // ConflictDay is a single (resource, date) where assigned hours exceed capacity.
 type ConflictDay struct {
-	Date          string           `json:"date"`            // YYYY-MM-DD
-	AssignedHours float64          `json:"assigned_hours"`  // sum of all contributing tickets
-	CapacityHours float64          `json:"capacity_hours"`  // the resource's daily availability
+	Date          string           `json:"date"`           // YYYY-MM-DD
+	AssignedHours float64          `json:"assigned_hours"` // sum of all contributing tickets
+	CapacityHours float64          `json:"capacity_hours"` // the resource's daily availability
 	OverByHours   float64          `json:"over_by_hours"`
 	Tickets       []ConflictTicket `json:"tickets"`
 }
@@ -52,10 +52,10 @@ type ScheduleWarning struct {
 // per-day totals reflect only the tickets in that phase — useful when the PM
 // wants to fix one phase at a time.
 type PhaseConflictSummary struct {
-	Phase           string              `json:"phase"`            // "" for tickets with no phase
-	Label           string              `json:"label"`            // human-readable, e.g. "Phase 1" or "(no phase)"
+	Phase           string              `json:"phase"` // "" for tickets with no phase
+	Label           string              `json:"label"` // human-readable, e.g. "Phase 1" or "(no phase)"
 	TicketsAnalyzed int                 `json:"tickets_analyzed"`
-	DaysOver        int                 `json:"days_over"`        // total over-allocated day-cells across resources
+	DaysOver        int                 `json:"days_over"` // total over-allocated day-cells across resources
 	Conflicts       []ResourceConflicts `json:"conflicts"`
 	Warnings        []ScheduleWarning   `json:"warnings"`
 }
@@ -74,7 +74,7 @@ type ConflictReport struct {
 
 // effortDaysFor returns the configured planned-days for a t-shirt size, falling
 // back to the project's effort_to_days map and then to defaults.
-func effortDaysFor(effort string, effortToDays map[string]int) int {
+func effortDaysFor(effort string, effortToDays map[string]float64) float64 {
 	if effort == "" {
 		return 0
 	}
@@ -113,7 +113,7 @@ func businessDaysBetween(start, end time.Time) int {
 //
 // PhaseSummaries break the same picture down per phase so the PM can fix one
 // phase at a time without seeing tickets from later phases.
-func CheckScheduleConflicts(tickets []*ticket.Ticket, resources []ticket.Resource, effortToDays map[string]int, now time.Time) ConflictReport {
+func CheckScheduleConflicts(tickets []*ticket.Ticket, resources []ticket.Resource, effortToDays map[string]float64, now time.Time) ConflictReport {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
@@ -188,7 +188,7 @@ func CheckScheduleConflicts(tickets []*ticket.Ticket, resources []ticket.Resourc
 // analyzeTickets is the conflict-detection core. Pure: given a (possibly
 // pre-filtered) ticket slice, returns the conflicts, the skip-warnings, and
 // the count of tickets actually analyzed.
-func analyzeTickets(tickets []*ticket.Ticket, resources []ticket.Resource, effortToDays map[string]int) ([]ResourceConflicts, []ScheduleWarning, int) {
+func analyzeTickets(tickets []*ticket.Ticket, resources []ticket.Resource, effortToDays map[string]float64) ([]ResourceConflicts, []ScheduleWarning, int) {
 	// Index resources by email for quick lookup.
 	resByEmail := map[string]ticket.Resource{}
 	for _, r := range resources {
@@ -254,7 +254,7 @@ func analyzeTickets(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 			})
 			continue
 		}
-		totalHours := float64(days) * HoursPerDay
+		totalHours := days * HoursPerDay
 		dailyHours := totalHours / float64(span)
 
 		// Distribute the daily-hours load over every business day in the span.

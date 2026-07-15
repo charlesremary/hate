@@ -59,7 +59,7 @@ func TestPhaseRollup(t *testing.T) {
 			p.TicketCount, p.CompleteCount, p.InProgressCount, p.NotStartedCount, p.CancelledCount)
 	}
 	if p.TotalEffortDays != 13 || p.DoneEffortDays != 8 {
-		t.Errorf("phase 1 effort: done=%d total=%d, want 8/13", p.DoneEffortDays, p.TotalEffortDays)
+		t.Errorf("phase 1 effort: done=%g total=%g, want 8/13", p.DoneEffortDays, p.TotalEffortDays)
 	}
 	if p.PlannedStart != "2026-01-05" || p.DueDate != "2026-02-01" {
 		t.Errorf("phase 1 dates: start=%q due=%q, want 2026-01-05 → 2026-02-01", p.PlannedStart, p.DueDate)

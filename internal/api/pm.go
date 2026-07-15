@@ -256,7 +256,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg, err := ticket.ReadConfig(root)
 		projectName := projectID
-		var effortToDays map[string]int
+		var effortToDays map[string]float64
 		if err == nil {
 			if cfg.ProjectName != "" {
 				projectName = cfg.ProjectName
@@ -288,7 +288,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		costTickets = []*ticket.Ticket{}
 	}
-	var effortToDays map[string]int
+	var effortToDays map[string]float64
 	if cfg, err := ticket.ReadConfig(root); err == nil {
 		effortToDays = cfg.EffortToDays
 	}
