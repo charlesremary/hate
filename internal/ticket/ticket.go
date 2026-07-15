@@ -768,8 +768,10 @@ func roundToQuarter(hours float64) float64 {
 	return math.Round(hours/0.25) * 0.25
 }
 
-// AddTimeEntry adds a time entry to a ticket.
-func AddTimeEntry(repoRoot, ticketID, date string, hours float64, description, author string) (*Ticket, error) {
+// AddTimeEntry adds a time entry to a ticket. extendReason is non-empty only
+// when the entry was authorized past the ticket's allotment under strict time
+// enforcement; it is recorded on the entry and in the activity detail.
+func AddTimeEntry(repoRoot, ticketID, date string, hours float64, description, author, extendReason string) (*Ticket, error) {
 	if err := ValidateDate(date); err != nil {
 		return nil, err
 	}
@@ -784,14 +786,19 @@ func AddTimeEntry(repoRoot, ticketID, date string, hours float64, description, a
 	}
 	entryID := fmt.Sprintf("t%d", len(t.TimeEntries)+1)
 	t.TimeEntries = append(t.TimeEntries, TimeEntry{
-		ID:          entryID,
-		Date:        date,
-		Hours:       hours,
-		Description: description,
-		Author:      author,
-		LoggedAt:    NowISO(),
+		ID:           entryID,
+		Date:         date,
+		Hours:        hours,
+		Description:  description,
+		Author:       author,
+		LoggedAt:     NowISO(),
+		ExtendReason: extendReason,
 	})
-	addActivity(t, author, "time_logged", fmt.Sprintf("%gh on %s: %s", hours, date, description))
+	detail := fmt.Sprintf("%gh on %s: %s", hours, date, description)
+	if extendReason != "" {
+		detail += fmt.Sprintf(" (extended past allotment — authorized: %s)", extendReason)
+	}
+	addActivity(t, author, "time_logged", detail)
 	if err := WriteTicket(repoRoot, t); err != nil {
 		return nil, err
 	}

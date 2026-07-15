@@ -1049,22 +1049,82 @@ function showTimeBox(id) {
   if (box) box.classList.toggle('hidden');
 }
 
+// Holds a time log that was blocked by strict enforcement, pending the
+// extension authorization from the modal.
+let pendingTimeExtend = null;
+
 async function submitTimeEntry(id) {
   const date = document.getElementById(`time-date-${id}`)?.value;
   const hours = parseFloat(document.getElementById(`time-hours-${id}`)?.value);
   const desc = document.getElementById(`time-desc-${id}`)?.value?.trim();
   if (!date || !hours || !desc) { showToast('Fill in date, hours, and description', 'error'); return; }
+  await postTimeEntry(id, { date, hours, description: desc });
+}
+
+// postTimeEntry sends the log via a raw fetch so it can detect the strict-mode
+// 409 (needs_time_extension) and open the authorization modal. When `extend`
+// is provided, it re-sends with the authorization attached.
+async function postTimeEntry(id, { date, hours, description, extend }) {
+  const body = { date, hours, description, author: currentUser?.email || '' };
+  if (extend) { body.extend_authorized = true; body.extend_reason = extend; }
   try {
-    const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/time`, { date, hours, description: desc, author: currentUser?.email || '' });
+    const r = await fetch(`/api/projects/${currentProject.id}/tickets/${id}/time`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      if (data.needs_time_extension) {
+        openTimeExtendModal(id, { date, hours, description }, data);
+        return;
+      }
+      throw new Error(data.detail || r.statusText);
+    }
     showToast(`Logged ${hours}h`);
-    renderTicketPanel(t);
-    // If this log was to satisfy a gated promote, finish the promote now.
+    renderTicketPanel(data);
     if (pendingPromoteAfterLog === id) {
       pendingPromoteAfterLog = null;
       promoteTicket(id);
     }
   } catch (e) { showToast(e.message, 'error'); }
 }
+
+function openTimeExtendModal(id, entry, info) {
+  pendingTimeExtend = { id, entry };
+  const over = (info.would_be_hours - info.allotted_hours);
+  document.getElementById('te-context').innerHTML =
+    `Logging <strong>${entry.hours}h</strong> brings <strong>${id}</strong> to ` +
+    `<strong>${info.would_be_hours}h</strong> — <strong>${(+over.toFixed(2))}h over</strong> its ` +
+    `${info.allotted_hours}h allotment. Confirm you're authorized to extend and record why.`;
+  document.getElementById('te-authorized').checked = false;
+  document.getElementById('te-reason').value = '';
+  document.getElementById('time-extend-overlay').classList.remove('hidden');
+  document.getElementById('te-reason').focus();
+}
+
+function closeTimeExtendModal() {
+  document.getElementById('time-extend-overlay').classList.add('hidden');
+  pendingTimeExtend = null;
+}
+
+document.getElementById('btn-cancel-time-extend').addEventListener('click', closeTimeExtendModal);
+document.getElementById('time-extend-overlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('time-extend-overlay')) closeTimeExtendModal();
+});
+document.getElementById('time-extend-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!pendingTimeExtend) return;
+  const reason = document.getElementById('te-reason').value.trim();
+  if (!document.getElementById('te-authorized').checked || !reason) {
+    showToast('Check the authorization box and enter a reason', 'error');
+    return;
+  }
+  const { id, entry } = pendingTimeExtend;
+  document.getElementById('time-extend-overlay').classList.add('hidden');
+  pendingTimeExtend = null;
+  postTimeEntry(id, { ...entry, extend: reason });
+});
 
 async function deleteTimeEntry(ticketId, entryId) {
   try {
@@ -1824,6 +1884,9 @@ async function loadEffortSizingSection() {
   const mhInputs = document.getElementById('max-hours-inputs');
   const mhEmpty = document.getElementById('max-hours-empty');
   const mhProj = document.getElementById('max-hours-project');
+  const stInputs = document.getElementById('strict-time-inputs');
+  const stEmpty = document.getElementById('strict-time-empty');
+  const stProj = document.getElementById('strict-time-project');
   if (!currentProject) {
     inputs.classList.add('hidden');
     note.classList.add('hidden');
@@ -1832,10 +1895,14 @@ async function loadEffortSizingSection() {
     mhInputs.classList.add('hidden');
     mhEmpty.classList.remove('hidden');
     mhProj.textContent = '';
+    stInputs.classList.add('hidden');
+    stEmpty.classList.remove('hidden');
+    stProj.textContent = '';
     return;
   }
   projLabel.textContent = `— ${currentProject.name || currentProject.id}`;
   mhProj.textContent = `— ${currentProject.name || currentProject.id}`;
+  stProj.textContent = `— ${currentProject.name || currentProject.id}`;
   try {
     const data = await API.get(`/api/projects/${currentProject.id}/effort-to-days`);
     const m = data.effort_to_days || {};
@@ -1851,6 +1918,12 @@ async function loadEffortSizingSection() {
     document.getElementById('max-hours').value = (mh.max_hours ?? '') === null ? '' : (mh.max_hours ?? '');
     mhEmpty.classList.add('hidden');
     mhInputs.classList.remove('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
+  try {
+    const st = await API.get(`/api/projects/${currentProject.id}/strict-time`);
+    document.getElementById('strict-time').checked = !!st.strict_time_enforcement;
+    stEmpty.classList.add('hidden');
+    stInputs.classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
 }
 
@@ -1902,6 +1975,11 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         maxHours = v;
       }
       await API.put(`/api/projects/${currentProject.id}/max-hours`, { max_hours: maxHours });
+    }
+    if (currentProject && !document.getElementById('strict-time-inputs').classList.contains('hidden')) {
+      await API.put(`/api/projects/${currentProject.id}/strict-time`, {
+        strict_time_enforcement: document.getElementById('strict-time').checked,
+      });
     }
     showToast('Settings saved');
     showBilling = body.show_billing;

@@ -14,11 +14,11 @@ const SchemaVersion = "1.0.0"
 
 // Enum slices matching the Python system exactly.
 var (
-	TicketTypes      = []string{"task", "dev_task", "design_task", "meeting", "administration"}
-	Statuses         = []string{"not_started", "in_progress", "dev_complete", "qa_testing", "submitted_for_review", "approved", "complete", "closed", "rework", "blocked"}
-	Priorities       = []string{"critical", "high", "medium", "low"}
-	Efforts          = []string{"xs", "s", "m", "l", "xl"}
-	DefectSeverities = []string{"critical", "major", "minor", "trivial"}
+	TicketTypes       = []string{"task", "dev_task", "design_task", "meeting", "administration"}
+	Statuses          = []string{"not_started", "in_progress", "dev_complete", "qa_testing", "submitted_for_review", "approved", "complete", "closed", "rework", "blocked"}
+	Priorities        = []string{"critical", "high", "medium", "low"}
+	Efforts           = []string{"xs", "s", "m", "l", "xl"}
+	DefectSeverities  = []string{"critical", "major", "minor", "trivial"}
 	AutoCompleteTypes = []string{"meeting", "administration"}
 
 	ActivityActions = []string{
@@ -93,6 +93,9 @@ type TimeEntry struct {
 	Description string  `json:"description"`
 	Author      string  `json:"author"`
 	LoggedAt    string  `json:"logged_at"`
+	// ExtendReason is set when this entry was logged past the ticket's effort
+	// allotment under strict time enforcement — the recorded authorization.
+	ExtendReason string `json:"extend_reason,omitempty"`
 }
 
 // Attachment represents a file attached to a ticket. The file itself is stored

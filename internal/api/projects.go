@@ -109,6 +109,8 @@ func RegisterProjectRoutes(r chi.Router) {
 			r.Put("/effort-to-days", updateEffortToDays)
 			r.Get("/max-hours", getMaxHours)
 			r.Put("/max-hours", updateMaxHours)
+			r.Get("/strict-time", getStrictTime)
+			r.Put("/strict-time", updateStrictTime)
 			r.Post("/close", closeProject)
 			r.Post("/reopen", reopenProject)
 			r.Patch("/info", updateProjectInfo)
@@ -887,6 +889,48 @@ func updateMaxHours(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{"max_hours": cfg.MaxHours})
+}
+
+// getStrictTime handles GET /api/projects/{projectId}/strict-time.
+func getStrictTime(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"strict_time_enforcement": cfg.StrictTimeEnforcement})
+}
+
+// updateStrictTime handles PUT /api/projects/{projectId}/strict-time.
+// Body: {"strict_time_enforcement": bool}.
+func updateStrictTime(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	var req struct {
+		StrictTimeEnforcement bool `json:"strict_time_enforcement"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cfg.StrictTimeEnforcement = req.StrictTimeEnforcement
+	if err := ticket.WriteConfig(root, cfg); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"strict_time_enforcement": cfg.StrictTimeEnforcement})
 }
 
 // updateProjectInfo handles PATCH /api/projects/{projectId}/info. Currently

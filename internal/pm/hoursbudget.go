@@ -27,6 +27,13 @@ func estimateHours(t *ticket.Ticket, effortToDays map[string]float64) float64 {
 	return effortDaysFor(effort, effortToDays) * HoursPerDay
 }
 
+// EffortHours returns the allotted hours for an effort size (days × HoursPerDay),
+// or 0 when the size is empty/unknown. Same basis as the estimate-variance math,
+// exported so the time-log gate enforces against the same number.
+func EffortHours(effort string, effortToDays map[string]float64) float64 {
+	return effortDaysFor(effort, effortToDays) * HoursPerDay
+}
+
 // inHoursScope reports whether a ticket counts toward the committed hours
 // budget. Cancelled (descoped) and backlog (uncommitted) tickets are excluded,
 // matching the phase-rollup / baseline conventions.

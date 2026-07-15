@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hate/internal/config"
+	"hate/internal/pm"
 	"hate/internal/ticket"
 )
 
@@ -117,6 +118,10 @@ type TimeEntryRequest struct {
 	Hours       float64 `json:"hours"`
 	Description string  `json:"description"`
 	Author      *string `json:"author"`
+	// ExtendAuthorized / ExtendReason authorize a log past the ticket's effort
+	// allotment under strict time enforcement (see handleAddTimeEntry).
+	ExtendAuthorized bool   `json:"extend_authorized"`
+	ExtendReason     string `json:"extend_reason"`
 }
 
 // PredecessorRequest matches the Python PredecessorRequest model.
@@ -615,7 +620,42 @@ func handleAddTimeEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	author := strVal(req.Author)
-	tk, err := ticket.AddTimeEntry(root, ticketID, req.Date, req.Hours, req.Description, author)
+	extendReason := ""
+
+	// Strict time enforcement: block a log that would push a sized ticket past
+	// its effort allotment unless the logger confirms authorization + a reason.
+	if cfg, err := ticket.ReadConfig(root); err == nil && cfg.StrictTimeEnforcement {
+		if tk, err := ticket.ReadTicket(root, ticketID); err == nil {
+			effort := ""
+			if tk.Effort != nil {
+				effort = *tk.Effort
+			}
+			allot := pm.EffortHours(effort, cfg.EffortToDays)
+			if allot > 0 { // unsized tickets have no allotment to enforce
+				var spent float64
+				for _, te := range tk.TimeEntries {
+					spent += te.Hours
+				}
+				if spent+req.Hours > allot {
+					reason := strings.TrimSpace(req.ExtendReason)
+					if !req.ExtendAuthorized || reason == "" {
+						respondJSON(w, http.StatusConflict, map[string]interface{}{
+							"detail": fmt.Sprintf("This log brings %s to %gh, past its %gh allotment. Authorization required to extend.",
+								ticketID, spent+req.Hours, allot),
+							"needs_time_extension": true,
+							"allotted_hours":       allot,
+							"spent_hours":          spent,
+							"would_be_hours":       spent + req.Hours,
+						})
+						return
+					}
+					extendReason = reason
+				}
+			}
+		}
+	}
+
+	tk, err := ticket.AddTimeEntry(root, ticketID, req.Date, req.Hours, req.Description, author, extendReason)
 	if err != nil {
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return

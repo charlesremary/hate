@@ -82,6 +82,10 @@ type ProjectConfig struct {
 	// set, the dashboard tracks logged hours against it (consumed vs remaining).
 	// nil = no cap set.
 	MaxHours *float64 `json:"max_hours,omitempty"`
+	// StrictTimeEnforcement, when true, blocks a time log that would push a sized
+	// ticket past its effort-based allotment unless the logger confirms they're
+	// authorized to extend and records a reason. false = log freely.
+	StrictTimeEnforcement bool `json:"strict_time_enforcement,omitempty"`
 }
 
 // IsClosed reports whether the project's ClosedAt field is set.
