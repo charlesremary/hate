@@ -49,8 +49,8 @@ func TestComputeHoursBudget(t *testing.T) {
 	if b.UnsizedTickets != 1 || b.UnsizedHours != 7 {
 		t.Errorf("unsized = %d/%.1fh, want 1/7.0h", b.UnsizedTickets, b.UnsizedHours)
 	}
-	if b.ExcludedCount != 2 {
-		t.Errorf("excluded = %d, want 2", b.ExcludedCount)
+	if b.ExcludedCount != 2 || b.ExcludedHours != 200 { // E + F, 100h each
+		t.Errorf("excluded = %d/%.1fh, want 2/200.0h", b.ExcludedCount, b.ExcludedHours)
 	}
 }
 

@@ -48,6 +48,7 @@ type HoursBudget struct {
 	UnsizedTickets int     `json:"unsized_tickets"` // in-scope tickets with no effort size
 	UnsizedHours   float64 `json:"unsized_hours"`   // hours logged on those unsized tickets
 	ExcludedCount  int     `json:"excluded_count"`  // cancelled/backlog tickets left out of scope
+	ExcludedHours  float64 `json:"excluded_hours"`  // hours logged on those excluded tickets
 }
 
 // ComputeHoursBudget sums projected (effort-based) and spent (logged) hours
@@ -57,6 +58,7 @@ func ComputeHoursBudget(tickets []*ticket.Ticket, effortToDays map[string]int) H
 	for _, t := range tickets {
 		if !inHoursScope(t) {
 			b.ExcludedCount++
+			b.ExcludedHours += cosmicLoggedHours(t)
 			continue
 		}
 		spent := cosmicLoggedHours(t)
@@ -94,8 +96,8 @@ func RenderHoursBudgetHTML(b HoursBudget) string {
 	}
 	if b.ExcludedCount > 0 {
 		notes = append(notes, fmt.Sprintf(
-			"%d cancelled/backlog ticket%s excluded from the committed budget.",
-			b.ExcludedCount, plural(b.ExcludedCount)))
+			"%d cancelled/backlog ticket%s (%.1fh logged on descoped work) excluded from the committed budget.",
+			b.ExcludedCount, plural(b.ExcludedCount), b.ExcludedHours))
 	}
 	notes = append(notes, "Projected hours are derived from t-shirt effort sizing, not a precise estimate.")
 	noteHTML := `<p style="font-size:12px;color:#999;margin-top:10px">` +
