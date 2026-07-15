@@ -267,6 +267,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 			adminHours = cfg.AdminHours
 		}
 		reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, workHours, adminHours)) +
+			pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(tickets, effortToDays)) +
 			pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(tickets, effortToDays)) +
 			pm.RenderOverridesHTML(pm.ComputeOverrides(tickets)) +
 			pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
@@ -300,6 +301,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		adminHours = cfg.AdminHours
 	}
 	reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, workHours, adminHours)) +
+		pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(costTickets, effortToDays)) +
 		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, effortToDays)) +
 		pm.RenderOverridesHTML(pm.ComputeOverrides(costTickets)) +
 		pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))

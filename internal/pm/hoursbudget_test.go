@@ -87,6 +87,30 @@ func TestComputeEstimateVariance(t *testing.T) {
 	}
 }
 
+// TestComputeHoursAtRisk lists active sized tickets at ≥90% of allotment,
+// including over 100%, most-consumed first; completed/unsized are excluded.
+func TestComputeHoursAtRisk(t *testing.T) {
+	xs := "xs" // 1 day → 8h allotment at HoursPerDay=8
+	tickets := []*ticket.Ticket{
+		{ID: "NEAR", Effort: &xs, Status: "in_progress", TimeEntries: te(7.5)}, // 93.8% → in
+		{ID: "OVER", Effort: &xs, Status: "in_progress", TimeEntries: te(10)},  // 125% → in
+		{ID: "LOW", Effort: &xs, Status: "in_progress", TimeEntries: te(4)},    // 50% → out
+		{ID: "DONE", Effort: &xs, Status: "complete", TimeEntries: te(8)},      // completed → out
+		{ID: "UNSIZED", Status: "in_progress", TimeEntries: te(99)},            // no allotment → out
+	}
+
+	rows := ComputeHoursAtRisk(tickets, ticket.DefaultEffortToDays)
+	if len(rows) != 2 {
+		t.Fatalf("got %d at-risk rows, want 2 (%+v)", len(rows), rows)
+	}
+	if rows[0].TicketID != "OVER" || rows[1].TicketID != "NEAR" { // most-consumed first
+		t.Errorf("order = %s,%s, want OVER,NEAR", rows[0].TicketID, rows[1].TicketID)
+	}
+	if rows[1].Allocated != 8 || rows[1].PercentUsed != 93.8 {
+		t.Errorf("NEAR = %.1fh alloc / %.1f%%, want 8 / 93.8", rows[1].Allocated, rows[1].PercentUsed)
+	}
+}
+
 // TestComputeOverrides collects only entries carrying an authorization reason,
 // most recent first.
 func TestComputeOverrides(t *testing.T) {

@@ -322,6 +322,100 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
 }
 
 // ---------------------------------------------------------------------------
+// Feature: hours-at-risk watchlist (active tickets near their allotment)
+// ---------------------------------------------------------------------------
+
+// hoursAtRiskThreshold is the % of a ticket's allotment at which it lands on the
+// watchlist.
+const hoursAtRiskThreshold = 90.0
+
+// HoursAtRiskRow is one active ticket at or past the at-risk threshold.
+type HoursAtRiskRow struct {
+	TicketID    string  `json:"ticket_id"`
+	Title       string  `json:"title"`
+	Status      string  `json:"status"`
+	Allocated   float64 `json:"allocated_hours"`
+	Spent       float64 `json:"spent_hours"`
+	PercentUsed float64 `json:"percent_used"`
+}
+
+// ComputeHoursAtRisk lists active (not completed/closed, not backlog) sized
+// tickets whose logged hours are ≥90% of their allotment — including those
+// already over 100% — most-consumed first.
+func ComputeHoursAtRisk(tickets []*ticket.Ticket, effortToDays map[string]float64) []HoursAtRiskRow {
+	var rows []HoursAtRiskRow
+	for _, t := range tickets {
+		if ticket.Contains(ticket.ClosedStatuses, t.Status) || ticket.IsBacklog(t) {
+			continue // only active work is actionable
+		}
+		effort := ""
+		if t.Effort != nil {
+			effort = *t.Effort
+		}
+		allot := EffortHours(effort, effortToDays)
+		if allot <= 0 {
+			continue // no allotment to be at risk against
+		}
+		spent := cosmicLoggedHours(t)
+		pct := round1(spent / allot * 100)
+		if pct < hoursAtRiskThreshold {
+			continue
+		}
+		rows = append(rows, HoursAtRiskRow{
+			TicketID: t.ID, Title: t.Title, Status: t.Status,
+			Allocated: allot, Spent: spent, PercentUsed: pct,
+		})
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].PercentUsed > rows[j].PercentUsed })
+	return rows
+}
+
+// RenderHoursAtRiskHTML renders the hours-at-risk watchlist. Always shown (with
+// an all-clear empty state) — it's a standing PM watchlist.
+func RenderHoursAtRiskHTML(rows []HoursAtRiskRow) string {
+	esc := html.EscapeString
+	body := ""
+	for _, r := range rows {
+		color := "#eab308" // approaching (90–100%)
+		if r.PercentUsed >= 100 {
+			color = "#ef4444" // over
+		}
+		remaining := r.Allocated - r.Spent
+		body += fmt.Sprintf(
+			`<tr>`+
+				`<td style="padding:6px 8px;white-space:nowrap">%s</td>`+
+				`<td style="padding:6px 8px">%s</td>`+
+				`<td style="padding:6px 8px;text-transform:uppercase;color:#999">%s</td>`+
+				`<td style="padding:6px 8px;text-align:right">%.1f</td>`+
+				`<td style="padding:6px 8px;text-align:right">%.1f</td>`+
+				`<td style="padding:6px 8px;text-align:right;color:%s;font-weight:600">%.0f%%</td>`+
+				`<td style="padding:6px 8px;text-align:right;color:%s">%+.1f</td></tr>`,
+			esc(r.TicketID), esc(r.Title), esc(strings.ReplaceAll(r.Status, "_", " ")),
+			r.Allocated, r.Spent, color, r.PercentUsed, color, remaining)
+	}
+	inner := ""
+	if body == "" {
+		inner = `<p style="padding:4px 0;color:#999;font-size:13px">No active tickets are near their allocated hours.</p>`
+	} else {
+		inner = fmt.Sprintf(`<table style="width:100%%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="text-align:left;color:#666;border-bottom:1px solid #eee">
+      <th style="padding:6px 8px">Ticket</th>
+      <th style="padding:6px 8px">Title</th>
+      <th style="padding:6px 8px">Status</th>
+      <th style="padding:6px 8px;text-align:right">Allocated</th>
+      <th style="padding:6px 8px;text-align:right">Logged</th>
+      <th style="padding:6px 8px;text-align:right">Used</th>
+      <th style="padding:6px 8px;text-align:right">Remaining</th>
+    </tr></thead><tbody>%s</tbody></table>`, body)
+	}
+	return fmt.Sprintf(`
+<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+  <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:12px">Hours at risk &mdash; active tickets &ge;90%% of allotment</h3>
+  %s
+</div>`, inner)
+}
+
+// ---------------------------------------------------------------------------
 // Feature 3: authorized-override log (strict time enforcement)
 // ---------------------------------------------------------------------------
 

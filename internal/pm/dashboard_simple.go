@@ -121,47 +121,6 @@ func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName, c
 		))
 	}
 
-	// Ticket table rows
-	var tableRows strings.Builder
-	for _, t := range tickets {
-		hours := 0.0
-		for _, te := range t.TimeEntries {
-			hours += te.Hours
-		}
-		hoursStr := "\u2014"
-		if hours > 0 {
-			hoursStr = fmt.Sprintf("%.2f", hours)
-		}
-		assignee := "\u2014"
-		if t.Assignee != nil && *t.Assignee != "" {
-			assignee = *t.Assignee
-			if idx := strings.Index(assignee, "@"); idx >= 0 {
-				assignee = assignee[:idx]
-			}
-		}
-		due := "\u2014"
-		if t.DueDate != nil && *t.DueDate != "" {
-			due = *t.DueDate
-		}
-		statusLabel := strings.Title(strings.ReplaceAll(t.Status, "_", " "))
-		tableRows.WriteString(fmt.Sprintf(`<tr>
-            <td><strong>%s</strong></td>
-            <td>%s</td>
-            <td>%s</td>
-            <td>%s</td>
-            <td>%s</td>
-            <td>%s</td>
-            <td>%s</td>
-        </tr>`,
-			t.ID, t.Type, t.Title, statusLabel, assignee, hoursStr, due,
-		))
-	}
-
-	tableBody := tableRows.String()
-	if tableBody == "" {
-		tableBody = `<tr><td colspan="7" style="color:#999;padding:16px">No tickets yet.</td></tr>`
-	}
-
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -243,14 +202,6 @@ tr:hover td { background: #f5f5f5; }
     <button class="btn btn-primary" onclick="baselineNow()">Baseline Now</button>
 </div>
 
-<div class="section">
-    <h3>All Tickets</h3>
-    <table>
-        <thead><tr><th>ID</th><th>Type</th><th>Title</th><th>Status</th><th>Assignee</th><th>Hours</th><th>Due</th></tr></thead>
-        <tbody>%s</tbody>
-    </table>
-</div>
-
 <div id="toast" class="toast"></div>
 
 <script>
@@ -283,7 +234,6 @@ async function baselineNow() {
 		barSegments.String(),
 		legendItems.String(),
 		costHTML,
-		tableBody,
 		projectID,
 	)
 }
