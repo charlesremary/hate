@@ -107,8 +107,8 @@ func RegisterProjectRoutes(r chi.Router) {
 			r.Get("/whoami", whoami)
 			r.Get("/effort-to-days", getEffortToDays)
 			r.Put("/effort-to-days", updateEffortToDays)
-			r.Get("/max-hours", getMaxHours)
-			r.Put("/max-hours", updateMaxHours)
+			r.Get("/hour-budget", getHourBudget)
+			r.Put("/hour-budget", updateHourBudget)
 			r.Get("/strict-time", getStrictTime)
 			r.Put("/strict-time", updateStrictTime)
 			r.Get("/overview", getOverview)
@@ -845,9 +845,10 @@ func updateEffortToDays(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// getMaxHours handles GET /api/projects/{projectId}/max-hours.
-// Returns the project's hours cap (null when unset).
-func getMaxHours(w http.ResponseWriter, r *http.Request) {
+// getHourBudget handles GET /api/projects/{projectId}/hour-budget.
+// Returns the two hour pools (null when unset); work_hours migrates a legacy
+// max_hours value so old projects keep their cap.
+func getHourBudget(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
 	if !ok {
@@ -858,39 +859,51 @@ func getMaxHours(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]interface{}{"max_hours": cfg.MaxHours})
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"work_hours":  cfg.EffectiveWorkHours(),
+		"admin_hours": cfg.AdminHours,
+	})
 }
 
-// updateMaxHours handles PUT /api/projects/{projectId}/max-hours.
-// Body: {"max_hours": <number|null>}. A positive number sets the cap; null (or
-// omitted) clears it. Non-positive values are rejected.
-func updateMaxHours(w http.ResponseWriter, r *http.Request) {
+// updateHourBudget handles PUT /api/projects/{projectId}/hour-budget.
+// Body: {"work_hours": <number|null>, "admin_hours": <number|null>}. A positive
+// number sets a pool; null clears it; ≤ 0 is rejected. Saving clears any legacy
+// max_hours so it stops shadowing the new fields.
+func updateHourBudget(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
 	if !ok {
 		return
 	}
 	var req struct {
-		MaxHours *float64 `json:"max_hours"`
+		WorkHours  *float64 `json:"work_hours"`
+		AdminHours *float64 `json:"admin_hours"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.MaxHours != nil && *req.MaxHours <= 0 {
-		respondError(w, http.StatusBadRequest, "max_hours must be greater than 0 (or null to clear)")
-		return
+	for name, v := range map[string]*float64{"work_hours": req.WorkHours, "admin_hours": req.AdminHours} {
+		if v != nil && *v <= 0 {
+			respondError(w, http.StatusBadRequest, name+" must be greater than 0 (or null to clear)")
+			return
+		}
 	}
 	cfg, err := ticket.ReadConfig(root)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	cfg.MaxHours = req.MaxHours
+	cfg.WorkHours = req.WorkHours
+	cfg.AdminHours = req.AdminHours
+	cfg.MaxHours = nil // migrated into WorkHours; stop shadowing
 	if err := ticket.WriteConfig(root, cfg); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]interface{}{"max_hours": cfg.MaxHours})
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"work_hours":  cfg.WorkHours,
+		"admin_hours": cfg.AdminHours,
+	})
 }
 
 // getStrictTime handles GET /api/projects/{projectId}/strict-time.

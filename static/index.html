@@ -170,12 +170,16 @@
             </p>
           </fieldset>
           <fieldset id="max-hours-fieldset">
-            <legend>Maximum hours <span id="max-hours-project" style="font-weight:normal;color:#999"></span></legend>
-            <p id="max-hours-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to set its hours cap.</p>
+            <legend>Hour budget <span id="max-hours-project" style="font-weight:normal;color:#999"></span></legend>
+            <p id="max-hours-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to set its hour budget.</p>
             <div id="max-hours-inputs" class="hidden">
-              <label>Maximum hours (the total you bid) <input type="number" id="max-hours" min="0" step="0.25" placeholder="none"></label>
+              <div style="display:flex;gap:8px">
+                <label style="flex:1">Work hours <input type="number" id="work-hours" min="0" step="0.25" placeholder="none"></label>
+                <label style="flex:1">Admin / meeting hours <input type="number" id="admin-hours" min="0" step="0.25" placeholder="none"></label>
+              </div>
               <p style="font-size:12px;color:#999;margin:8px 0 0">
-                The dashboard tracks total logged hours against this cap. Leave blank to clear it.
+                Work covers task / dev / design tickets; Admin / meeting covers meeting &amp; administration tickets.
+                The dashboard burns each pool down separately. Leave a field blank to clear that pool.
               </p>
             </div>
           </fieldset>

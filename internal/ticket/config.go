@@ -111,9 +111,14 @@ type ProjectConfig struct {
 	// unset (no estimate entered yet).
 	EstimateHPerCFP *float64 `json:"estimate_h_per_cfp,omitempty"`
 	EstimateWrapPct *float64 `json:"estimate_wrap_pct,omitempty"`
-	// MaxHours is the project's hours cap — the total you bid / committed to. When
-	// set, the dashboard tracks logged hours against it (consumed vs remaining).
-	// nil = no cap set.
+	// WorkHours / AdminHours are the project's two hour pools: work (task,
+	// dev_task, design_task) and admin/meeting (administration, meeting). Their
+	// sum is the total hours available; the dashboard burns each down separately.
+	// nil = pool has no budget set.
+	WorkHours  *float64 `json:"work_hours,omitempty"`
+	AdminHours *float64 `json:"admin_hours,omitempty"`
+	// MaxHours is the deprecated single cap, kept so existing configs migrate:
+	// it seeds WorkHours until the budget is saved through the new settings.
 	MaxHours *float64 `json:"max_hours,omitempty"`
 	// StrictTimeEnforcement, when true, blocks a time log that would push a sized
 	// ticket past its effort-based allotment unless the logger confirms they're
@@ -128,6 +133,15 @@ type ProjectConfig struct {
 // IsClosed reports whether the project's ClosedAt field is set.
 func (c *ProjectConfig) IsClosed() bool {
 	return c != nil && c.ClosedAt != ""
+}
+
+// EffectiveWorkHours resolves the work-pool budget, falling back to the legacy
+// MaxHours cap so projects set before the work/admin split keep their value.
+func (c *ProjectConfig) EffectiveWorkHours() *float64 {
+	if c.WorkHours != nil {
+		return c.WorkHours
+	}
+	return c.MaxHours
 }
 
 // DefaultEffortToDays maps effort sizes to estimated days. Values are days and

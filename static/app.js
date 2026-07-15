@@ -2132,8 +2132,9 @@ async function loadEffortSizingSection() {
     note.classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
   try {
-    const mh = await API.get(`/api/projects/${currentProject.id}/max-hours`);
-    document.getElementById('max-hours').value = (mh.max_hours ?? '') === null ? '' : (mh.max_hours ?? '');
+    const hb = await API.get(`/api/projects/${currentProject.id}/hour-budget`);
+    document.getElementById('work-hours').value = hb.work_hours ?? '';
+    document.getElementById('admin-hours').value = hb.admin_hours ?? '';
     mhEmpty.classList.add('hidden');
     mhInputs.classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
@@ -2182,17 +2183,20 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
       }
     }
     if (currentProject && !document.getElementById('max-hours-inputs').classList.contains('hidden')) {
-      const raw = document.getElementById('max-hours').value.trim();
-      let maxHours = null; // blank clears the cap
-      if (raw !== '') {
+      // Blank clears a pool; a value must be > 0.
+      const parsePool = (id, label) => {
+        const raw = document.getElementById(id).value.trim();
+        if (raw === '') return null;
         const v = parseFloat(raw);
-        if (!Number.isFinite(v) || v <= 0) {
-          showToast('Maximum hours must be a number greater than 0 (or blank to clear)', 'error');
-          return;
-        }
-        maxHours = v;
-      }
-      await API.put(`/api/projects/${currentProject.id}/max-hours`, { max_hours: maxHours });
+        if (!Number.isFinite(v) || v <= 0) throw new Error(`${label} must be a number greater than 0 (or blank to clear)`);
+        return v;
+      };
+      let workHours, adminHours;
+      try {
+        workHours = parsePool('work-hours', 'Work hours');
+        adminHours = parsePool('admin-hours', 'Admin / meeting hours');
+      } catch (err) { showToast(err.message, 'error'); return; }
+      await API.put(`/api/projects/${currentProject.id}/hour-budget`, { work_hours: workHours, admin_hours: adminHours });
     }
     if (currentProject && !document.getElementById('strict-time-inputs').classList.contains('hidden')) {
       await API.put(`/api/projects/${currentProject.id}/strict-time`, {

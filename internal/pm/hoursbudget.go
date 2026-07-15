@@ -42,99 +42,115 @@ func inHoursScope(t *ticket.Ticket) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Feature 1: hours budget (logged vs the project's maximum-hours cap)
+// Feature 1: hours budget — two pools (work vs admin/meeting) burned down
 // ---------------------------------------------------------------------------
 
-// HoursBudget tracks total logged hours against the project's maximum-hours cap
-// (the hours you bid / committed to). Every logged hour counts against the cap,
-// including hours on descoped work — a bid is a hard ceiling on total effort.
+// isAdminMeeting reports whether a ticket draws from the admin/meeting pool
+// (administration + meeting) rather than the work pool.
+func isAdminMeeting(t *ticket.Ticket) bool {
+	return t.Type == "administration" || t.Type == "meeting"
+}
+
+// PoolBudget is one hour pool's burn-down: logged hours vs its budget.
+type PoolBudget struct {
+	Budget      *float64 `json:"budget"`       // nil when no budget set
+	Spent       float64  `json:"spent"`        // Σ logged hours in this pool
+	Remaining   float64  `json:"remaining"`    // Budget − Spent (0 when no budget)
+	PercentUsed float64  `json:"percent_used"` // Spent ÷ Budget × 100 (0 when no budget)
+}
+
+func newPoolBudget(budget *float64, spent float64) PoolBudget {
+	p := PoolBudget{Budget: budget, Spent: spent}
+	if budget != nil && *budget > 0 {
+		p.Remaining = *budget - spent
+		p.PercentUsed = round1(spent / *budget * 100)
+	}
+	return p
+}
+
+// HoursBudget tracks logged hours against the project's two hour pools: work
+// (task/dev_task/design_task) and admin/meeting (administration/meeting).
 type HoursBudget struct {
-	MaxHours       *float64 `json:"max_hours"`       // the cap, nil when unset
-	SpentHours     float64  `json:"spent_hours"`     // Σ logged hours across all tickets
-	RemainingHours float64  `json:"remaining_hours"` // Max − Spent (0 when no cap)
-	PercentUsed    float64  `json:"percent_used"`    // Spent ÷ Max × 100 (0 when no cap)
+	Work  PoolBudget `json:"work"`
+	Admin PoolBudget `json:"admin"`
 }
 
-// ComputeHoursBudget sums every logged hour in the project and compares it to
-// the maximum-hours cap.
-func ComputeHoursBudget(tickets []*ticket.Ticket, maxHours *float64) HoursBudget {
-	b := HoursBudget{MaxHours: maxHours}
+// ComputeHoursBudget buckets every logged hour into the work or admin/meeting
+// pool by ticket type and compares each to its budget.
+func ComputeHoursBudget(tickets []*ticket.Ticket, workHours, adminHours *float64) HoursBudget {
+	var workSpent, adminSpent float64
 	for _, t := range tickets {
-		b.SpentHours += cosmicLoggedHours(t)
+		if isAdminMeeting(t) {
+			adminSpent += cosmicLoggedHours(t)
+		} else {
+			workSpent += cosmicLoggedHours(t)
+		}
 	}
-	if maxHours != nil && *maxHours > 0 {
-		b.RemainingHours = *maxHours - b.SpentHours
-		b.PercentUsed = round1(b.SpentHours / *maxHours * 100)
+	return HoursBudget{
+		Work:  newPoolBudget(workHours, workSpent),
+		Admin: newPoolBudget(adminHours, adminSpent),
 	}
-	return b
 }
 
-// RenderHoursBudgetHTML renders the "Hours Budget" summary. Self-styled to drop
-// into either dashboard flavor (same idiom as RenderProjectCostHTML).
-func RenderHoursBudgetHTML(b HoursBudget) string {
-	stat := func(value, label, color string) string {
-		style := "font-size:24px;font-weight:700;line-height:1.1"
+// renderPool renders one pool's row: a label, the stat blocks, and a bar.
+func renderPool(label string, p PoolBudget) string {
+	stat := func(value, sub, color string) string {
+		style := "font-size:22px;font-weight:700;line-height:1.1"
 		if color != "" {
 			style += ";color:" + color
 		}
 		return fmt.Sprintf(
-			`<div style="flex:1;min-width:120px"><div style="%s">%s</div><div style="font-size:12px;color:#666;margin-top:4px">%s</div></div>`,
-			style, value, label)
+			`<div style="flex:1;min-width:110px"><div style="%s">%s</div><div style="font-size:12px;color:#666;margin-top:3px">%s</div></div>`,
+			style, value, sub)
+	}
+	head := fmt.Sprintf(`<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#888;margin:0 0 8px">%s</div>`, label)
+
+	// No budget for this pool — just report the spend.
+	if p.Budget == nil || *p.Budget <= 0 {
+		return fmt.Sprintf(`<div style="margin-bottom:18px">%s<div style="display:flex;gap:20px;flex-wrap:wrap">%s</div><p style="font-size:12px;color:#999;margin-top:6px">No budget set for this pool.</p></div>`,
+			head, stat(fmt.Sprintf("%.1fh", p.Spent), "Spent", "#1976d2"))
 	}
 
-	header := `<h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:14px">Hours Budget &mdash; logged vs cap</h3>`
-
-	// No cap set — show the spend and prompt for a maximum.
-	if b.MaxHours == nil || *b.MaxHours <= 0 {
-		return fmt.Sprintf(`
-<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
-  %s
-  <div style="display:flex;gap:24px;flex-wrap:wrap">%s</div>
-  <p style="font-size:12px;color:#999;margin-top:10px">Set a <strong>Maximum hours</strong> for this project in Settings to track spend against your bid.</p>
-</div>`, header, stat(fmt.Sprintf("%.1fh", b.SpentHours), "Spent", "#1976d2"))
+	remColor, remLabel := "#22c55e", "Remaining"
+	if p.Remaining < 0 {
+		remColor, remLabel = "#ef4444", "Over budget"
 	}
-
-	remColor := "#22c55e" // under cap
-	remLabel := "Remaining"
-	if b.RemainingHours < 0 {
-		remColor = "#ef4444" // over cap
-		remLabel = "Over cap"
-	}
-	// Spend colour warms up as it approaches the ceiling.
 	spentColor := "#1976d2"
-	if b.PercentUsed >= 100 {
+	if p.PercentUsed >= 100 {
 		spentColor = "#ef4444"
-	} else if b.PercentUsed >= 85 {
+	} else if p.PercentUsed >= 85 {
 		spentColor = "#eab308"
 	}
-
-	// Progress bar toward the cap.
-	barPct := b.PercentUsed
+	barPct := p.PercentUsed
 	if barPct > 100 {
 		barPct = 100
 	}
-	bar := fmt.Sprintf(`
-  <div style="margin-top:14px">
-    <div style="height:8px;background:#eee;border-radius:4px;overflow:hidden">
-      <div style="height:100%%;width:%.1f%%;background:%s"></div>
-    </div>
-  </div>`, barPct, spentColor)
+	bar := fmt.Sprintf(`<div style="margin-top:12px"><div style="height:8px;background:#eee;border-radius:4px;overflow:hidden"><div style="height:100%%;width:%.1f%%;background:%s"></div></div></div>`, barPct, spentColor)
 
+	return fmt.Sprintf(`<div style="margin-bottom:18px">%s<div style="display:flex;gap:20px;flex-wrap:wrap">%s%s%s</div>%s</div>`,
+		head,
+		stat(fmt.Sprintf("%.1fh", *p.Budget), "Budget", ""),
+		stat(fmt.Sprintf("%.1fh", p.Spent), fmt.Sprintf("Spent (%.1f%%)", p.PercentUsed), spentColor),
+		stat(fmt.Sprintf("%+.1fh", p.Remaining), remLabel, remColor),
+		bar,
+	)
+}
+
+// RenderHoursBudgetHTML renders the two-pool "Hours Budget" summary. Self-styled
+// to drop into either dashboard flavor (same idiom as RenderProjectCostHTML).
+func RenderHoursBudgetHTML(b HoursBudget) string {
+	header := `<h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:14px">Hours Budget &mdash; logged vs available</h3>`
+	hint := ""
+	if (b.Work.Budget == nil || *b.Work.Budget <= 0) && (b.Admin.Budget == nil || *b.Admin.Budget <= 0) {
+		hint = `<p style="font-size:12px;color:#999;margin-top:2px">Set <strong>Work hours</strong> and <strong>Admin / meeting hours</strong> in Settings to track burn-down against each pool.</p>`
+	}
 	return fmt.Sprintf(`
 <div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
   %s
-  <div style="display:flex;gap:24px;flex-wrap:wrap">
-    %s
-    %s
-    %s
-  </div>%s
-</div>`,
-		header,
-		stat(fmt.Sprintf("%.1fh", *b.MaxHours), "Maximum hours", ""),
-		stat(fmt.Sprintf("%.1fh", b.SpentHours), fmt.Sprintf("Spent (%.1f%% of cap)", b.PercentUsed), spentColor),
-		stat(fmt.Sprintf("%+.1fh", b.RemainingHours), remLabel, remColor),
-		bar,
-	)
+  %s
+  %s
+  %s
+</div>`, header, renderPool("Work", b.Work), renderPool("Admin / meeting", b.Admin), hint)
 }
 
 // ---------------------------------------------------------------------------

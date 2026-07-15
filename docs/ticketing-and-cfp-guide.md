@@ -299,8 +299,10 @@ Conventions:
 | `GET /{projectId}/whoami` | Resolve the current user for this project. | — |
 | `GET /{projectId}/effort-to-days` | Effort-size → days map (+ defaults). | — |
 | `PUT /{projectId}/effort-to-days` | Set the map. All five sizes required, each ≥ 0.25 (quarter-day granularity). | `{"effort_to_days": {"xs":1,"s":2,"m":3,"l":5,"xl":8}}` |
-| `GET /{projectId}/max-hours` | The project's hours cap (`null` if unset). | — |
-| `PUT /{projectId}/max-hours` | Set/clear the hours cap (the total you bid). Positive sets it; `null` clears; ≤ 0 → 400. | `{"max_hours": 2000}` or `{"max_hours": null}` |
+| `GET /{projectId}/hour-budget` | The two hour pools (`null` if unset); `work_hours` migrates a legacy `max_hours`. | — |
+| `PUT /{projectId}/hour-budget` | Set/clear the work and admin/meeting pools. Positive sets; `null` clears; ≤ 0 → 400. | `{"work_hours": 400, "admin_hours": 100}` |
+| `GET /{projectId}/strict-time` · `PUT …/strict-time` | Read / set strict time enforcement (gate over-allotment time logs). | PUT: `{"strict_time_enforcement": true}` |
+| `GET /{projectId}/overview` · `PUT …/overview` | Read / replace the Project Overview content (contacts, links, instructions). | PUT: `{contacts:[…], links:[…], instructions:[…]}` |
 | `POST /{projectId}/close` · `POST …/reopen` | Close / reopen the project (closed rejects ticket writes). | — |
 | `PATCH /{projectId}/info` | Edit the project display name (id/prefix are immutable). | `{name}` |
 

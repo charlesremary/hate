@@ -14,39 +14,32 @@ func te(h float64) []ticket.TimeEntry {
 	return []ticket.TimeEntry{{Hours: h}}
 }
 
-// TestComputeHoursBudget checks logged hours vs the max-hours cap. Every logged
-// hour counts — including descoped work — since the cap is a hard ceiling on
-// total project effort.
+// TestComputeHoursBudget checks that logged hours bucket into the work vs
+// admin/meeting pools by ticket type and burn down each pool's budget.
 func TestComputeHoursBudget(t *testing.T) {
-	m, s := "m", "s"
-	cancel := "descoped"
-
 	tickets := []*ticket.Ticket{
-		{ID: "A", Effort: &m, Status: "complete", TimeEntries: te(30)},
-		{ID: "B", Effort: &s, Status: "in_progress", TimeEntries: te(5)},
-		// Descoped work still burned hours against the cap.
-		{ID: "C", Status: "closed", CancellationReason: &cancel, TimeEntries: te(10)},
+		{ID: "A", Type: "dev_task", TimeEntries: te(30)},      // work
+		{ID: "B", Type: "task", TimeEntries: te(10)},          // work
+		{ID: "C", Type: "meeting", TimeEntries: te(4)},        // admin/meeting
+		{ID: "D", Type: "administration", TimeEntries: te(2)}, // admin/meeting
 	}
 
-	max := 50.0
-	b := ComputeHoursBudget(tickets, &max)
-	if b.SpentHours != 45 { // 30 + 5 + 10
-		t.Errorf("spent = %.1f, want 45", b.SpentHours)
+	work, admin := 50.0, 8.0
+	b := ComputeHoursBudget(tickets, &work, &admin)
+	if b.Work.Spent != 40 || b.Work.Remaining != 10 || b.Work.PercentUsed != 80 { // 40/50
+		t.Errorf("work = spent %.1f/rem %.1f/pct %.1f, want 40/10/80", b.Work.Spent, b.Work.Remaining, b.Work.PercentUsed)
 	}
-	if b.RemainingHours != 5 { // 50 - 45
-		t.Errorf("remaining = %.1f, want 5", b.RemainingHours)
-	}
-	if b.PercentUsed != 90 { // 45/50
-		t.Errorf("percentUsed = %.1f, want 90", b.PercentUsed)
+	if b.Admin.Spent != 6 || b.Admin.Remaining != 2 || b.Admin.PercentUsed != 75 { // 6/8
+		t.Errorf("admin = spent %.1f/rem %.1f/pct %.1f, want 6/2/75", b.Admin.Spent, b.Admin.Remaining, b.Admin.PercentUsed)
 	}
 
-	// No cap set: spend still totals, but there's nothing to track against.
-	nb := ComputeHoursBudget(tickets, nil)
-	if nb.MaxHours != nil {
-		t.Errorf("maxHours = %v, want nil", nb.MaxHours)
+	// No budgets set: pools still total their spend, nothing to burn against.
+	nb := ComputeHoursBudget(tickets, nil, nil)
+	if nb.Work.Budget != nil || nb.Work.Spent != 40 || nb.Work.PercentUsed != 0 {
+		t.Errorf("no-budget work = %+v, want spent 40, pct 0, nil budget", nb.Work)
 	}
-	if nb.SpentHours != 45 || nb.RemainingHours != 0 || nb.PercentUsed != 0 {
-		t.Errorf("no-cap = spent %.1f/rem %.1f/pct %.1f, want 45/0/0", nb.SpentHours, nb.RemainingHours, nb.PercentUsed)
+	if nb.Admin.Spent != 6 {
+		t.Errorf("no-budget admin spent = %.1f, want 6", nb.Admin.Spent)
 	}
 }
 
