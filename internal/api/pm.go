@@ -267,6 +267,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, maxHours)) +
 			pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(tickets, effortToDays)) +
+			pm.RenderOverridesHTML(pm.ComputeOverrides(tickets)) +
 			pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
 		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, reportsHTML)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -298,6 +299,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, maxHours)) +
 		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, effortToDays)) +
+		pm.RenderOverridesHTML(pm.ComputeOverrides(costTickets)) +
 		pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))
 	html := pm.GenerateDashboard(snapshot, reportsHTML)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

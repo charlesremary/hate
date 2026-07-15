@@ -94,6 +94,31 @@ func TestComputeEstimateVariance(t *testing.T) {
 	}
 }
 
+// TestComputeOverrides collects only entries carrying an authorization reason,
+// most recent first.
+func TestComputeOverrides(t *testing.T) {
+	tickets := []*ticket.Ticket{
+		{ID: "A", Title: "Task A", TimeEntries: []ticket.TimeEntry{
+			{Date: "2026-07-01", Hours: 2, Author: "sam@x.com", LoggedAt: "2026-07-01T00:00:00Z"},                          // no reason → skip
+			{Date: "2026-07-03", Hours: 1, Author: "sam@x.com", ExtendReason: "boss ok", LoggedAt: "2026-07-03T00:00:00Z"}, // include
+		}},
+		{ID: "B", Title: "Task B", TimeEntries: []ticket.TimeEntry{
+			{Date: "2026-07-05", Hours: 3, Author: "kai@x.com", ExtendReason: "scope grew", LoggedAt: "2026-07-05T00:00:00Z"}, // include, newest
+		}},
+	}
+
+	rows := ComputeOverrides(tickets)
+	if len(rows) != 2 {
+		t.Fatalf("got %d override rows, want 2", len(rows))
+	}
+	if rows[0].TicketID != "B" || rows[0].Date != "2026-07-05" { // most recent first
+		t.Errorf("row[0] = %s/%s, want B/2026-07-05", rows[0].TicketID, rows[0].Date)
+	}
+	if rows[1].TicketID != "A" || rows[1].Reason != "boss ok" || rows[1].Author != "sam@x.com" {
+		t.Errorf("row[1] = %+v, want A / boss ok / sam@x.com", rows[1])
+	}
+}
+
 // TestEstimateVarianceSortOrder confirms the biggest miss surfaces first in each list.
 func TestEstimateVarianceSortOrder(t *testing.T) {
 	m, l := "m", "l" // 24h, 40h

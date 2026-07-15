@@ -304,3 +304,104 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
   <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:4px">Estimate Variance &mdash; over/under the sizing budget</h3>%s%s
 </div>`, inner, noteHTML)
 }
+
+// ---------------------------------------------------------------------------
+// Feature 3: authorized-override log (strict time enforcement)
+// ---------------------------------------------------------------------------
+
+// OverrideRow is one time entry that was authorized past a ticket's allotment.
+type OverrideRow struct {
+	TicketID string  `json:"ticket_id"`
+	Title    string  `json:"title"`
+	Date     string  `json:"date"`
+	Hours    float64 `json:"hours"`
+	Author   string  `json:"author"`
+	Reason   string  `json:"reason"`
+	loggedAt string  // for stable most-recent-first ordering
+}
+
+// ComputeOverrides collects every time entry logged past a ticket's allotment
+// under strict enforcement (i.e. carrying a recorded authorization reason),
+// most recent first.
+func ComputeOverrides(tickets []*ticket.Ticket) []OverrideRow {
+	var rows []OverrideRow
+	for _, t := range tickets {
+		for _, te := range t.TimeEntries {
+			if strings.TrimSpace(te.ExtendReason) == "" {
+				continue
+			}
+			rows = append(rows, OverrideRow{
+				TicketID: t.ID, Title: t.Title, Date: te.Date,
+				Hours: te.Hours, Author: te.Author, Reason: te.ExtendReason,
+				loggedAt: te.LoggedAt,
+			})
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Date != rows[j].Date {
+			return rows[i].Date > rows[j].Date
+		}
+		return rows[i].loggedAt > rows[j].loggedAt
+	})
+	return rows
+}
+
+// RenderOverridesHTML renders the "Authorized overrides" section. Returns "" when
+// there are none, so projects that never hit the gate get no empty table.
+func RenderOverridesHTML(rows []OverrideRow) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	esc := html.EscapeString
+	var body strings.Builder
+	var total float64
+	for _, r := range rows {
+		total += r.Hours
+		author := r.Author
+		if idx := strings.Index(author, "@"); idx >= 0 {
+			author = author[:idx]
+		}
+		if author == "" {
+			author = "—"
+		}
+		label := r.TicketID
+		if r.Title != "" {
+			label += " &mdash; " + esc(r.Title)
+		}
+		body.WriteString(fmt.Sprintf(
+			`<tr>`+
+				`<td style="padding:6px 8px;white-space:nowrap">%s</td>`+
+				`<td style="padding:6px 8px;white-space:nowrap">%s</td>`+
+				`<td style="padding:6px 8px;text-align:right">%.2f</td>`+
+				`<td style="padding:6px 8px;white-space:nowrap">%s</td>`+
+				`<td style="padding:6px 8px">%s</td></tr>`,
+			label, esc(r.Date), r.Hours, esc(author), esc(r.Reason)))
+	}
+	return fmt.Sprintf(`
+<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+  <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:12px">Authorized overrides &mdash; time logged past allotment</h3>
+  <table style="width:100%%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="text-align:left;color:#666;border-bottom:1px solid #eee">
+      <th style="padding:6px 8px">Ticket</th>
+      <th style="padding:6px 8px">Date</th>
+      <th style="padding:6px 8px;text-align:right">Hours</th>
+      <th style="padding:6px 8px">By</th>
+      <th style="padding:6px 8px">Reason</th>
+    </tr></thead>
+    <tbody>%s</tbody>
+    <tfoot><tr style="font-weight:700;border-top:2px solid #eee">
+      <td style="padding:6px 8px" colspan="2">%d override%s</td>
+      <td style="padding:6px 8px;text-align:right">%.1f</td>
+      <td style="padding:6px 8px" colspan="2">total extended</td>
+    </tr></tfoot>
+  </table>
+</div>`, body.String(), len(rows), pluralS(len(rows)), total)
+}
+
+// pluralS returns "s" unless n == 1.
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
