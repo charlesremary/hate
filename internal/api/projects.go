@@ -111,6 +111,8 @@ func RegisterProjectRoutes(r chi.Router) {
 			r.Put("/max-hours", updateMaxHours)
 			r.Get("/strict-time", getStrictTime)
 			r.Put("/strict-time", updateStrictTime)
+			r.Get("/overview", getOverview)
+			r.Put("/overview", updateOverview)
 			r.Post("/close", closeProject)
 			r.Post("/reopen", reopenProject)
 			r.Patch("/info", updateProjectInfo)

@@ -43,6 +43,39 @@ type GitIdentity struct {
 	Email string `json:"email"`
 }
 
+// Contact is a person on the project surfaced in the Project Overview tab.
+type Contact struct {
+	ID           string `json:"id"`
+	Type         string `json:"type"` // "internal" | "client"
+	Name         string `json:"name"`
+	Role         string `json:"role,omitempty"`
+	Company      string `json:"company,omitempty"`
+	Phone        string `json:"phone,omitempty"`
+	Email        string `json:"email,omitempty"`
+	ChatPlatform string `json:"chat_platform,omitempty"` // "slack" | "teams" | "other"
+	ChatHandle   string `json:"chat_handle,omitempty"`
+}
+
+// Link is a named URL (repo, drive, doc) on the Project Overview tab.
+type Link struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
+}
+
+// Instruction is a titled, Markdown note on the Project Overview tab.
+type Instruction struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+// ContactTypes / ChatPlatforms enumerate the allowed enum values.
+var (
+	ContactTypes  = []string{"internal", "client"}
+	ChatPlatforms = []string{"slack", "teams", "other"}
+)
+
 // TypeWorkflow defines the promote/demote transitions for one ticket type.
 // A status mapped to "_previous" returns the ticket to whatever status it held
 // before the current one (resolved from the activity log).
@@ -86,6 +119,10 @@ type ProjectConfig struct {
 	// ticket past its effort-based allotment unless the logger confirms they're
 	// authorized to extend and records a reason. false = log freely.
 	StrictTimeEnforcement bool `json:"strict_time_enforcement,omitempty"`
+	// Project Overview tab content — hand-maintained reference material.
+	Contacts     []Contact     `json:"contacts,omitempty"`
+	Links        []Link        `json:"links,omitempty"`
+	Instructions []Instruction `json:"instructions,omitempty"`
 }
 
 // IsClosed reports whether the project's ClosedAt field is set.

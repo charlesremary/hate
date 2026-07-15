@@ -421,11 +421,13 @@ function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.getElementById('tab-tickets').classList.toggle('hidden', tab !== 'tickets');
   document.getElementById('tab-dashboard').classList.toggle('hidden', tab !== 'dashboard');
+  document.getElementById('tab-overview').classList.toggle('hidden', tab !== 'overview');
   document.getElementById('tab-billing').classList.toggle('hidden', tab !== 'billing');
   document.getElementById('tab-cosmic').classList.toggle('hidden', tab !== 'cosmic');
 
   if (tab === 'tickets' && currentProject) loadTickets();
   if (tab === 'dashboard' && currentProject) loadDashboard();
+  if (tab === 'overview' && currentProject) loadOverview();
   if (tab === 'billing' && currentProject) loadBilling();
   if (tab === 'cosmic' && currentProject) loadCosmic();
 }
@@ -443,6 +445,222 @@ function applyCosmicVisibility() {
   const btn = document.querySelector('.tab[data-tab="cosmic"]');
   if (btn) btn.classList.toggle('hidden', !showCosmic);
   if (!showCosmic && currentTab === 'cosmic') switchTab('tickets');
+}
+
+// ── Project Overview ──────────────────────────────────
+// Per-project reference material: contacts, links, and general instructions.
+// The whole overview is replaced on every add/edit/delete (small hand lists).
+let overviewData = { contacts: [], links: [], instructions: [] };
+let overviewEditing = null; // { section, id } while a form is open
+
+function ovNewId() {
+  return (crypto.randomUUID ? crypto.randomUUID() : 'ov' + Math.random().toString(36).slice(2));
+}
+
+async function loadOverview() {
+  const el = document.getElementById('overview-content');
+  if (!currentProject) { el.innerHTML = '<p style="color:#999;padding:16px">Open a project to see its overview.</p>'; return; }
+  el.innerHTML = '<p style="color:#999;padding:16px">Loading…</p>';
+  overviewEditing = null;
+  try {
+    const d = await API.get(`/api/projects/${currentProject.id}/overview`);
+    overviewData = { contacts: d.contacts || [], links: d.links || [], instructions: d.instructions || [] };
+    renderOverview();
+  } catch (e) { el.innerHTML = `<p style="color:#c62828;padding:16px">${escapeHtml(e.message)}</p>`; }
+}
+
+async function ovPersist() {
+  const d = await API.put(`/api/projects/${currentProject.id}/overview`, overviewData);
+  overviewData = { contacts: d.contacts || [], links: d.links || [], instructions: d.instructions || [] };
+  overviewEditing = null;
+  renderOverview();
+  showToast('Overview saved');
+}
+
+function ovAdd(section) { overviewEditing = { section, id: null }; renderOverview(); }
+function ovEdit(section, id) { overviewEditing = { section, id }; renderOverview(); }
+function ovCancel() { overviewEditing = null; renderOverview(); }
+async function ovDelete(section, id) {
+  overviewData[section] = overviewData[section].filter(x => x.id !== id);
+  try { await ovPersist(); } catch (e) { showToast(e.message, 'error'); }
+}
+
+const OV_CARD = 'background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px';
+const OV_SEC = 'margin-bottom:28px;max-width:760px';
+
+function ovSectionHeader(title, section) {
+  return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <h3 style="font-size:15px;margin:0">${title}</h3>
+    <button class="btn-secondary" onclick="ovAdd('${section}')">+ Add</button>
+  </div>`;
+}
+
+function ovRowButtons(section, id) {
+  return `<div style="display:flex;gap:6px;flex-shrink:0">
+    <button class="btn-secondary" style="padding:2px 8px;font-size:12px" onclick="ovEdit('${section}','${id}')">Edit</button>
+    <button class="btn-secondary" style="padding:2px 8px;font-size:12px" onclick="ovDelete('${section}','${id}')">Delete</button>
+  </div>`;
+}
+
+function renderOverview() {
+  const el = document.getElementById('overview-content');
+  el.innerHTML = ovContactsSection() + ovLinksSection() + ovInstructionsSection();
+}
+
+// ── Contacts ──
+function ovContactsSection() {
+  const editing = overviewEditing && overviewEditing.section === 'contacts';
+  let items = overviewData.contacts.map(c => {
+    if (editing && overviewEditing.id === c.id) return ovContactForm(c);
+    const badge = c.type === 'client'
+      ? '<span class="badge s-blocked" style="font-size:10px">CLIENT</span>'
+      : '<span class="badge s-in_progress" style="font-size:10px">INTERNAL</span>';
+    const sub = [c.role, c.company].filter(Boolean).map(escapeHtml).join(', ');
+    const chat = c.chat_handle ? `${c.chat_platform ? c.chat_platform[0].toUpperCase() + c.chat_platform.slice(1) : 'Chat'} ${escapeHtml(c.chat_handle)}` : '';
+    const contactLine = [
+      c.email ? `<a href="mailto:${escapeHtml(c.email)}">${escapeHtml(c.email)}</a>` : '',
+      c.phone ? escapeHtml(c.phone) : '',
+      chat,
+    ].filter(Boolean).join(' &middot; ');
+    return `<div style="${OV_CARD};display:flex;justify-content:space-between;gap:12px">
+      <div>
+        <div style="font-weight:600">${escapeHtml(c.name)} ${badge}</div>
+        ${sub ? `<div style="color:var(--text-muted);font-size:12px;margin-top:2px">${sub}</div>` : ''}
+        ${contactLine ? `<div style="font-size:13px;margin-top:4px">${contactLine}</div>` : ''}
+      </div>
+      ${ovRowButtons('contacts', c.id)}
+    </div>`;
+  }).join('');
+  if (editing && !overviewEditing.id) items += ovContactForm(null);
+  if (!overviewData.contacts.length && !editing) items = '<p style="color:#999;font-size:13px">No contacts yet.</p>';
+  return `<section style="${OV_SEC}">${ovSectionHeader('Contacts', 'contacts')}${items}</section>`;
+}
+
+function ovContactForm(c) {
+  c = c || {};
+  const sel = (v, opts) => opts.map(o => `<option value="${o}"${v === o ? ' selected' : ''}>${o[0].toUpperCase() + o.slice(1)}</option>`).join('');
+  return `<form onsubmit="return false" style="${OV_CARD};border-color:var(--accent)">
+    <div style="display:flex;gap:8px">
+      <label style="flex:1">Type<select id="ov-c-type">${sel(c.type || 'internal', ['internal','client'])}</select></label>
+      <label style="flex:2">Name<input type="text" id="ov-c-name" value="${escapeHtml(c.name || '')}"></label>
+    </div>
+    <div style="display:flex;gap:8px">
+      <label style="flex:1">Role / title<input type="text" id="ov-c-role" value="${escapeHtml(c.role || '')}"></label>
+      <label style="flex:1">Company / org<input type="text" id="ov-c-company" value="${escapeHtml(c.company || '')}"></label>
+    </div>
+    <div style="display:flex;gap:8px">
+      <label style="flex:1">Email<input type="text" id="ov-c-email" value="${escapeHtml(c.email || '')}"></label>
+      <label style="flex:1">Phone<input type="text" id="ov-c-phone" value="${escapeHtml(c.phone || '')}"></label>
+    </div>
+    <div style="display:flex;gap:8px">
+      <label style="width:120px">Chat<select id="ov-c-platform">${sel(c.chat_platform || 'slack', ['slack','teams','other'])}</select></label>
+      <label style="flex:1">Handle<input type="text" id="ov-c-handle" value="${escapeHtml(c.chat_handle || '')}" placeholder="@handle"></label>
+    </div>
+    <div class="form-actions">
+      <button class="btn-primary" onclick="ovSaveContact('${c.id || ''}')">Save</button>
+      <button class="btn-secondary" onclick="ovCancel()">Cancel</button>
+    </div>
+  </form>`;
+}
+
+async function ovSaveContact(id) {
+  const name = document.getElementById('ov-c-name').value.trim();
+  if (!name) { showToast('Name is required', 'error'); return; }
+  const item = {
+    id: id || ovNewId(),
+    type: document.getElementById('ov-c-type').value,
+    name,
+    role: document.getElementById('ov-c-role').value.trim(),
+    company: document.getElementById('ov-c-company').value.trim(),
+    email: document.getElementById('ov-c-email').value.trim(),
+    phone: document.getElementById('ov-c-phone').value.trim(),
+    chat_platform: document.getElementById('ov-c-platform').value,
+    chat_handle: document.getElementById('ov-c-handle').value.trim(),
+  };
+  ovUpsert('contacts', item);
+  try { await ovPersist(); } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ── Links ──
+function ovLinksSection() {
+  const editing = overviewEditing && overviewEditing.section === 'links';
+  let items = overviewData.links.map(l => {
+    if (editing && overviewEditing.id === l.id) return ovLinkForm(l);
+    return `<div style="${OV_CARD};display:flex;justify-content:space-between;gap:12px">
+      <div style="min-width:0">
+        <div style="font-weight:600">${escapeHtml(l.description || l.url)}</div>
+        <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener" style="font-size:13px;word-break:break-all">${escapeHtml(l.url)}</a>
+      </div>
+      ${ovRowButtons('links', l.id)}
+    </div>`;
+  }).join('');
+  if (editing && !overviewEditing.id) items += ovLinkForm(null);
+  if (!overviewData.links.length && !editing) items = '<p style="color:#999;font-size:13px">No links yet.</p>';
+  return `<section style="${OV_SEC}">${ovSectionHeader('Links', 'links')}${items}</section>`;
+}
+
+function ovLinkForm(l) {
+  l = l || {};
+  return `<form onsubmit="return false" style="${OV_CARD};border-color:var(--accent)">
+    <label>Description<input type="text" id="ov-l-desc" value="${escapeHtml(l.description || '')}" placeholder="e.g. GitHub repo"></label>
+    <label>URL<input type="text" id="ov-l-url" value="${escapeHtml(l.url || '')}" placeholder="https://…"></label>
+    <div class="form-actions">
+      <button class="btn-primary" onclick="ovSaveLink('${l.id || ''}')">Save</button>
+      <button class="btn-secondary" onclick="ovCancel()">Cancel</button>
+    </div>
+  </form>`;
+}
+
+async function ovSaveLink(id) {
+  const url = document.getElementById('ov-l-url').value.trim();
+  if (!url) { showToast('URL is required', 'error'); return; }
+  ovUpsert('links', { id: id || ovNewId(), description: document.getElementById('ov-l-desc').value.trim(), url });
+  try { await ovPersist(); } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ── Instructions ──
+function ovInstructionsSection() {
+  const editing = overviewEditing && overviewEditing.section === 'instructions';
+  let items = overviewData.instructions.map(i => {
+    if (editing && overviewEditing.id === i.id) return ovInstructionForm(i);
+    return `<div style="${OV_CARD}">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+        <div style="font-weight:600">${escapeHtml(i.title || 'Untitled')}</div>
+        ${ovRowButtons('instructions', i.id)}
+      </div>
+      ${i.body ? `<div class="md" style="margin-top:8px;font-size:13px">${renderMarkdown(i.body)}</div>` : ''}
+    </div>`;
+  }).join('');
+  if (editing && !overviewEditing.id) items += ovInstructionForm(null);
+  if (!overviewData.instructions.length && !editing) items = '<p style="color:#999;font-size:13px">No instructions yet.</p>';
+  return `<section style="${OV_SEC}">${ovSectionHeader('General instructions', 'instructions')}${items}</section>`;
+}
+
+function ovInstructionForm(i) {
+  i = i || {};
+  return `<form onsubmit="return false" style="${OV_CARD};border-color:var(--accent)">
+    <label>Title<input type="text" id="ov-i-title" value="${escapeHtml(i.title || '')}" placeholder="e.g. How to log time"></label>
+    <label>Body (Markdown supported)<textarea id="ov-i-body" rows="5" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-family:inherit">${escapeHtml(i.body || '')}</textarea></label>
+    <div class="form-actions">
+      <button class="btn-primary" onclick="ovSaveInstruction('${i.id || ''}')">Save</button>
+      <button class="btn-secondary" onclick="ovCancel()">Cancel</button>
+    </div>
+  </form>`;
+}
+
+async function ovSaveInstruction(id) {
+  const title = document.getElementById('ov-i-title').value.trim();
+  const body = document.getElementById('ov-i-body').value.trim();
+  if (!title && !body) { showToast('Add a title or body', 'error'); return; }
+  ovUpsert('instructions', { id: id || ovNewId(), title, body });
+  try { await ovPersist(); } catch (e) { showToast(e.message, 'error'); }
+}
+
+// Replace an item by id in a section, or append when new.
+function ovUpsert(section, item) {
+  const arr = overviewData[section];
+  const idx = arr.findIndex(x => x.id === item.id);
+  if (idx >= 0) arr[idx] = item; else arr.push(item);
 }
 
 // ── Tickets ───────────────────────────────────────────
