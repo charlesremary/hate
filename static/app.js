@@ -1821,14 +1821,21 @@ async function loadEffortSizingSection() {
   const empty = document.getElementById('effort-sizing-empty');
   const note = document.getElementById('effort-sizing-note');
   const projLabel = document.getElementById('effort-sizing-project');
+  const mhInputs = document.getElementById('max-hours-inputs');
+  const mhEmpty = document.getElementById('max-hours-empty');
+  const mhProj = document.getElementById('max-hours-project');
   if (!currentProject) {
     inputs.classList.add('hidden');
     note.classList.add('hidden');
     empty.classList.remove('hidden');
     projLabel.textContent = '';
+    mhInputs.classList.add('hidden');
+    mhEmpty.classList.remove('hidden');
+    mhProj.textContent = '';
     return;
   }
   projLabel.textContent = `— ${currentProject.name || currentProject.id}`;
+  mhProj.textContent = `— ${currentProject.name || currentProject.id}`;
   try {
     const data = await API.get(`/api/projects/${currentProject.id}/effort-to-days`);
     const m = data.effort_to_days || {};
@@ -1838,6 +1845,12 @@ async function loadEffortSizingSection() {
     empty.classList.add('hidden');
     inputs.classList.remove('hidden');
     note.classList.remove('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
+  try {
+    const mh = await API.get(`/api/projects/${currentProject.id}/max-hours`);
+    document.getElementById('max-hours').value = (mh.max_hours ?? '') === null ? '' : (mh.max_hours ?? '');
+    mhEmpty.classList.add('hidden');
+    mhInputs.classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
 }
 
@@ -1876,6 +1889,19 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         showToast('Effort sizing not saved — all five sizes need a value ≥ 0.25', 'error');
         return;
       }
+    }
+    if (currentProject && !document.getElementById('max-hours-inputs').classList.contains('hidden')) {
+      const raw = document.getElementById('max-hours').value.trim();
+      let maxHours = null; // blank clears the cap
+      if (raw !== '') {
+        const v = parseFloat(raw);
+        if (!Number.isFinite(v) || v <= 0) {
+          showToast('Maximum hours must be a number greater than 0 (or blank to clear)', 'error');
+          return;
+        }
+        maxHours = v;
+      }
+      await API.put(`/api/projects/${currentProject.id}/max-hours`, { max_hours: maxHours });
     }
     showToast('Settings saved');
     showBilling = body.show_billing;

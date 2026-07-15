@@ -161,6 +161,16 @@
               baseline keeps its original planned days. Defaults: xs&nbsp;1, s&nbsp;2, m&nbsp;3, l&nbsp;5, xl&nbsp;8.
             </p>
           </fieldset>
+          <fieldset id="max-hours-fieldset">
+            <legend>Maximum hours <span id="max-hours-project" style="font-weight:normal;color:#999"></span></legend>
+            <p id="max-hours-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to set its hours cap.</p>
+            <div id="max-hours-inputs" class="hidden">
+              <label>Maximum hours (the total you bid) <input type="number" id="max-hours" min="0" step="0.25" placeholder="none"></label>
+              <p style="font-size:12px;color:#999;margin:8px 0 0">
+                The dashboard tracks total logged hours against this cap. Leave blank to clear it.
+              </p>
+            </div>
+          </fieldset>
           <div class="form-actions">
             <button type="submit" class="btn-primary">Save Settings</button>
             <button type="button" class="btn-secondary" id="btn-run-now">Run Now</button>

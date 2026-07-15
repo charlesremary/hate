@@ -107,6 +107,8 @@ func RegisterProjectRoutes(r chi.Router) {
 			r.Get("/whoami", whoami)
 			r.Get("/effort-to-days", getEffortToDays)
 			r.Put("/effort-to-days", updateEffortToDays)
+			r.Get("/max-hours", getMaxHours)
+			r.Put("/max-hours", updateMaxHours)
 			r.Post("/close", closeProject)
 			r.Post("/reopen", reopenProject)
 			r.Patch("/info", updateProjectInfo)
@@ -837,6 +839,54 @@ func updateEffortToDays(w http.ResponseWriter, r *http.Request) {
 		"effort_to_days": cleaned,
 		"defaults":       ticket.DefaultEffortToDays,
 	})
+}
+
+// getMaxHours handles GET /api/projects/{projectId}/max-hours.
+// Returns the project's hours cap (null when unset).
+func getMaxHours(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"max_hours": cfg.MaxHours})
+}
+
+// updateMaxHours handles PUT /api/projects/{projectId}/max-hours.
+// Body: {"max_hours": <number|null>}. A positive number sets the cap; null (or
+// omitted) clears it. Non-positive values are rejected.
+func updateMaxHours(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	var req struct {
+		MaxHours *float64 `json:"max_hours"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.MaxHours != nil && *req.MaxHours <= 0 {
+		respondError(w, http.StatusBadRequest, "max_hours must be greater than 0 (or null to clear)")
+		return
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cfg.MaxHours = req.MaxHours
+	if err := ticket.WriteConfig(root, cfg); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"max_hours": cfg.MaxHours})
 }
 
 // updateProjectInfo handles PATCH /api/projects/{projectId}/info. Currently

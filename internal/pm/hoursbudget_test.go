@@ -14,43 +14,39 @@ func te(h float64) []ticket.TimeEntry {
 	return []ticket.TimeEntry{{Hours: h}}
 }
 
-// TestComputeHoursBudget exercises the projected-vs-spent roll-up: effort-based
-// projection, logged-hours spend, the unsized bucket, and cancelled/backlog
-// exclusion. Defaults: xs=1d, s=2d, m=3d → 8h/16h/24h at HoursPerDay=8.
+// TestComputeHoursBudget checks logged hours vs the max-hours cap. Every logged
+// hour counts — including descoped work — since the cap is a hard ceiling on
+// total project effort.
 func TestComputeHoursBudget(t *testing.T) {
-	xs, s, m := "xs", "s", "m"
+	m, s := "m", "s"
 	cancel := "descoped"
 
 	tickets := []*ticket.Ticket{
-		{ID: "A", Effort: &m, Status: "complete", TimeEntries: te(30)},   // proj 24, spent 30
-		{ID: "B", Effort: &s, Status: "in_progress", TimeEntries: te(5)}, // proj 16, spent 5
-		{ID: "C", Effort: &xs, Status: "not_started"},                    // proj 8, spent 0
-		{ID: "D", Status: "in_progress", TimeEntries: te(7)},             // unsized: spent 7, no proj
-		// Cancelled (descoped) — excluded entirely.
-		{ID: "E", Effort: &m, Status: "closed", CancellationReason: &cancel, TimeEntries: te(100)},
-		// Backlog — uncommitted, excluded entirely.
-		{ID: "F", Effort: &m, Status: "not_started", Tags: []string{ticket.BacklogTag}, TimeEntries: te(100)},
+		{ID: "A", Effort: &m, Status: "complete", TimeEntries: te(30)},
+		{ID: "B", Effort: &s, Status: "in_progress", TimeEntries: te(5)},
+		// Descoped work still burned hours against the cap.
+		{ID: "C", Status: "closed", CancellationReason: &cancel, TimeEntries: te(10)},
 	}
 
-	b := ComputeHoursBudget(tickets, ticket.DefaultEffortToDays)
+	max := 50.0
+	b := ComputeHoursBudget(tickets, &max)
+	if b.SpentHours != 45 { // 30 + 5 + 10
+		t.Errorf("spent = %.1f, want 45", b.SpentHours)
+	}
+	if b.RemainingHours != 5 { // 50 - 45
+		t.Errorf("remaining = %.1f, want 5", b.RemainingHours)
+	}
+	if b.PercentUsed != 90 { // 45/50
+		t.Errorf("percentUsed = %.1f, want 90", b.PercentUsed)
+	}
 
-	if b.ProjectedHours != 48 { // 24 + 16 + 8
-		t.Errorf("projected = %.1f, want 48", b.ProjectedHours)
+	// No cap set: spend still totals, but there's nothing to track against.
+	nb := ComputeHoursBudget(tickets, nil)
+	if nb.MaxHours != nil {
+		t.Errorf("maxHours = %v, want nil", nb.MaxHours)
 	}
-	if b.SpentHours != 42 { // 30 + 5 + 0 + 7
-		t.Errorf("spent = %.1f, want 42", b.SpentHours)
-	}
-	if b.RemainingHours != 6 { // 48 - 42
-		t.Errorf("remaining = %.1f, want 6", b.RemainingHours)
-	}
-	if b.SizedTickets != 3 {
-		t.Errorf("sized = %d, want 3", b.SizedTickets)
-	}
-	if b.UnsizedTickets != 1 || b.UnsizedHours != 7 {
-		t.Errorf("unsized = %d/%.1fh, want 1/7.0h", b.UnsizedTickets, b.UnsizedHours)
-	}
-	if b.ExcludedCount != 2 || b.ExcludedHours != 200 { // E + F, 100h each
-		t.Errorf("excluded = %d/%.1fh, want 2/200.0h", b.ExcludedCount, b.ExcludedHours)
+	if nb.SpentHours != 45 || nb.RemainingHours != 0 || nb.PercentUsed != 0 {
+		t.Errorf("no-cap = spent %.1f/rem %.1f/pct %.1f, want 45/0/0", nb.SpentHours, nb.RemainingHours, nb.PercentUsed)
 	}
 }
 

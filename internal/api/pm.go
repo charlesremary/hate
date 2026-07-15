@@ -257,13 +257,15 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		cfg, err := ticket.ReadConfig(root)
 		projectName := projectID
 		var effortToDays map[string]float64
+		var maxHours *float64
 		if err == nil {
 			if cfg.ProjectName != "" {
 				projectName = cfg.ProjectName
 			}
 			effortToDays = cfg.EffortToDays
+			maxHours = cfg.MaxHours
 		}
-		reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, effortToDays)) +
+		reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, maxHours)) +
 			pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(tickets, effortToDays)) +
 			pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
 		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, reportsHTML)
@@ -289,10 +291,12 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		costTickets = []*ticket.Ticket{}
 	}
 	var effortToDays map[string]float64
+	var maxHours *float64
 	if cfg, err := ticket.ReadConfig(root); err == nil {
 		effortToDays = cfg.EffortToDays
+		maxHours = cfg.MaxHours
 	}
-	reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, effortToDays)) +
+	reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, maxHours)) +
 		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, effortToDays)) +
 		pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))
 	html := pm.GenerateDashboard(snapshot, reportsHTML)

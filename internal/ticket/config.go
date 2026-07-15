@@ -78,6 +78,10 @@ type ProjectConfig struct {
 	// unset (no estimate entered yet).
 	EstimateHPerCFP *float64 `json:"estimate_h_per_cfp,omitempty"`
 	EstimateWrapPct *float64 `json:"estimate_wrap_pct,omitempty"`
+	// MaxHours is the project's hours cap — the total you bid / committed to. When
+	// set, the dashboard tracks logged hours against it (consumed vs remaining).
+	// nil = no cap set.
+	MaxHours *float64 `json:"max_hours,omitempty"`
 }
 
 // IsClosed reports whether the project's ClosedAt field is set.

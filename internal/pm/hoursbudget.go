@@ -35,74 +35,36 @@ func inHoursScope(t *ticket.Ticket) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Feature 1: hours budget (projected vs spent vs remaining)
+// Feature 1: hours budget (logged vs the project's maximum-hours cap)
 // ---------------------------------------------------------------------------
 
-// HoursBudget is the project-wide roll-up of sizing hours vs logged hours.
+// HoursBudget tracks total logged hours against the project's maximum-hours cap
+// (the hours you bid / committed to). Every logged hour counts against the cap,
+// including hours on descoped work — a bid is a hard ceiling on total effort.
 type HoursBudget struct {
-	ProjectedHours float64 `json:"projected_hours"` // Σ effort-hours over in-scope tickets
-	SpentHours     float64 `json:"spent_hours"`     // Σ logged hours over in-scope tickets
-	RemainingHours float64 `json:"remaining_hours"` // Projected − Spent (negative = over budget)
-
-	SizedTickets   int     `json:"sized_tickets"`   // in-scope tickets carrying an effort size
-	UnsizedTickets int     `json:"unsized_tickets"` // in-scope tickets with no effort size
-	UnsizedHours   float64 `json:"unsized_hours"`   // hours logged on those unsized tickets
-	ExcludedCount  int     `json:"excluded_count"`  // cancelled/backlog tickets left out of scope
-	ExcludedHours  float64 `json:"excluded_hours"`  // hours logged on those excluded tickets
+	MaxHours       *float64 `json:"max_hours"`       // the cap, nil when unset
+	SpentHours     float64  `json:"spent_hours"`     // Σ logged hours across all tickets
+	RemainingHours float64  `json:"remaining_hours"` // Max − Spent (0 when no cap)
+	PercentUsed    float64  `json:"percent_used"`    // Spent ÷ Max × 100 (0 when no cap)
 }
 
-// ComputeHoursBudget sums projected (effort-based) and spent (logged) hours
-// across a project's committed tickets.
-func ComputeHoursBudget(tickets []*ticket.Ticket, effortToDays map[string]float64) HoursBudget {
-	var b HoursBudget
+// ComputeHoursBudget sums every logged hour in the project and compares it to
+// the maximum-hours cap.
+func ComputeHoursBudget(tickets []*ticket.Ticket, maxHours *float64) HoursBudget {
+	b := HoursBudget{MaxHours: maxHours}
 	for _, t := range tickets {
-		if !inHoursScope(t) {
-			b.ExcludedCount++
-			b.ExcludedHours += cosmicLoggedHours(t)
-			continue
-		}
-		spent := cosmicLoggedHours(t)
-		b.SpentHours += spent
-		est := estimateHours(t, effortToDays)
-		if est > 0 {
-			b.ProjectedHours += est
-			b.SizedTickets++
-		} else {
-			b.UnsizedTickets++
-			b.UnsizedHours += spent
-		}
+		b.SpentHours += cosmicLoggedHours(t)
 	}
-	b.RemainingHours = b.ProjectedHours - b.SpentHours
+	if maxHours != nil && *maxHours > 0 {
+		b.RemainingHours = *maxHours - b.SpentHours
+		b.PercentUsed = round1(b.SpentHours / *maxHours * 100)
+	}
 	return b
 }
 
 // RenderHoursBudgetHTML renders the "Hours Budget" summary. Self-styled to drop
 // into either dashboard flavor (same idiom as RenderProjectCostHTML).
 func RenderHoursBudgetHTML(b HoursBudget) string {
-	remColor := "#22c55e" // under budget
-	if b.RemainingHours < 0 {
-		remColor = "#ef4444" // over budget
-	}
-	remLabel := "Remaining"
-	if b.RemainingHours < 0 {
-		remLabel = "Over budget"
-	}
-
-	var notes []string
-	if b.UnsizedTickets > 0 {
-		notes = append(notes, fmt.Sprintf(
-			"%d unsized ticket%s (%.1fh logged) — no effort size, so counted in spent but not projected.",
-			b.UnsizedTickets, plural(b.UnsizedTickets), b.UnsizedHours))
-	}
-	if b.ExcludedCount > 0 {
-		notes = append(notes, fmt.Sprintf(
-			"%d cancelled/backlog ticket%s (%.1fh logged on descoped work) excluded from the committed budget.",
-			b.ExcludedCount, plural(b.ExcludedCount), b.ExcludedHours))
-	}
-	notes = append(notes, "Projected hours are derived from t-shirt effort sizing, not a precise estimate.")
-	noteHTML := `<p style="font-size:12px;color:#999;margin-top:10px">` +
-		html.EscapeString(strings.Join(notes, " ")) + `</p>`
-
 	stat := func(value, label, color string) string {
 		style := "font-size:24px;font-weight:700;line-height:1.1"
 		if color != "" {
@@ -113,19 +75,58 @@ func RenderHoursBudgetHTML(b HoursBudget) string {
 			style, value, label)
 	}
 
+	header := `<h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:14px">Hours Budget &mdash; logged vs cap</h3>`
+
+	// No cap set — show the spend and prompt for a maximum.
+	if b.MaxHours == nil || *b.MaxHours <= 0 {
+		return fmt.Sprintf(`
+<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+  %s
+  <div style="display:flex;gap:24px;flex-wrap:wrap">%s</div>
+  <p style="font-size:12px;color:#999;margin-top:10px">Set a <strong>Maximum hours</strong> for this project in Settings to track spend against your bid.</p>
+</div>`, header, stat(fmt.Sprintf("%.1fh", b.SpentHours), "Spent", "#1976d2"))
+	}
+
+	remColor := "#22c55e" // under cap
+	remLabel := "Remaining"
+	if b.RemainingHours < 0 {
+		remColor = "#ef4444" // over cap
+		remLabel = "Over cap"
+	}
+	// Spend colour warms up as it approaches the ceiling.
+	spentColor := "#1976d2"
+	if b.PercentUsed >= 100 {
+		spentColor = "#ef4444"
+	} else if b.PercentUsed >= 85 {
+		spentColor = "#eab308"
+	}
+
+	// Progress bar toward the cap.
+	barPct := b.PercentUsed
+	if barPct > 100 {
+		barPct = 100
+	}
+	bar := fmt.Sprintf(`
+  <div style="margin-top:14px">
+    <div style="height:8px;background:#eee;border-radius:4px;overflow:hidden">
+      <div style="height:100%%;width:%.1f%%;background:%s"></div>
+    </div>
+  </div>`, barPct, spentColor)
+
 	return fmt.Sprintf(`
 <div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
-  <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:14px">Hours Budget &mdash; projected vs spent</h3>
+  %s
   <div style="display:flex;gap:24px;flex-wrap:wrap">
     %s
     %s
     %s
   </div>%s
 </div>`,
-		stat(fmt.Sprintf("%.1fh", b.ProjectedHours), fmt.Sprintf("Projected (%d sized ticket%s)", b.SizedTickets, plural(b.SizedTickets)), ""),
-		stat(fmt.Sprintf("%.1fh", b.SpentHours), "Spent", "#1976d2"),
+		header,
+		stat(fmt.Sprintf("%.1fh", *b.MaxHours), "Maximum hours", ""),
+		stat(fmt.Sprintf("%.1fh", b.SpentHours), fmt.Sprintf("Spent (%.1f%% of cap)", b.PercentUsed), spentColor),
 		stat(fmt.Sprintf("%+.1fh", b.RemainingHours), remLabel, remColor),
-		noteHTML,
+		bar,
 	)
 }
 
@@ -295,12 +296,4 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
 <div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
   <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:4px">Estimate Variance &mdash; over/under the sizing budget</h3>%s%s
 </div>`, inner, noteHTML)
-}
-
-// plural returns "s" unless n is exactly 1.
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }
