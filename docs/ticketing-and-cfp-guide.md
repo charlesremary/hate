@@ -253,3 +253,102 @@ wrap. To estimate a new project, read those off a similar delivered one and
 extrapolate by hand; there's no automatic cross-project calibration (it doesn't
 generalize across domains). Keep one class tag per child and the numbers stay
 meaningful.
+
+---
+
+## 12. API endpoint reference
+
+The full HTTP API. The server listens on `http://localhost:8000` (see
+`main.go`). No authentication. All request/response bodies are JSON unless noted
+(`Content-Type: application/json`), except attachment upload (multipart) and the
+dashboard (HTML). `{projectId}` is the project's folder name / id; `{ticketId}`
+is the full ticket id (e.g. `AMPL-7k3x`).
+
+Conventions:
+- Optional `author` (in body or `?author=` query) attributes the action in the
+  activity log; it defaults to a system value when omitted.
+- Mutations auto-commit the changed files to the project's git repo.
+- Errors return `{"error": "<message>"}` with a 4xx/5xx status.
+
+### Projects (app-level) — `/api/projects`
+
+| Method & path | What it does | Body |
+|---|---|---|
+| `GET /api/projects` | List all discovered projects. | — |
+| `POST /api/projects` | Create a new project on disk. | `{folder_name, client, project_name, project_id, prefix}` |
+| `GET /api/projects/settings` | Global app settings (projects root, tab toggles, scheduler). | — |
+| `PUT /api/projects/settings` | Update global settings. | `{projects_root?, scheduler?, show_billing?, show_cosmic?}` |
+| `POST /api/projects/open` | Register an existing project folder by path. | `{path}` |
+| `GET /api/projects/hidden` | List hidden projects. | — |
+| `POST /api/projects/hide` | Hide a project from the sidebar. | `{path}` |
+| `POST /api/projects/unhide` | Unhide a project. | `{path}` |
+
+### Project config & lifecycle — `/api/projects/{projectId}`
+
+| Method & path | What it does | Body |
+|---|---|---|
+| `GET /{projectId}` | Project details (name, prefix, counts, closed state). | — |
+| `GET /{projectId}/sync-status` | Git ahead/behind status vs remote. | — |
+| `POST /{projectId}/sync` | Pull/push the project repo. | — |
+| `GET /{projectId}/git-status` | Working-tree git status. | — |
+| `GET /{projectId}/git-identity` · `POST …/git-identity` | Read / set the project's git author identity. | POST: `{name, email}` |
+| `GET /{projectId}/resources` | List team resources (assignable people + capacity). | — |
+| `POST /{projectId}/resources` | Add a resource. | `{name, email, git_user, role, daily_hours_available?}` |
+| `PATCH /{projectId}/resources/{email}` | Update a resource. | resource fields |
+| `DELETE /{projectId}/resources/{email}` | Remove a resource. | — |
+| `GET /{projectId}/whoami` | Resolve the current user for this project. | — |
+| `GET /{projectId}/effort-to-days` | Effort-size → days map (+ defaults). | — |
+| `PUT /{projectId}/effort-to-days` | Set the map. All five sizes required, each ≥ 0.25 (quarter-day granularity). | `{"effort_to_days": {"xs":1,"s":2,"m":3,"l":5,"xl":8}}` |
+| `GET /{projectId}/max-hours` | The project's hours cap (`null` if unset). | — |
+| `PUT /{projectId}/max-hours` | Set/clear the hours cap (the total you bid). Positive sets it; `null` clears; ≤ 0 → 400. | `{"max_hours": 2000}` or `{"max_hours": null}` |
+| `POST /{projectId}/close` · `POST …/reopen` | Close / reopen the project (closed rejects ticket writes). | — |
+| `PATCH /{projectId}/info` | Edit the project display name (id/prefix are immutable). | `{name}` |
+
+### Tickets — `/api/projects/{projectId}/tickets`
+
+| Method & path | What it does | Body |
+|---|---|---|
+| `GET …/tickets` | List all tickets. | — |
+| `POST …/tickets` | Create a ticket (see §1 for the full body). | see §1 |
+| `GET …/tickets/billing` | Billing rollup (logged hours × rates). | — |
+| `GET …/tickets/{ticketId}` | Full ticket JSON. | — |
+| `PATCH …/tickets/{ticketId}` | Edit one field (title, description, priority, effort, tags, dates, …). | `{field, value, author?}` |
+
+### Ticket actions
+
+| Method & path | What it does | Body / params |
+|---|---|---|
+| `POST …/tickets/{ticketId}/promote` | Advance status along the type's workflow. Gated on logged time in work statuses. | `?author=` optional |
+| `POST …/tickets/{ticketId}/demote` | Move status back one step. | `?author=` optional |
+| `POST …/tickets/{ticketId}/block` | Set status to `blocked`. | `?author=` optional |
+| `POST …/tickets/{ticketId}/force-close` | Skip the workflow to `closed`, recording a reason (marks it descoped/cancelled). | `{reason, author?}` |
+| `POST …/tickets/{ticketId}/comment` | Add a comment to the activity log. | `{message, author?}` |
+| `POST …/tickets/{ticketId}/time` | Log a time entry (hours round to 0.25). | `{date, hours, description, author?}` |
+| `DELETE …/tickets/{ticketId}/time/{entryId}` | Delete a time entry. | — |
+| `POST …/tickets/{ticketId}/predecessors` | Add a predecessor dependency. | `{predecessor_id, author?}` |
+| `DELETE …/tickets/{ticketId}/predecessors/{predecessorId}` | Remove a predecessor. | — |
+| `POST …/tickets/{ticketId}/attachments` | Upload a file (multipart/form-data). | multipart |
+| `GET …/tickets/{ticketId}/attachments/{attachmentId}` | Download an attachment. | — |
+| `DELETE …/tickets/{ticketId}/attachments/{attachmentId}` | Delete an attachment. | — |
+
+### PM: reporting, baseline & scheduling — `/api/projects/{projectId}`
+
+| Method & path | What it does | Body |
+|---|---|---|
+| `GET /{projectId}/dashboard` | **HTML** PM dashboard (hours budget vs cap, estimate variance, project cost, status/slip). | — |
+| `GET /{projectId}/snapshot` · `POST …/snapshot` | Read latest / create a new slip snapshot. | — |
+| `POST /{projectId}/baseline` | Create the immutable schedule baseline from a template. | `{project_name, template_id, start_date, owner_assignments, duration_adjustments, created_by?}` |
+| `POST /{projectId}/baseline-now` | Baseline directly from current tickets (no template). | — |
+| `GET /{projectId}/slip` | List slip events. | — |
+| `PATCH /{projectId}/slip/{slipEventId}` | Resolve a slip event with a reason. | `{reason_category, reason_narrative, acknowledged_by?}` |
+| `POST /{projectId}/check-conflicts` | Capacity/over-allocation analysis (read-only). | — |
+| `POST /{projectId}/balance` | Propose (or apply) a rebalanced schedule. | `{apply?, author?}` |
+| `GET /{projectId}/phase-rollup` | Effort-weighted % complete per phase. | — |
+| `POST /{projectId}/report` | **Not implemented** (returns 501). | — |
+
+### COSMIC / estimation — `/api/projects/{projectId}`
+
+| Method & path | What it does | Body |
+|---|---|---|
+| `GET /{projectId}/cosmic` | Full COSMIC calibration report: per-feature h/CFP + wrap %, aggregates, and the manual initial estimate. | — |
+| `PUT /{projectId}/cosmic-estimate` | Set the borrowed rate + wrap for the manual initial-estimate projection. | `{h_per_cfp, wrap_pct}` |
