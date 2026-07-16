@@ -84,7 +84,7 @@
             <table id="ticket-table">
               <thead>
                 <tr>
-                  <th>ID</th><th>Title</th><th>Phase</th><th>Status</th>
+                  <th style="width:36px;padding:0" title="Red ✕ = blocked · Blue ! = hours at risk (≥90% of allotment)"></th><th>ID</th><th>Title</th><th>Phase</th><th>Status</th>
                   <th>Assignee</th><th>Planned start</th><th>Due</th>
                 </tr>
               </thead>
@@ -194,6 +194,18 @@
               </p>
             </div>
           </fieldset>
+          <fieldset id="enforce-qa-fieldset">
+            <legend>QA enforcement <span id="enforce-qa-project" style="font-weight:normal;color:#999"></span></legend>
+            <p id="enforce-qa-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to configure QA enforcement.</p>
+            <div id="enforce-qa-inputs" class="hidden">
+              <label><input type="checkbox" id="enforce-qa"> Require test cases to enter QA</label>
+              <p style="font-size:12px;color:#999;margin:8px 0 0">
+                When on, a dev task can't be promoted from Dev Complete to QA Testing until it has at
+                least one test case (a step and an expected result). Turn it off for agentic projects
+                that pass straight through.
+              </p>
+            </div>
+          </fieldset>
           <div class="form-actions">
             <button type="submit" class="btn-primary">Save Settings</button>
             <button type="button" class="btn-secondary" id="btn-run-now">Run Now</button>
@@ -221,6 +233,7 @@
             <a href="#help-pm">6. For Project Managers</a>
             <a href="#help-cosmic">7. Sizing &amp; estimating (COSMIC)</a>
             <a href="#help-team">8. Team &amp; Identity</a>
+            <a href="#help-agile">9. Working in Agile</a>
           </nav>
 
           <!-- 0 -->
@@ -473,6 +486,15 @@
               the <strong>Author</strong> filter — the Total updates to match — then
               <strong>Export CSV</strong> to download exactly what's shown. Enable the tab under
               ⚙ Settings → "Show Billing tab".</p>
+            <p><strong>Override hours.</strong> The billing table splits each entry's hours into three
+              columns — <strong>Hours</strong> (within the ticket's effort allotment),
+              <strong>Override</strong> (hours beyond it), and <strong>Total</strong> — each summed at
+              the bottom. The split is cumulative per ticket against its <code>effort</code> size (an
+              unsized ticket has no allotment, so all its hours read as normal). The <strong>Override
+              reason</strong> column shows the recorded authorization for any override hours, or
+              <span style="color:#ef4444">⚠ no authorization</span> when none was captured — so a biller
+              can pay the override hours, question them, or drop them. (Authorizations come from strict
+              time enforcement — see §6.)</p>
           </section>
 
           <!-- 5 -->
@@ -489,6 +511,38 @@
           <!-- 6 -->
           <section id="help-pm">
             <h2>6. For Project Managers</h2>
+
+            <h3>Hour budget — what you bid vs what you've burned</h3>
+            <p>Set a project's hour budget under ⚙ Settings → <em>Hour budget</em>. It's split into
+              two independent pools, and every logged hour burns down whichever pool matches the
+              ticket's type:</p>
+            <ul>
+              <li><strong>Work hours</strong> — the build budget. Burned by <code>task</code>,
+                <code>dev task</code>, and <code>design task</code> hours.</li>
+              <li><strong>Admin / meeting hours</strong> — the overhead budget. Burned by
+                <code>administration</code> and <code>meeting</code> hours. Keeping it separate stops
+                meeting overhead from quietly eating the build budget (and vice-versa).</li>
+            </ul>
+            <p>Either pool can be left blank. <code>backlog</code>-tagged and cancelled tickets are
+              excluded — the budget tracks <em>committed</em> work only. The <strong>PM Dashboard</strong>
+              shows each pool as spent / remaining / % used and flags it
+              <span style="color:#ef4444;font-weight:600">Over budget</span> once logged hours pass the
+              cap. (A project's older single <em>max hours</em> cap is migrated automatically into the
+              Work pool, so nothing set previously is lost.)</p>
+
+            <h3>Hours-at-risk watchlist</h3>
+            <p>The dashboard carries a standing <strong>Hours at risk</strong> watchlist: every active
+              ticket whose logged hours have reached <strong>≥ 90%</strong> of its effort-based
+              allotment (its <code>effort</code> size converted to hours). It's the early-warning list of
+              work about to blow its size, and shows an all-clear state when nothing is at risk.</p>
+
+            <h3>Strict time enforcement</h3>
+            <p>With <em>strict time enforcement</em> on (a per-project setting), a time log that would
+              push a sized ticket <strong>past its effort allotment</strong> is blocked unless it's
+              explicitly authorized. Each authorized over-log is recorded and surfaced on the dashboard
+              under <strong>Authorized overrides — time logged past allotment</strong>, so going over is
+              a deliberate, audited decision rather than silent scope creep. (This is separate from the
+              always-on rule in §3 that you must log time to promote out of a work status.)</p>
 
             <h3>Baselining</h3>
             <p>A <strong>baseline</strong> is a frozen copy of the plan — every task's planned
@@ -791,6 +845,80 @@ total      = code + wrap</pre>
               configured.</p>
           </section>
 
+          <!-- 9 -->
+          <section id="help-agile">
+            <h2>9. Working in Agile</h2>
+            <p>hate is deliberately <strong>methodology-agnostic</strong>. Its primitives — a
+              parent/child hierarchy, a <code>phase</code> grouping, a <code>backlog</code> tag,
+              per-type status workflows, and <code>effort</code> sizing — assume neither waterfall nor
+              Scrum nor Kanban. The examples elsewhere in this guide read as phase-gated
+              (Discovery → Build → QA → Deploy) because that suits agentic, near-waterfall delivery.
+              <strong>hate is not an Agile tool</strong> — but if you run Scrum, the same primitives map
+              onto it cleanly by convention. Here is the recommended approach.</p>
+
+            <h3>The mapping</h3>
+            <table class="help-table">
+              <thead><tr><th>Agile concept</th><th>In hate</th><th>How</th></tr></thead>
+              <tbody>
+                <tr><td><strong>Epic</strong></td><td>Parent ticket</td><td>A large feature or theme. Carries <code>cfp:</code> and/or <code>type:</code> if you want sizing; never logs hours.</td></tr>
+                <tr><td><strong>Story</strong></td><td>Child ticket</td><td><code>parent:&lt;epic-id&gt;</code>, one class tag, an <code>effort</code> size — and where hours are logged.</td></tr>
+                <tr><td><strong>Sprint</strong></td><td><code>phase</code></td><td>Name phases <code>Sprint 01</code>, <code>Sprint 02</code>, … The phase rollup then reads as sprint progress (effort-weighted % complete).</td></tr>
+                <tr><td><strong>Product backlog</strong></td><td><code>backlog</code> tag</td><td>Already excluded from completion %, schedule, and capacity — i.e. "not committed to a sprint yet."</td></tr>
+                <tr><td><strong>Sprint planning</strong></td><td>Remove <code>backlog</code> + set <code>phase</code></td><td>Pulling a story into a sprint is one tag removal and one phase set.</td></tr>
+                <tr><td><strong>Dev lifecycle / DoD</strong></td><td>Ticket <code>status</code></td><td>The promotion workflow (§3) — Not Started → In Progress → Dev Complete → QA → Complete — is each story's mini-lifecycle inside the sprint.</td></tr>
+                <tr><td><strong>Velocity</strong></td><td>Completed effort per phase</td><td>Done effort-days per sprint, straight off the phase rollup.</td></tr>
+                <tr><td><strong>Ceremonies</strong></td><td><code>meeting</code> / <code>administration</code></td><td>Planning, standups, review, retro — phase them into the sprint; they burn the admin/meeting hour pool (§6).</td></tr>
+              </tbody>
+            </table>
+
+            <div class="help-callout" style="background:#f4f6f8;border-left:4px solid #607d8b;padding:12px 16px;margin:12px 0;border-radius:4px">
+              <p style="margin:0"><strong>The one idea that makes it click.</strong> You have two
+                independent axes. <strong><code>status</code></strong> is where a ticket sits in its dev
+                lifecycle; <strong><code>phase</code></strong> is which bucket of time it belongs to. In
+                phase-gated waterfall you spend <code>phase</code> on the lifecycle stage. In Agile each
+                story runs its own lifecycle via <code>status</code>, which <em>frees up</em>
+                <code>phase</code> to mean the sprint. You are not adding a concept — you are re-assigning
+                which axis carries the timebox.</p>
+            </div>
+
+            <h3>An epic is not a backlog</h3>
+            <p>The backlog is not a container — it's a <em>state</em> (the <code>backlog</code> tag) any
+              story can be in, across many epics. An epic can have three stories already in Sprint 4 and
+              five still in the backlog. So model the epic as a parent and the backlog as a tag on the
+              children, never as the epic itself.</p>
+            <pre style="margin:0;font-size:12px;white-space:pre-wrap">PROJ-100  "Checkout revamp"     tags: cfp:24                                     &larr; epic (parent)
+  PROJ-101  "Guest checkout"     tags: parent:PROJ-100, functional, phase:Sprint 03   &larr; committed story
+  PROJ-102  "Saved cards"        tags: parent:PROJ-100, functional, backlog           &larr; still in the backlog</pre>
+
+            <h3>Where it doesn't fit — know the edges</h3>
+            <p>hate was not built to <em>be</em> Scrum, so a few things are conventions rather than
+              first-class features:</p>
+            <ul>
+              <li><strong>Two levels, not three.</strong> The hierarchy is parent → child (one level of
+                nesting); Agile's epic → story → <em>task</em> is three. Pick which two get the real
+                hierarchy. The recommended <em>Epic = parent, Story = child</em> logs hours at the story
+                level. If a team must split stories into tasks and log time per task, instead make the
+                epic a tag (e.g. <code>epic:checkout</code>) with the story as the parent and the task as
+                the child.</li>
+              <li><strong>Story points vs CFP.</strong> <code>cfp:</code> is objective COSMIC functional
+                size, not relative story points — don't cram points into it. Let <code>effort</code>
+                (the t-shirt size) drive velocity, and keep <code>cfp:</code> only if you also want
+                COSMIC calibration (§7).</li>
+              <li><strong>No strictly-ranked backlog.</strong> Agile backlogs are totally ordered
+                (1…N). hate has four <code>priority</code> buckets, not a strict rank. If you need an
+                ordered backlog, adopt a convention — a <code>rank:</code> tag, or predecessors.</li>
+              <li><strong>A sprint isn't a first-class timebox.</strong> A phase is a string, not a dated
+                container with a burndown. Infer sprint dates from ticket start/due dates, and run a
+                <strong>snapshot</strong> (§6) at each sprint boundary to capture velocity history. A
+                native sprint entity — fixed dates plus a burndown chart — is the one piece you would
+                have to build for the full ceremony.</li>
+            </ul>
+            <p><strong>Bottom line:</strong> set <code>phase = sprint</code>, tag uncommitted work
+              <code>backlog</code>, let <code>status</code> carry each story's lifecycle, and read
+              velocity off the phase rollup — and you are running Agile on the same primitives everything
+              else here uses.</p>
+          </section>
+
           <p class="help-foot">That's the whole tool. Reach this page any time from the ⓘ button
             beside the gear.</p>
         </div>
@@ -860,6 +988,27 @@ total      = code + wrap</pre>
           <div class="form-actions" style="margin-top:12px">
             <button type="submit" class="btn-primary">Force close</button>
             <button type="button" class="btn-secondary" id="btn-cancel-force-close">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Block ticket modal -->
+    <div id="block-modal-overlay" class="hidden">
+      <div id="block-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:480px;margin:8% auto">
+        <h3>⛔ Block ticket</h3>
+        <p style="font-size:13px;color:#555;margin:8px 0 12px">
+          Marks the ticket <strong>blocked</strong> and records why. The reason shows on the
+          PM dashboard's blocked-tickets list. Optional, but recommended so nobody's left guessing.
+        </p>
+        <p style="font-size:13px;color:#333;margin:0 0 12px"><strong>Ticket:</strong> <span id="bl-ticket-label"></span></p>
+        <form id="block-form">
+          <label style="display:block">Reason
+            <textarea id="bl-reason" rows="3" placeholder="e.g. Waiting on Genesys API credentials from the client." style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-top:4px"></textarea>
+          </label>
+          <div class="form-actions" style="margin-top:12px">
+            <button type="submit" class="btn-primary">Block</button>
+            <button type="button" class="btn-secondary" id="btn-cancel-block">Cancel</button>
           </div>
         </form>
       </div>

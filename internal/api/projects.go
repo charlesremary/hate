@@ -111,6 +111,8 @@ func RegisterProjectRoutes(r chi.Router) {
 			r.Put("/hour-budget", updateHourBudget)
 			r.Get("/strict-time", getStrictTime)
 			r.Put("/strict-time", updateStrictTime)
+			r.Get("/enforce-qa", getEnforceQA)
+			r.Put("/enforce-qa", updateEnforceQA)
 			r.Get("/overview", getOverview)
 			r.Put("/overview", updateOverview)
 			r.Post("/close", closeProject)
@@ -946,6 +948,48 @@ func updateStrictTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{"strict_time_enforcement": cfg.StrictTimeEnforcement})
+}
+
+// getEnforceQA handles GET /api/projects/{projectId}/enforce-qa.
+func getEnforceQA(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"enforce_qa": cfg.EnforceQA})
+}
+
+// updateEnforceQA handles PUT /api/projects/{projectId}/enforce-qa.
+// Body: {"enforce_qa": bool}.
+func updateEnforceQA(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	var req struct {
+		EnforceQA bool `json:"enforce_qa"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cfg.EnforceQA = req.EnforceQA
+	if err := ticket.WriteConfig(root, cfg); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"enforce_qa": cfg.EnforceQA})
 }
 
 // updateProjectInfo handles PATCH /api/projects/{projectId}/info. Currently

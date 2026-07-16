@@ -303,7 +303,35 @@ func ChangeStatus(repoRoot, ticketID, newStatus, author string) (*Ticket, error)
 	} else if Contains(ClosedStatuses, oldStatus) && !Contains(ClosedStatuses, newStatus) {
 		t.ClosedAt = nil
 	}
+	if oldStatus == "blocked" && newStatus != "blocked" {
+		t.BlockReason = nil // leaving the blocked state clears the stale reason
+	}
 	addActivity(t, author, "status_changed", fmt.Sprintf("%s -> %s", oldStatus, newStatus))
+	if err := WriteTicket(repoRoot, t); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// BlockTicket sets a ticket to "blocked" and records an optional reason (kept on
+// the ticket as BlockReason and folded into the activity-log detail). It's the
+// one entry point into the blocked state — the promote/demote workflow never
+// transitions *into* blocked.
+func BlockTicket(repoRoot, ticketID, reason, author string) (*Ticket, error) {
+	t, err := ReadTicket(repoRoot, ticketID)
+	if err != nil {
+		return nil, err
+	}
+	oldStatus := t.Status
+	t.Status = "blocked"
+	detail := fmt.Sprintf("%s -> blocked", oldStatus)
+	if r := strings.TrimSpace(reason); r != "" {
+		t.BlockReason = &r
+		detail += ": " + r
+	} else {
+		t.BlockReason = nil
+	}
+	addActivity(t, author, "status_changed", detail)
 	if err := WriteTicket(repoRoot, t); err != nil {
 		return nil, err
 	}
@@ -398,7 +426,16 @@ func Promote(repoRoot, ticketID, author string) (*Ticket, error) {
 		nextStatus = resolvePrevious(t)
 	}
 
+	if nextStatus == "qa_testing" {
+		if cfg, cErr := ReadConfig(repoRoot); cErr == nil && cfg.EnforceQA && !HasFilledTestCases(t) {
+			return nil, fmt.Errorf("Test cases are required to enter QA (enabled in this project's settings). Add at least one test case with a step and an expected result before promoting.")
+		}
+	}
+
 	t.Status = nextStatus
+	if current == "blocked" && nextStatus != "blocked" {
+		t.BlockReason = nil // leaving the blocked state clears the stale reason
+	}
 	if nextStatus == "in_progress" && t.ActualStartDate == nil {
 		date := NowISO()[:10]
 		t.ActualStartDate = &date
@@ -437,6 +474,9 @@ func Demote(repoRoot, ticketID, author string) (*Ticket, error) {
 	}
 
 	t.Status = prevStatus
+	if current == "blocked" && prevStatus != "blocked" {
+		t.BlockReason = nil // leaving the blocked state clears the stale reason
+	}
 	if Contains(ClosedStatuses, current) && !Contains(ClosedStatuses, prevStatus) {
 		t.ClosedAt = nil
 	}

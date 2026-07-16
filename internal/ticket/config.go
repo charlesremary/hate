@@ -124,6 +124,9 @@ type ProjectConfig struct {
 	// ticket past its effort-based allotment unless the logger confirms they're
 	// authorized to extend and records a reason. false = log freely.
 	StrictTimeEnforcement bool `json:"strict_time_enforcement,omitempty"`
+	// EnforceQA, when true, blocks promoting a dev_task from dev_complete to
+	// qa_testing until it has at least one filled test case (step + expected).
+	EnforceQA bool `json:"enforce_qa,omitempty"`
 	// Project Overview tab content — hand-maintained reference material.
 	Contacts     []Contact     `json:"contacts,omitempty"`
 	Links        []Link        `json:"links,omitempty"`

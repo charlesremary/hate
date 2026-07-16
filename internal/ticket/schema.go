@@ -35,6 +35,9 @@ var (
 		"edited",
 		"time_logged",
 		"time_deleted",
+		"test_case_added",
+		"test_case_result",
+		"test_case_removed",
 	}
 
 	// TypeSpecificFields maps ticket types to their type-specific field names.
@@ -98,6 +101,16 @@ type TimeEntry struct {
 	ExtendReason string `json:"extend_reason,omitempty"`
 }
 
+// TestCase is one QA test case on a ticket: how to exercise the work and what to
+// expect, plus the QA result. Status is "" (untested), "pass", or "fail".
+type TestCase struct {
+	ID       string `json:"id"`
+	Step     string `json:"step"`
+	Expected string `json:"expected"`
+	Status   string `json:"status"`
+	Comment  string `json:"comment,omitempty"`
+}
+
 // Attachment represents a file attached to a ticket. The file itself is stored
 // under <repo>/attachments/<ticket_id>/<attachment_id>-<filename> and committed
 // to the project repo alongside the ticket JSON.
@@ -158,6 +171,13 @@ type Ticket struct {
 	// CancellationReason is set when a ticket is force-closed (skipped through
 	// the workflow). Empty for normal completions.
 	CancellationReason *string `json:"cancellation_reason,omitempty"`
+
+	// BlockReason is the reason captured when the ticket was last set to
+	// "blocked". Cleared when the ticket leaves the blocked state.
+	BlockReason *string `json:"block_reason,omitempty"`
+
+	// TestCases are the QA test cases for this ticket (how to test it + results).
+	TestCases []TestCase `json:"test_cases,omitempty"`
 }
 
 // NowISO returns the current UTC time in ISO 8601 format matching Python's output.

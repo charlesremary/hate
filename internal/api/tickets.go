@@ -161,6 +161,10 @@ func RegisterTicketRoutes(r chi.Router) {
 		r.Post("/{ticketId}/comment", handleAddComment)
 		r.Post("/{ticketId}/time", handleAddTimeEntry)
 		r.Delete("/{ticketId}/time/{entryId}", handleDeleteTimeEntry)
+		r.Post("/{ticketId}/test-cases", handleAddTestCase)
+		r.Post("/{ticketId}/test-cases/bulk", handleAddTestCasesBulk)
+		r.Patch("/{ticketId}/test-cases/{caseId}", handleUpdateTestCase)
+		r.Delete("/{ticketId}/test-cases/{caseId}", handleDeleteTestCase)
 		r.Post("/{ticketId}/predecessors", handleAddPredecessor)
 		r.Delete("/{ticketId}/predecessors/{predecessorId}", handleRemovePredecessor)
 		r.Post("/{ticketId}/attachments", handleUploadAttachment)
@@ -264,7 +268,34 @@ func handleListTickets(w http.ResponseWriter, r *http.Request) {
 	if filtered == nil {
 		filtered = []ticket.IndexSummary{}
 	}
-	respondJSON(w, http.StatusOK, filtered)
+
+	// Flag tickets whose logged hours are ≥90% of their effort allotment, using
+	// the same rule as the PM dashboard's hours-at-risk watchlist, so the ticket
+	// gutter and the watchlist always agree.
+	effortToDays := ticket.DefaultEffortToDays
+	if cfg, cErr := ticket.ReadConfig(root); cErr == nil && cfg != nil && cfg.EffortToDays != nil {
+		effortToDays = cfg.EffortToDays
+	}
+	var full []*ticket.Ticket
+	for _, s := range filtered {
+		if tk, rErr := ticket.ReadTicket(root, s.ID); rErr == nil {
+			full = append(full, tk)
+		}
+	}
+	atRisk := make(map[string]bool)
+	for _, row := range pm.ComputeHoursAtRisk(full, effortToDays) {
+		atRisk[row.TicketID] = true
+	}
+
+	type listItem struct {
+		ticket.IndexSummary
+		AtRisk bool `json:"at_risk"`
+	}
+	items := make([]listItem, len(filtered))
+	for i, s := range filtered {
+		items[i] = listItem{IndexSummary: s, AtRisk: atRisk[s.ID]}
+	}
+	respondJSON(w, http.StatusOK, items)
 }
 
 // handleCreateTicket handles POST /api/projects/{projectId}/tickets
@@ -359,16 +390,26 @@ func handleGetBilling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Effort-based allotment per ticket drives the normal/override split: hours
+	// up to a ticket's effort size are "normal"; everything beyond is "override".
+	// Fall back to the default effort→days map if the config is unreadable.
+	effortToDays := ticket.DefaultEffortToDays
+	if cfg, cErr := ticket.ReadConfig(root); cErr == nil && cfg != nil && cfg.EffortToDays != nil {
+		effortToDays = cfg.EffortToDays
+	}
+
 	type billingEntry struct {
-		TicketID    string  `json:"ticket_id"`
-		TicketTitle string  `json:"ticket_title"`
-		TicketPhase *string `json:"ticket_phase"`
-		ID          string  `json:"id"`
-		Date        string  `json:"date"`
-		Hours       float64 `json:"hours"`
-		Description string  `json:"description"`
-		Author      string  `json:"author"`
-		LoggedAt    string  `json:"logged_at"`
+		TicketID      string  `json:"ticket_id"`
+		TicketTitle   string  `json:"ticket_title"`
+		TicketPhase   *string `json:"ticket_phase"`
+		ID            string  `json:"id"`
+		Date          string  `json:"date"`
+		Hours         float64 `json:"hours"`          // normal (within-allotment) portion
+		OverrideHours float64 `json:"override_hours"` // over-allotment portion
+		ExtendReason  string  `json:"extend_reason"`  // recorded authorization for override hours, if any
+		Description   string  `json:"description"`
+		Author        string  `json:"author"`
+		LoggedAt      string  `json:"logged_at"`
 	}
 
 	var entries []billingEntry
@@ -377,23 +418,64 @@ func handleGetBilling(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		for _, te := range tk.TimeEntries {
+
+		// Allotment for this ticket (0 when unsized → all hours are normal, since
+		// there is no budget to exceed).
+		allot := 0.0
+		if tk.Effort != nil {
+			allot = pm.EffortHours(*tk.Effort, effortToDays)
+		}
+
+		// The split is cumulative over ALL of a ticket's entries in chronological
+		// order, computed *before* the date filter — so a filtered view can't reset
+		// the allotment and mislabel later over-budget hours as normal.
+		ordered := make([]ticket.TimeEntry, len(tk.TimeEntries))
+		copy(ordered, tk.TimeEntries)
+		sort.SliceStable(ordered, func(i, j int) bool {
+			if ordered[i].Date != ordered[j].Date {
+				return ordered[i].Date < ordered[j].Date
+			}
+			return ordered[i].LoggedAt < ordered[j].LoggedAt
+		})
+
+		cum := 0.0
+		for _, te := range ordered {
+			normal, over := te.Hours, 0.0
+			if allot > 0 {
+				before, after := cum, cum+te.Hours
+				switch {
+				case after <= allot:
+					normal, over = te.Hours, 0
+				case before >= allot:
+					normal, over = 0, te.Hours
+				default:
+					normal, over = allot-before, after-allot
+				}
+			}
+			cum += te.Hours
+
 			if start != "" && te.Date < start {
 				continue
 			}
 			if end != "" && te.Date > end {
 				continue
 			}
+			reason := ""
+			if over > 0 {
+				reason = te.ExtendReason
+			}
 			entries = append(entries, billingEntry{
-				TicketID:    tk.ID,
-				TicketTitle: tk.Title,
-				TicketPhase: tk.Phase,
-				ID:          te.ID,
-				Date:        te.Date,
-				Hours:       te.Hours,
-				Description: te.Description,
-				Author:      te.Author,
-				LoggedAt:    te.LoggedAt,
+				TicketID:      tk.ID,
+				TicketTitle:   tk.Title,
+				TicketPhase:   tk.Phase,
+				ID:            te.ID,
+				Date:          te.Date,
+				Hours:         normal,
+				OverrideHours: over,
+				ExtendReason:  reason,
+				Description:   te.Description,
+				Author:        te.Author,
+				LoggedAt:      te.LoggedAt,
 			})
 		}
 	}
@@ -407,14 +489,17 @@ func handleGetBilling(w http.ResponseWriter, r *http.Request) {
 		entries = []billingEntry{}
 	}
 
-	var totalHours float64
+	var totalNormal, totalOverride float64
 	for _, e := range entries {
-		totalHours += e.Hours
+		totalNormal += e.Hours
+		totalOverride += e.OverrideHours
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"entries":     entries,
-		"total_hours": totalHours,
+		"entries":              entries,
+		"total_hours":          totalNormal + totalOverride,
+		"total_normal_hours":   totalNormal,
+		"total_override_hours": totalOverride,
 	})
 }
 
@@ -533,7 +618,19 @@ func handleBlockTicket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	author := r.URL.Query().Get("author")
-	tk, err := ticket.ChangeStatus(root, ticketID, "blocked", author)
+	// Optional {reason, author} body — the reason is captured on the ticket and
+	// shown on the PM dashboard's blocked-tickets list. Body is tolerated as empty.
+	var req struct {
+		Reason string `json:"reason"`
+		Author string `json:"author"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if req.Author != "" {
+		author = req.Author
+	}
+	tk, err := ticket.BlockTicket(root, ticketID, req.Reason, author)
 	if err != nil {
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -544,6 +641,117 @@ func handleBlockTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	commitTicket(root, ticketID, "status → blocked")
+	respondJSON(w, http.StatusOK, tk)
+}
+
+// handleAddTestCase handles POST /api/projects/{projectId}/tickets/{ticketId}/test-cases
+func handleAddTestCase(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	ticketID := chi.URLParam(r, "ticketId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	var req struct {
+		Step     string `json:"step"`
+		Expected string `json:"expected"`
+		Author   string `json:"author"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	tk, err := ticket.AddTestCase(root, ticketID, req.Step, req.Expected, req.Author)
+	if err != nil {
+		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	commitTicket(root, ticketID, "add test case")
+	respondJSON(w, http.StatusOK, tk)
+}
+
+// handleAddTestCasesBulk handles POST /api/projects/{projectId}/tickets/{ticketId}/test-cases/bulk
+// Body: {"cases": [{"step": "...", "expected": "..."}], "author": "..."}. The
+// low-friction path for agents and the paste-to-author box — all cases in one write.
+func handleAddTestCasesBulk(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	ticketID := chi.URLParam(r, "ticketId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	var req struct {
+		Cases []struct {
+			Step     string `json:"step"`
+			Expected string `json:"expected"`
+		} `json:"cases"`
+		Author string `json:"author"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	cases := make([]ticket.TestCase, len(req.Cases))
+	for i, c := range req.Cases {
+		cases[i] = ticket.TestCase{Step: c.Step, Expected: c.Expected}
+	}
+	tk, err := ticket.AddTestCases(root, ticketID, cases, req.Author)
+	if err != nil {
+		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	commitTicket(root, ticketID, "add test cases (bulk)")
+	respondJSON(w, http.StatusOK, tk)
+}
+
+// handleUpdateTestCase handles PATCH /api/projects/{projectId}/tickets/{ticketId}/test-cases/{caseId}
+func handleUpdateTestCase(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	ticketID := chi.URLParam(r, "ticketId")
+	caseID := chi.URLParam(r, "caseId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	var req struct {
+		Step     *string `json:"step"`
+		Expected *string `json:"expected"`
+		Status   *string `json:"status"`
+		Comment  *string `json:"comment"`
+		Author   *string `json:"author"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	author := ""
+	if req.Author != nil {
+		author = *req.Author
+	}
+	tk, err := ticket.UpdateTestCase(root, ticketID, caseID, ticket.TestCaseUpdate{
+		Step: req.Step, Expected: req.Expected, Status: req.Status, Comment: req.Comment,
+	}, author)
+	if err != nil {
+		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	commitTicket(root, ticketID, "update test case")
+	respondJSON(w, http.StatusOK, tk)
+}
+
+// handleDeleteTestCase handles DELETE /api/projects/{projectId}/tickets/{ticketId}/test-cases/{caseId}
+func handleDeleteTestCase(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	ticketID := chi.URLParam(r, "ticketId")
+	caseID := chi.URLParam(r, "caseId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	author := r.URL.Query().Get("author")
+	tk, err := ticket.DeleteTestCase(root, ticketID, caseID, author)
+	if err != nil {
+		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	commitTicket(root, ticketID, "delete test case")
 	respondJSON(w, http.StatusOK, tk)
 }
 

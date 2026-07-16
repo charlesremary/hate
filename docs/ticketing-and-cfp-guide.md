@@ -35,6 +35,49 @@ This file is about **how to structure and tag** the tickets you create.
 - `effort`: `xs` | `s` | `m` | `l` | `xl` (maps to days via project config).
 - All conventions below are expressed through the **`tags`** array.
 
+### Writing a ticket a human or agent can act on
+
+The ticket is the **source of authority** for its work — a developer or an agent
+should be able to build it without hunting elsewhere. Every ticket you create
+(**including agent-created ones**) must carry these four things:
+
+1. **A verb-first, descriptive title.** Say what to do, in the imperative — name
+   the action or the deliverable.
+   - ✅ "Build the customer entry screen" · "Build the one-click installer"
+   - ❌ `VA2-R2-04 Coordinator: health/heartbeat reporting` — an ID prefix plus a
+     noun fragment; it never says what to *do*. Don't prefix titles with a
+     workbook/ticket ID; the system assigns the real ID.
+
+2. **A real description — the what and the why.** State what we're trying to do and
+   enough scope to act on it. Metadata is **not** a description.
+   - ❌ `Child of KC-e01e. Class: functional. Reference CFP (display-only): 4.` —
+     pure metadata; tells the developer nothing.
+   - ✅ "Add an admin toggle to enable/disable Virtual Agents per account. Enforce
+     the two preconditions (…) before it can be enabled; persist the flag and gate
+     the VA features on it."
+
+3. **Mockups attached, for any UI ticket.** If the ticket renders a screen, form,
+   or component, its design belongs **on the ticket** as an attachment — a
+   screenshot or mockup (attachment endpoints are in §12). Before creating a UI
+   ticket, ask *"where are the mockups/screenshots?"* and attach them, so nobody
+   has to go find the design.
+
+4. **Test cases — authored up front — are the acceptance criteria.** Do **not** add
+   a separate "acceptance criteria" or per-ticket "definition of done" field; the
+   **test cases *are* the acceptance criteria, just made runnable.** Each test
+   case's *expected result* is one acceptance condition. Write them when you write
+   the ticket (agent drafts, human edits), not as a QA afterthought:
+   - They are the **spec** before build, the **build target** during, and the
+     **proof** at QA — one artifact, three jobs.
+   - **Ticket-level "done" = all its test cases pass.** The project's enforce-QA
+     setting keeps unfilled tickets out of QA, and the PM dashboard's test-case
+     summary shows pass / fail / untested. (A *team-wide* definition of done —
+     reviewed, deployed, docs — is a separate project convention, not a per-ticket
+     field.)
+
+**In short: title (verb) + description (what/why) + mockups (if UI) + test cases
+(acceptance criteria) = a ticket that's self-sufficient.**
+
 ---
 
 ## 2. Structure: features (parents) and work items (children)

@@ -256,6 +256,7 @@ document.addEventListener('mouseout', (e) => {
   scheduleHideTicketHovercard();
 });
 let allTickets = [];
+let effortToDaysMap = {}; // effort size → configured days, for the current project
 let projectResources = [];
 let currentUser = null;
 let showBilling = false; // Billing tab is hidden unless enabled in Settings.
@@ -667,7 +668,7 @@ function ovUpsert(section, item) {
 async function loadTickets() {
   if (!currentProject) return;
   const tbody = document.getElementById('ticket-tbody');
-  tbody.innerHTML = '<tr><td colspan="7" style="padding:16px;color:#999">Loading…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" style="padding:16px;color:#999">Loading…</td></tr>';
 
   try {
     const status = document.getElementById('filter-status').value;
@@ -681,6 +682,11 @@ async function loadTickets() {
     if (params.length) url += '?' + params.join('&');
 
     allTickets = await API.get(url);
+    // Cache the project's effort→days map so the detail panel can show what each
+    // t-shirt size resolves to (non-fatal if it fails).
+    try {
+      effortToDaysMap = (await API.get(`/api/projects/${currentProject.id}/effort-to-days`)).effort_to_days || {};
+    } catch { /* leave the previous map in place */ }
     populatePhaseFilter(allTickets);
     populateTagFilter(allTickets);
     const hideClosed = document.getElementById('filter-hide-closed').checked;
@@ -689,7 +695,7 @@ async function loadTickets() {
     if (tagFilter) visible = visible.filter(t => (t.tags || []).includes(tagFilter));
     renderTicketTable(visible);
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="7" style="padding:16px;color:red">${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="padding:16px;color:red">${e.message}</td></tr>`;
   }
 }
 
@@ -839,11 +845,12 @@ function renderTicketTable(tickets) {
   }
 
   if (tickets.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:16px;color:#999">No tickets. Create one with "+ New Ticket".</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:16px;color:#999">No tickets. Create one with "+ New Ticket".</td></tr>';
     return;
   }
   tbody.innerHTML = tickets.map(t => `
     <tr data-id="${t.id}">
+      <td style="text-align:center;padding:0;white-space:nowrap">${gutterMarks(t)}</td>
       <td><strong>${t.id}</strong></td>
       <td>${t.title}${isBacklogTicket(t) ? ' <span class="badge backlog-badge">Backlog</span>' : ''}${depBadge(t, byId)}${kidCount.get(t.id) ? ` <span class="badge child-badge" title="${kidCount.get(t.id)} child ticket(s)">↳ ${kidCount.get(t.id)}</span>` : ''}</td>
       <td>${t.phase || '—'}</td>
@@ -959,6 +966,45 @@ async function openTicketPanel(ticketId) {
   }
 }
 
+// Resolve an effort t-shirt size to its configured days/hours, e.g. "m (3d · 24h)".
+// Hours use the same 8h/day basis as the schedule and the hours-at-risk rule.
+function effortLabel(e) {
+  if (!e) return '—';
+  const d = effortToDaysMap[e];
+  if (d == null) return e;
+  const days = +(+d).toFixed(2);
+  const hours = +(d * 8).toFixed(2);
+  return `${e} <span style="color:#888;font-weight:400">(${days}d · ${hours}h)</span>`;
+}
+
+// Label the create-ticket effort options with their configured hours, e.g. "M (24h)".
+function refreshEffortOptions() {
+  const sel = document.getElementById('nt-effort');
+  if (!sel) return;
+  [...sel.options].forEach(o => {
+    if (!o.value) return; // leave the blank "—" option alone
+    const d = effortToDaysMap[o.value];
+    o.textContent = d == null ? o.value.toUpperCase() : `${o.value.toUpperCase()} (${+(d * 8).toFixed(2)}h)`;
+  });
+}
+
+// Auto-size a test-case textarea to its content so long steps/expected/comments
+// wrap and stay fully readable instead of clipping.
+function autoGrowTC(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+// Gutter markers for the ticket list: red ✕ = blocked, blue ! = hours at risk (≥90%).
+function gutterMarks(t) {
+  const badge = (bg, glyph, title) =>
+    `<span title="${title}" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:${bg};color:#fff;font-weight:800;font-size:11px;line-height:1">${glyph}</span>`;
+  const marks = [];
+  if (t.status === 'blocked') marks.push(badge('#dc2626', '✕', 'Blocked'));
+  if (t.at_risk) marks.push(badge('#2563eb', '!', "Logged hours ≥ 90% of this ticket's allotment"));
+  return marks.join('&nbsp;');
+}
+
 function renderTicketPanel(t) {
   panelTicket = t;
   const content = document.getElementById('panel-content');
@@ -967,7 +1013,7 @@ function renderTicketPanel(t) {
   const fields = [
     ['Type', `<select class="inline-edit" onchange="editField('${t.id}','type',this.value)">${typeOptions}</select>`],
     ['Status', statusBadge(t.status)],
-    ['Priority', priorityCell(t.priority)], ['Effort', t.effort || '—'],
+    ['Priority', priorityCell(t.priority)], ['Effort', effortLabel(t.effort)],
     ['Assignee', resolveResourceName(t.assignee)], ['Creator', resolveResourceName(t.creator)],
     ['Due date', t.due_date || '—'], ['Planned start', t.planned_start_date || '—'],
     ['Actual start', t.actual_start_date || '—'],
@@ -1018,6 +1064,42 @@ function renderTicketPanel(t) {
       </ul>
     </div>` : '';
 
+  const tcs = t.test_cases || [];
+  const tcPass = tcs.filter(c => c.status === 'pass').length;
+  const tcFail = tcs.filter(c => c.status === 'fail').length;
+  const tcSummary = tcs.length ? ` · ${tcPass} pass${tcFail ? `, ${tcFail} fail` : ''}` : '';
+  const tcStatusBtn = (active, color, label, title, onclick) =>
+    `<button title="${title}" onclick="${onclick}" style="cursor:pointer;width:26px;height:24px;border-radius:4px;border:1px solid ${active ? color : '#ddd'};background:${active ? color : '#fff'};color:${active ? '#fff' : '#bbb'};font-weight:800;font-size:13px;line-height:1">${label}</button>`;
+  const tcRows = tcs.map((c, i) => `
+      <div style="border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px;margin-bottom:8px;display:flex;gap:8px;align-items:flex-start">
+        <span style="font-weight:700;color:#bbb;font-size:12px;padding-top:5px">${i + 1}</span>
+        <div style="flex:1;min-width:0">
+          <textarea class="tc-ta" rows="1" placeholder="Step / action" oninput="autoGrowTC(this)" onblur="updateTestCase('${t.id}','${c.id}','step',this.value)" style="width:100%;box-sizing:border-box;border:none;border-bottom:1px solid #eee;font-size:13px;padding:3px 0;resize:none;overflow:hidden;font-family:inherit;line-height:1.45;background:transparent">${escapeHtml(c.step)}</textarea>
+          <textarea class="tc-ta" rows="1" placeholder="Expected result" oninput="autoGrowTC(this)" onblur="updateTestCase('${t.id}','${c.id}','expected',this.value)" style="width:100%;box-sizing:border-box;border:none;border-bottom:1px solid #eee;font-size:13px;padding:3px 0;resize:none;overflow:hidden;font-family:inherit;line-height:1.45;color:#555;background:transparent">${escapeHtml(c.expected)}</textarea>
+          <textarea class="tc-ta" rows="1" placeholder="QA comment — what happened / how to reproduce" oninput="autoGrowTC(this)" onblur="updateTestCase('${t.id}','${c.id}','comment',this.value)" style="width:100%;box-sizing:border-box;border:none;font-size:12px;padding:4px 0 0;resize:none;overflow:hidden;font-family:inherit;line-height:1.45;color:#777;background:transparent">${escapeHtml(c.comment || '')}</textarea>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center;padding-top:2px">
+          ${tcStatusBtn(c.status === 'pass', '#16a34a', '✓', 'Pass', `setTestCaseStatus('${t.id}','${c.id}','${c.status === 'pass' ? '' : 'pass'}')`)}
+          ${tcStatusBtn(c.status === 'fail', '#dc2626', '✕', 'Fail', `setTestCaseStatus('${t.id}','${c.id}','${c.status === 'fail' ? '' : 'fail'}')`)}
+          <button class="btn-delete-time" title="Delete case" onclick="deleteTestCase('${t.id}','${c.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+  const testCasesSection = `
+    <div class="panel-section" style="margin-top:16px">
+      <h4>Test Cases <span style="font-size:12px;color:#999;font-weight:normal">(${tcs.length}${tcSummary})</span></h4>
+      ${tcs.length ? tcRows : '<p style="color:#999;font-size:13px;margin:4px 0 8px">No test cases yet — add how to test this so QA (or whoever inherits it) can reproduce it.</p>'}
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+        <input id="tc-step-${t.id}" placeholder="Step / action" onkeydown="tcAddKey(event,'${t.id}')" style="width:100%;box-sizing:border-box;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:13px">
+        <input id="tc-expected-${t.id}" placeholder="Expected result (Enter to add)" onkeydown="tcAddKey(event,'${t.id}')" style="width:100%;box-sizing:border-box;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:13px">
+        <button class="btn-secondary" style="align-self:flex-start" onclick="addTestCase('${t.id}')">+ Add case</button>
+      </div>
+      <details style="margin-top:8px">
+        <summary style="cursor:pointer;font-size:12px;color:#555">Paste multiple &mdash; one per line: <code>action | expected</code></summary>
+        <textarea id="tc-bulk-${t.id}" rows="4" placeholder="Select radio = Business | Dropdown shows Sales / Support / Billing&#10;Submit with empty comment | Validation error, nothing written" style="width:100%;box-sizing:border-box;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;margin-top:6px"></textarea>
+        <button class="btn-secondary" onclick="addTestCasesBulk('${t.id}')">Add cases</button>
+      </details>
+    </div>`;
+
   content.innerHTML = `
     <div class="panel-section">
       <h4>${t.title} <span class="time-badge">${totalHours.toFixed(2)}h</span></h4>
@@ -1028,11 +1110,12 @@ function renderTicketPanel(t) {
       ${fields.map(([l, v]) => `<div class="field-row"><span class="field-label">${l}</span><span class="field-value">${v}</span></div>`).join('')}
     </div>
     ${childrenSection}
+    ${testCasesSection}
     <div class="panel-actions">
       ${WORKFLOW_TYPES.includes(t.type) ? `
       <button class="btn-primary" onclick="promoteTicket('${t.id}')">▲ Promote</button>
       <button class="btn-secondary" onclick="demoteTicket('${t.id}')">▼ Demote</button>
-      ${t.status !== 'blocked' ? `<button class="btn-secondary" onclick="blockTicket('${t.id}')">⛔ Block</button>` : ''}` : ''}
+      ${t.status !== 'blocked' ? `<button class="btn-secondary" onclick="blockTicket('${t.id}','${(t.title||'').replace(/'/g, "\\'")}')">⛔ Block</button>` : ''}` : ''}
       ${t.status !== 'closed' ? `<button class="btn-secondary" onclick="forceCloseTicket('${t.id}','${(t.title||'').replace(/'/g, "\\'")}')" title="Skip the workflow and close this ticket with a reason">⏩ Force close</button>` : ''}
       <button class="btn-secondary" onclick="showCommentBox('${t.id}')">💬 Comment</button>
       <button class="btn-secondary" onclick="showTimeBox('${t.id}')">⏱ Log Time</button>
@@ -1072,6 +1155,8 @@ function renderTicketPanel(t) {
     </div>`;
   // After innerHTML is replaced, wire the drop-zone events for this ticket.
   wireAttachmentDropZone(t.id);
+  // Size every test-case textarea to fit its text.
+  document.querySelectorAll('#panel-content .tc-ta').forEach(autoGrowTC);
 }
 
 function renderAttachments(t) {
@@ -1181,7 +1266,7 @@ async function promoteTicket(id) {
     const data = await r.json();
     if (!r.ok) {
       if (data.needs_time_log) { promptTimeToPromote(id, data.detail); return; }
-      throw new Error(data.detail || r.statusText);
+      throw new Error(data.detail || data.error || r.statusText);
     }
     showToast(`${id} → ${data.status}`);
     renderTicketPanel(data);
@@ -1219,13 +1304,15 @@ function forceCloseTicket(id, title) {
   setTimeout(() => document.getElementById('fc-reason').focus(), 0);
 }
 
-async function blockTicket(id) {
-  try {
-    const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/block?author=${encodeURIComponent(currentUser?.email || '')}`);
-    showToast(`${id} → ${t.status}`);
-    renderTicketPanel(t);
-    loadTickets();
-  } catch (e) { showToast(e.message, 'error'); }
+// Open the block modal to capture a reason. The submit happens in the block-form
+// handler; the reason lands on the ticket and the PM dashboard's blocked list.
+function blockTicket(id, title) {
+  document.getElementById('bl-reason').value = '';
+  document.getElementById('bl-ticket-label').textContent = `${id}${title ? ' — ' + title : ''}`;
+  const overlay = document.getElementById('block-modal-overlay');
+  overlay.dataset.ticketId = id;
+  overlay.classList.remove('hidden');
+  setTimeout(() => document.getElementById('bl-reason').focus(), 0);
 }
 
 async function editField(id, field, value) {
@@ -1234,6 +1321,55 @@ async function editField(id, field, value) {
     showToast(`${field} updated`);
     renderTicketPanel(t);
     loadTickets();
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function addTestCase(id) {
+  const step = document.getElementById(`tc-step-${id}`).value.trim();
+  const expected = document.getElementById(`tc-expected-${id}`).value.trim();
+  if (!step && !expected) { showToast('Enter a step or expected result', 'error'); return; }
+  try {
+    const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/test-cases`, { step, expected, author: currentUser?.email || '' });
+    renderTicketPanel(t);
+    const el = document.getElementById(`tc-step-${id}`); if (el) el.focus(); // keep authoring without the mouse
+  } catch (e) { showToast(e.message, 'error'); }
+}
+// Enter in either add field commits the case (keyboard-first authoring).
+function tcAddKey(e, id) {
+  if (e.key === 'Enter') { e.preventDefault(); addTestCase(id); }
+}
+// Paste-to-author: one case per line, "action | expected" (expected optional).
+async function addTestCasesBulk(id) {
+  const raw = document.getElementById(`tc-bulk-${id}`).value;
+  const cases = raw.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+    const i = l.indexOf('|');
+    return i >= 0 ? { step: l.slice(0, i).trim(), expected: l.slice(i + 1).trim() } : { step: l, expected: '' };
+  });
+  if (!cases.length) { showToast('Nothing to add — one case per line', 'error'); return; }
+  try {
+    const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/test-cases/bulk`, { cases, author: currentUser?.email || '' });
+    renderTicketPanel(t);
+  } catch (e) { showToast(e.message, 'error'); }
+}
+// Field edits (step/expected/comment) fire on blur — refresh the cache but don't
+// re-render, so we don't yank focus mid-edit. Status/add/delete re-render.
+async function updateTestCase(id, caseId, field, value) {
+  try {
+    const body = { author: currentUser?.email || '' };
+    body[field] = value;
+    panelTicket = await API.patch(`/api/projects/${currentProject.id}/tickets/${id}/test-cases/${caseId}`, body);
+  } catch (e) { showToast(e.message, 'error'); }
+}
+async function setTestCaseStatus(id, caseId, status) {
+  try {
+    const t = await API.patch(`/api/projects/${currentProject.id}/tickets/${id}/test-cases/${caseId}`, { status, author: currentUser?.email || '' });
+    renderTicketPanel(t);
+  } catch (e) { showToast(e.message, 'error'); }
+}
+async function deleteTestCase(id, caseId) {
+  try {
+    const t = await API.delete(`/api/projects/${currentProject.id}/tickets/${id}/test-cases/${caseId}?author=${encodeURIComponent(currentUser?.email || '')}`);
+    renderTicketPanel(t);
   } catch (e) { showToast(e.message, 'error'); }
 }
 
@@ -1799,6 +1935,7 @@ document.getElementById('btn-new-ticket').addEventListener('click', () => {
   const phases = [...new Set((allTickets || []).map(t => t.phase).filter(Boolean))].sort();
   const dl = document.getElementById('nt-phase-list');
   dl.innerHTML = phases.map(p => `<option value="${escapeHtml(p)}"></option>`).join('');
+  refreshEffortOptions();
   document.getElementById('modal-overlay').classList.remove('hidden');
   document.getElementById('nt-title').focus();
 });
@@ -1837,6 +1974,26 @@ document.getElementById('force-close-form').addEventListener('submit', async (e)
     renderTicketPanel(t);
     loadTickets();
   } catch (e) { showToast(e.message, 'error'); }
+});
+
+document.getElementById('block-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const overlay = document.getElementById('block-modal-overlay');
+  const id = overlay.dataset.ticketId;
+  const reason = document.getElementById('bl-reason').value.trim();
+  try {
+    const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/block`, {
+      reason,
+      author: currentUser?.email || '',
+    });
+    overlay.classList.add('hidden');
+    showToast(`${id} blocked`);
+    renderTicketPanel(t);
+    loadTickets();
+  } catch (e) { showToast(e.message, 'error'); }
+});
+document.getElementById('btn-cancel-block').addEventListener('click', () => {
+  document.getElementById('block-modal-overlay').classList.add('hidden');
 });
 
 const AUTO_COMPLETE_TYPES = ['meeting', 'administration'];
@@ -2143,6 +2300,13 @@ async function loadEffortSizingSection() {
     stEmpty.classList.add('hidden');
     stInputs.classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
+  try {
+    const eq = await API.get(`/api/projects/${currentProject.id}/enforce-qa`);
+    document.getElementById('enforce-qa').checked = !!eq.enforce_qa;
+    document.getElementById('enforce-qa-project').textContent = '— ' + currentProject.name.toUpperCase();
+    document.getElementById('enforce-qa-empty').classList.add('hidden');
+    document.getElementById('enforce-qa-inputs').classList.remove('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
 }
 
 document.getElementById('settings-form').addEventListener('submit', async (e) => {
@@ -2200,6 +2364,11 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
     if (currentProject && !document.getElementById('strict-time-inputs').classList.contains('hidden')) {
       await API.put(`/api/projects/${currentProject.id}/strict-time`, {
         strict_time_enforcement: document.getElementById('strict-time').checked,
+      });
+    }
+    if (currentProject && !document.getElementById('enforce-qa-inputs').classList.contains('hidden')) {
+      await API.put(`/api/projects/${currentProject.id}/enforce-qa`, {
+        enforce_qa: document.getElementById('enforce-qa').checked,
       });
     }
     showToast('Settings saved');
@@ -2450,22 +2619,40 @@ function renderBilling() {
     container.innerHTML = '<p style="color:#999;padding:16px">No time entries found for this period.</p>';
     return;
   }
-  const totalHours = entries.reduce((s, e) => s + e.hours, 0);
-  const rows = entries.map(e => `
+  const totNormal = entries.reduce((s, e) => s + (e.hours || 0), 0);
+  const totOverride = entries.reduce((s, e) => s + (e.override_hours || 0), 0);
+  const totAll = totNormal + totOverride;
+  const rows = entries.map(e => {
+    const normal = e.hours || 0;
+    const over = e.override_hours || 0;
+    const reasonCell = over > 0
+      ? (e.extend_reason || '<span style="color:#ef4444;font-weight:600">⚠ no authorization</span>')
+      : '';
+    return `
     <tr>
       <td>${e.ticket_id}</td>
       <td>${e.ticket_title}</td>
       <td>${e.ticket_phase || '—'}</td>
       <td>${e.date}</td>
-      <td>${e.hours.toFixed(2)}</td>
+      <td style="text-align:right">${normal.toFixed(2)}</td>
+      <td style="text-align:right${over > 0 ? ';color:#b45309;font-weight:600' : ';color:#bbb'}">${over.toFixed(2)}</td>
+      <td style="text-align:right;font-weight:600">${(normal + over).toFixed(2)}</td>
       <td>${e.description}</td>
       <td>${e.author || '—'}</td>
-    </tr>`).join('');
+      <td>${reasonCell}</td>
+    </tr>`;
+  }).join('');
   container.innerHTML = `
     <table class="billing-table">
-      <thead><tr><th>Ticket</th><th>Title</th><th>Phase</th><th>Date</th><th>Hours</th><th>Description</th><th>Author</th></tr></thead>
+      <thead><tr><th>Ticket</th><th>Title</th><th>Phase</th><th>Date</th><th style="text-align:right">Hours</th><th style="text-align:right">Override</th><th style="text-align:right">Total</th><th>Description</th><th>Author</th><th>Override reason</th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total</td><td style="font-weight:700">${totalHours.toFixed(2)}</td><td colspan="2"></td></tr></tfoot>
+      <tfoot><tr>
+        <td colspan="4" style="text-align:right;font-weight:700">Total</td>
+        <td style="text-align:right;font-weight:700">${totNormal.toFixed(2)}</td>
+        <td style="text-align:right;font-weight:700;color:#b45309">${totOverride.toFixed(2)}</td>
+        <td style="text-align:right;font-weight:700">${totAll.toFixed(2)}</td>
+        <td colspan="3"></td>
+      </tr></tfoot>
     </table>`;
 }
 
