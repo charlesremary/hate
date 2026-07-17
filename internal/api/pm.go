@@ -284,7 +284,8 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 			adminHours = cfg.AdminHours
 			qaHours = cfg.QAHours
 		}
-		reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, workHours, adminHours, qaHours)) +
+		reportsHTML := pm.RenderExecPlanHTML(tickets, effortToDays) +
+			pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, workHours, adminHours, qaHours)) +
 			pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(tickets, effortToDays)) +
 			pm.RenderBlockedHTML(pm.ComputeBlocked(tickets)) +
 			pm.RenderTestSummaryLineHTML(pm.ComputeTestSummary(tickets)) +
@@ -321,7 +322,8 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		adminHours = cfg.AdminHours
 		qaHours = cfg.QAHours
 	}
-	reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, workHours, adminHours, qaHours)) +
+	reportsHTML := pm.RenderExecPlanHTML(costTickets, effortToDays) +
+		pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, workHours, adminHours, qaHours)) +
 		pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(costTickets, effortToDays)) +
 		pm.RenderBlockedHTML(pm.ComputeBlocked(costTickets)) +
 		pm.RenderTestSummaryLineHTML(pm.ComputeTestSummary(costTickets)) +
