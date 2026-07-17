@@ -12,11 +12,13 @@ import (
 	"hate/internal/ticket"
 )
 
-// RenderExecPlanHTML renders a dependency "execution plan" for the PM dashboard:
-// a tree (nested by each ticket's gating predecessor) that shows order and
-// parallelism, with the effort-weighted critical path highlighted and a per-wave
-// parallel-width summary. Derived purely from `predecessors`, so it works
-// pre-baseline. Backlog tickets are excluded.
+// RenderExecPlanHTML renders a dependency "execution plan" for the PM dashboard,
+// grouped into parallel stages. A stage (topological wave) is a batch of tickets
+// whose blockers are all satisfied, so they can run at once; a stage opens once
+// the previous one's work is done. Each stage is a collapsible row whose header
+// carries the stage's ticket count, total effort (Σ), and an effort bar; the
+// effort-weighted critical path is flagged. Derived purely from `predecessors`,
+// so it works pre-baseline. Backlog tickets and feature parents are excluded.
 func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float64) string {
 	byID := map[string]*ticket.Ticket{}
 	for _, t := range tickets {
@@ -26,14 +28,11 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 		byID[t.ID] = t
 	}
 
-	// Edges limited to existing, non-backlog tickets.
 	preds := map[string][]string{}
-	succ := map[string][]string{}
 	for id, t := range byID {
 		for _, p := range t.Predecessors {
 			if _, ok := byID[p]; ok {
 				preds[id] = append(preds[id], p)
-				succ[p] = append(succ[p], id)
 			}
 		}
 	}
@@ -42,7 +41,7 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 		return execPlanCard(`<p style="padding:4px 0;color:#999;font-size:13px">No tickets to plan.</p>`)
 	}
 
-	// Wave = longest dependency chain to this node (topological level).
+	// Wave = longest dependency chain to this node (its stage, 0-based).
 	wave := map[string]int{}
 	var waveOf func(id string, stk map[string]bool) int
 	waveOf = func(id string, stk map[string]bool) int {
@@ -50,7 +49,7 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 			return w
 		}
 		if stk[id] {
-			return 0 // defensive: cycles shouldn't exist
+			return 0
 		}
 		stk[id] = true
 		best := 0
@@ -64,7 +63,8 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 		return best
 	}
 
-	// Effort-weighted earliest finish, for the critical path.
+	// Effort (person-days) per ticket, and effort-weighted earliest finish for
+	// the critical path.
 	dur := func(id string) float64 {
 		t := byID[id]
 		if t.Effort == nil {
@@ -124,159 +124,136 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 		cur = next
 	}
 
-	// Tree parent = the predecessor with the highest wave (the gating dep).
-	primary := map[string]string{}
-	for _, id := range ids {
-		pl := preds[id]
-		if len(pl) == 0 {
-			continue
+	esc := html.EscapeString
+	trunc := func(s string) string {
+		if len(s) > 66 {
+			return s[:65] + "…"
 		}
-		best := pl[0]
-		for _, p := range pl[1:] {
-			if wave[p] > wave[best] {
-				best = p
-			}
-		}
-		primary[id] = best
+		return s
 	}
-	kids := map[string][]string{}
-	var roots, isolated []string
-	for _, id := range ids {
-		if p, ok := primary[id]; ok {
-			kids[p] = append(kids[p], id)
-			continue
-		}
-		if len(succ[id]) == 0 { // no predecessors and nothing depends on it
-			isolated = append(isolated, id)
-		} else {
-			roots = append(roots, id)
+
+	// Feature parents (containers) aren't schedulable work — keep them out.
+	isParent := map[string]bool{}
+	for _, t := range byID {
+		for _, tag := range t.Tags {
+			if strings.HasPrefix(tag, "parent:") {
+				isParent[strings.TrimPrefix(tag, "parent:")] = true
+			}
 		}
 	}
 
-	sortIDs := func(s []string) {
+	// Group schedulable tickets by stage, tallying per-stage effort.
+	stageIDs := map[int][]string{}
+	stageDays := map[int]float64{}
+	maxWave := 0
+	maxStageDays := 0.0
+	for _, id := range ids {
+		if isParent[id] {
+			continue
+		}
+		w := wave[id]
+		stageIDs[w] = append(stageIDs[w], id)
+		stageDays[w] += dur(id)
+		if w > maxWave {
+			maxWave = w
+		}
+	}
+	for _, d := range stageDays {
+		if d > maxStageDays {
+			maxStageDays = d
+		}
+	}
+	for w := range stageIDs {
+		s := stageIDs[w]
 		sort.SliceStable(s, func(i, j int) bool {
 			a, b := s[i], s[j]
 			if critical[a] != critical[b] {
-				return critical[a] // critical branches first
-			}
-			if wave[a] != wave[b] {
-				return wave[a] < wave[b]
+				return critical[a] // critical first
 			}
 			return a < b
 		})
 	}
-	for k := range kids {
-		sortIDs(kids[k])
-	}
-	sortIDs(roots)
 
-	esc := html.EscapeString
-	trunc := func(s string) string {
-		if len(s) > 64 {
-			return s[:63] + "…"
-		}
-		return s
-	}
-	line := func(id string) string {
+	// One ticket row inside a stage.
+	row := func(id string) string {
 		t := byID[id]
 		star, style := "", "color:#333"
 		if critical[id] {
 			star, style = "★ ", "color:#dc2626;font-weight:600"
 		}
-		var sec []string
+		var needs []string
 		for _, p := range preds[id] {
-			if p != primary[id] {
-				sec = append(sec, p)
+			if !isParent[p] {
+				needs = append(needs, fmt.Sprintf("%s (stage %d)", p, wave[p]+1))
 			}
 		}
-		extra := ""
-		if len(sec) > 0 {
-			extra = fmt.Sprintf(`  <span style="color:#b45309">+needs %s</span>`, esc(strings.Join(sec, ", ")))
+		nstr := ""
+		if len(needs) > 0 {
+			nstr = fmt.Sprintf(` <span style="color:#b45309;font-size:11px">needs %s</span>`, esc(strings.Join(needs, ", ")))
 		}
-		return fmt.Sprintf(`<span style="%s">%s%s</span> %s <span style="color:#bbb">W%d</span>%s`,
-			style, star, esc(id), esc(trunc(t.Title)), wave[id], extra)
+		eff := ""
+		if d := dur(id); d > 0 {
+			eff = fmt.Sprintf(` <span style="color:#aaa;font-size:11px">%.0fh</span>`, d*HoursPerDay)
+		}
+		return fmt.Sprintf(`<div style="padding:3px 4px 3px 24px;font-size:13px"><span style="%s">%s%s</span> %s%s%s</div>`,
+			style, star, esc(id), esc(trunc(t.Title)), eff, nstr)
 	}
 
-	// Subtree effort rollup: person-days summed over a branch and its descendants.
-	subDays := map[string]float64{}
-	var sub func(id string) float64
-	sub = func(id string) float64 {
-		if v, ok := subDays[id]; ok {
-			return v
-		}
-		total := dur(id)
-		for _, c := range kids[id] {
-			total += sub(c)
-		}
-		subDays[id] = total
-		return total
-	}
-	metric := func(days float64, roll bool) string {
-		if days <= 0 {
-			return ""
-		}
-		if roll {
-			return fmt.Sprintf(` <span style="color:#0d9488;font-weight:600;white-space:nowrap">&Sigma; %.0fh &asymp; %.0fd</span>`, days*HoursPerDay, days)
-		}
-		return fmt.Sprintf(` <span style="color:#aaa;white-space:nowrap">%.0fh</span>`, days*HoursPerDay)
-	}
-
-	// Render as nested <details> so every branch collapses independently.
 	var sb strings.Builder
-	var render func(id string)
-	render = func(id string) {
-		ch := kids[id]
-		if len(ch) == 0 {
-			sb.WriteString(fmt.Sprintf(`<div style="padding:2px 4px 2px 22px">%s%s</div>`, line(id), metric(dur(id), false)))
-			return
-		}
-		sb.WriteString(fmt.Sprintf(`<details style="margin:0"><summary style="cursor:pointer;padding:2px 4px">%s%s</summary><div style="margin-left:16px;border-left:1px solid #eee;padding-left:10px">`, line(id), metric(sub(id), true)))
-		for _, c := range ch {
-			render(c)
-		}
-		sb.WriteString(`</div></details>`)
-	}
-	for _, r := range roots {
-		render(r)
-	}
-
-	// Per-wave parallel width summary.
-	widths := map[int]int{}
-	maxWave := 0
-	for _, id := range ids {
-		widths[wave[id]]++
-		if wave[id] > maxWave {
-			maxWave = wave[id]
-		}
-	}
-	var wparts []string
 	for w := 0; w <= maxWave; w++ {
-		wparts = append(wparts, fmt.Sprintf("W%d %d", w, widths[w]))
+		list := stageIDs[w]
+		if len(list) == 0 {
+			continue
+		}
+		barPct := 0.0
+		if maxStageDays > 0 {
+			barPct = stageDays[w] / maxStageDays * 100
+		}
+		note := ""
+		if w == 0 {
+			note = ` &middot; <span style="color:#16a34a">can start now</span>`
+		}
+		crit := 0
+		var body strings.Builder
+		for _, id := range list {
+			if critical[id] {
+				crit++
+			}
+			body.WriteString(row(id))
+		}
+		critNote := ""
+		if crit > 0 {
+			critNote = fmt.Sprintf(` &middot; <span style="color:#dc2626">%d on critical path ★</span>`, crit)
+		}
+		count := "<strong>1</strong> ticket"
+		if len(list) > 1 {
+			count = fmt.Sprintf("<strong>%d</strong> tickets, independent (can run at once)", len(list))
+		}
+		header := fmt.Sprintf(
+			`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">`+
+				`<div style="width:62px;font-weight:600;color:#334155">Stage %d</div>`+
+				`<div style="flex:1;min-width:90px;max-width:230px;background:#f1f5f9;border-radius:3px"><div style="height:14px;width:%.1f%%;min-width:3px;background:#3b82f6;border-radius:3px"></div></div>`+
+				`<div style="color:#334155;font-size:12.5px">%s &middot; <span style="color:#0d9488;font-weight:600">&Sigma; %.0fh &asymp; %.0fd</span>%s%s</div>`+
+				`</div>`,
+			w+1, barPct, count, stageDays[w]*HoursPerDay, stageDays[w], note, critNote)
+		sb.WriteString(fmt.Sprintf(`<details style="margin:0;border-bottom:1px solid #f1f5f9"><summary style="cursor:pointer;padding:7px 4px">%s</summary><div style="padding:2px 0 10px">%s</div></details>`,
+			header, body.String()))
 	}
+
 	critCount := len(critical)
-	summary := fmt.Sprintf(
-		`<p style="font-size:13px;color:#555;margin:0 0 4px"><strong>Critical path:</strong> `+
-			`<span style="color:#dc2626;font-weight:600">%d tickets ★</span> &middot; ~%.0f effort-days (the long pole; everything off it has slack).</p>`+
-			`<p style="font-size:12px;color:#888;margin:0 0 10px"><strong>Parallel width by wave</strong> (tickets that can run at once): %s</p>`+
-			`<p style="font-size:12px;color:#999;margin:0 0 10px">Siblings in the tree run in parallel; nesting = order. <span style="color:#b45309">+needs</span> flags an extra blocker beyond the tree parent. <strong style="color:#0d9488">&Sigma;</strong> = total effort in that branch (person-days @ 8h/day) &mdash; work, not elapsed time.</p>`,
-		critCount, maxEF, esc(strings.Join(wparts, " · ")))
+	head := fmt.Sprintf(
+		`<p style="font-size:13px;color:#555;margin:0 0 8px"><strong>Critical path:</strong> `+
+			`<span style="color:#dc2626;font-weight:600">%d tickets ★</span> &middot; ~%.0f effort-days &mdash; the longest dependency chain (the fastest this could finish even with unlimited people).</p>`+
+			`<p style="font-size:12px;color:#555;margin:0 0 12px"><strong>A stage groups tickets that don't depend on each other</strong>, so a stage's tickets can run at the same time. A ticket's stage number is how deep its longest chain of prerequisites is &mdash; it can't start until the earlier stages it <span style="color:#b45309">needs</span> are done. Bar length &amp; <span style="color:#0d9488">&Sigma;</span> = the stage's total effort (person-days @ 8h/day). Expand a stage for its tickets; <span style="color:#dc2626">★</span> = critical path.</p>`,
+		critCount, maxEF)
 
-	tree := fmt.Sprintf(`<div style="font-size:13px;line-height:1.5">%s</div>`, sb.String())
-
-	iso := ""
-	if len(isolated) > 0 {
-		sortIDs(isolated)
-		iso = fmt.Sprintf(`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:#888">Independent — %d tickets with no dependencies (can run any time)</summary><p style="font-size:12px;color:#777;margin:6px 0 0">%s</p></details>`,
-			len(isolated), esc(strings.Join(isolated, ", ")))
-	}
-
-	return execPlanCard(summary + tree + iso)
+	return execPlanCard(head + sb.String())
 }
 
 func execPlanCard(inner string) string {
 	return fmt.Sprintf(`
 <div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
-  <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:12px">&#127795; Execution plan &mdash; dependency order &amp; parallelism</h3>
+  <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:12px">&#127795; Execution plan &mdash; parallel stages</h3>
   %s
 </div>`, inner)
 }

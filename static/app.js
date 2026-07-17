@@ -257,6 +257,7 @@ document.addEventListener('mouseout', (e) => {
 });
 let allTickets = [];
 let effortToDaysMap = {}; // effort size → configured days, for the current project
+let ticketView = localStorage.getItem('hate:ticketview') || 'list'; // 'list' | 'plan'
 let projectResources = [];
 let currentUser = null;
 let showBilling = false; // Billing tab is hidden unless enabled in Settings.
@@ -692,7 +693,7 @@ async function loadTickets() {
     populatePhaseFilter(allTickets);
     populateTagFilter(allTickets);
     populateAssigneeFilter(allTickets);
-    renderTicketTable(visibleTickets());
+    renderTickets();
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="8" style="padding:16px;color:red">${e.message}</td></tr>`;
   }
@@ -832,9 +833,13 @@ function renderTicketTable(tickets) {
 
   if (mode === 'work') {
     const depth = computeWorkOrder(tickets, byId);
+    // Committed-active first, then backlog, then done — so uncommitted/finished
+    // work never leads the order.
+    const rank = t => isDone(t) ? 2 : (isBacklogTicket(t) ? 1 : 0);
     tickets.sort((a, b) =>
-         ((isDone(a) ? 1 : 0) - (isDone(b) ? 1 : 0))           // active before done
-      || ((depth.get(a.id) || 0) - (depth.get(b.id) || 0))     // ready before blocked, preds first
+         (rank(a) - rank(b))
+      || ((depth.get(a.id) || 0) - (depth.get(b.id) || 0))     // dependency order: ready before blocked
+      || (a.phase || '~').localeCompare(b.phase || '~')        // within a stage: phase order (Discovery→Build→…); unphased last
       || cmpDate(a.planned_start_date, b.planned_start_date)
       || cmpDate(a.due_date, b.due_date)
       || ((PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99))
@@ -957,6 +962,142 @@ function visibleTickets() {
   return visible;
 }
 
+// Render the ticket set in whichever view is active (flat list vs dependency plan).
+function renderTickets() {
+  const planActive = ticketView === 'plan';
+  const table = document.getElementById('ticket-table');
+  const plan = document.getElementById('ticket-plan');
+  if (table) table.classList.toggle('hidden', planActive);
+  if (plan) plan.classList.toggle('hidden', !planActive);
+  const visible = visibleTickets();
+  if (planActive) renderTicketPlan(visible);
+  else renderTicketTable(visible);
+}
+
+// Compute dependency stages + critical path from the loaded tickets (mirrors the
+// server's execution-plan logic). Backlog excluded; parents tracked separately.
+function computeExecPlan(all) {
+  const byId = {};
+  all.forEach(t => { if (!isBacklogTicket(t)) byId[t.id] = t; });
+  const ids = Object.keys(byId);
+  const preds = {};
+  ids.forEach(id => { preds[id] = (byId[id].predecessors || []).filter(p => byId[p]); });
+  const wave = {};
+  const waveOf = (id, stk) => {
+    if (id in wave) return wave[id];
+    if (stk.has(id)) return 0;
+    stk.add(id);
+    let best = 0;
+    for (const p of preds[id]) best = Math.max(best, waveOf(p, stk) + 1);
+    stk.delete(id);
+    wave[id] = best; return best;
+  };
+  ids.forEach(id => waveOf(id, new Set()));
+  const dur = id => {
+    const e = byId[id] && byId[id].effort;
+    const d = e ? effortToDaysMap[e] : 0;
+    return d == null ? 0 : d;
+  };
+  const ef = {};
+  const efOf = (id, stk) => {
+    if (id in ef) return ef[id];
+    if (stk.has(id)) return 0;
+    stk.add(id);
+    let best = 0;
+    for (const p of preds[id]) best = Math.max(best, efOf(p, stk));
+    stk.delete(id);
+    ef[id] = best + dur(id); return ef[id];
+  };
+  ids.forEach(id => efOf(id, new Set()));
+  let endNode = null, maxEF = -1;
+  ids.slice().sort().forEach(id => { if (ef[id] > maxEF) { maxEF = ef[id]; endNode = id; } });
+  const critical = new Set();
+  let cur = endNode;
+  while (cur) {
+    critical.add(cur);
+    const want = ef[cur] - dur(cur);
+    let next = null;
+    for (const p of preds[cur]) { if (Math.abs(ef[p] - want) < 1e-9) { next = p; break; } }
+    cur = next;
+  }
+  const isParent = new Set();
+  all.forEach(t => (t.tags || []).forEach(tag => { if (tag.startsWith('parent:')) isParent.add(tag.slice(7)); }));
+  return { byId, preds, wave, dur, critical, isParent };
+}
+
+// Interactive dependency-stage view: filtered tickets grouped by stage, each row
+// clickable to open/start it.
+function renderTicketPlan(visible) {
+  const el = document.getElementById('ticket-plan');
+  if (!allTickets.length) { el.innerHTML = '<p style="color:#999;padding:16px">No tickets.</p>'; return; }
+  const P = computeExecPlan(allTickets);
+  const HPD = 8;
+  const stages = {};
+  visible.forEach(t => {
+    if (P.isParent.has(t.id) || !P.byId[t.id]) return; // skip parents/backlog
+    const w = P.wave[t.id] ?? 0;
+    (stages[w] = stages[w] || []).push(t.id);
+  });
+  const stageNums = Object.keys(stages).map(Number).sort((a, b) => a - b);
+  if (!stageNums.length) { el.innerHTML = '<p style="color:#999;padding:16px">No tickets match the current filters.</p>'; return; }
+  const stageDays = {}; let maxStageDays = 0;
+  stageNums.forEach(w => { stageDays[w] = stages[w].reduce((s, id) => s + P.dur(id), 0); if (stageDays[w] > maxStageDays) maxStageDays = stageDays[w]; });
+  const blocks = stageNums.map(w => {
+    const list = stages[w].slice().sort((a, b) => {
+      const ca = P.critical.has(a), cb = P.critical.has(b);
+      if (ca !== cb) return ca ? -1 : 1;
+      return a < b ? -1 : 1;
+    });
+    const bar = maxStageDays > 0 ? stageDays[w] / maxStageDays * 100 : 0;
+    const crit = list.filter(id => P.critical.has(id)).length;
+    const count = list.length === 1 ? '<strong>1</strong> ticket' : `<strong>${list.length}</strong> tickets, independent (can run at once)`;
+    const note = w === 0 ? ' · <span style="color:#16a34a">can start now</span>' : '';
+    const critNote = crit > 0 ? ` · <span style="color:#dc2626">${crit} on critical path ★</span>` : '';
+    const rows = list.map(id => {
+      const t = P.byId[id];
+      const star = P.critical.has(id) ? '<span style="color:#dc2626">★</span> ' : '';
+      const needs = (P.preds[id] || []).filter(p => !P.isParent.has(p)).map(p => `${p} (stage ${(P.wave[p] ?? 0) + 1})`);
+      const nstr = needs.length ? ` <span style="color:#b45309;font-size:11px">needs ${escapeHtml(needs.join(', '))}</span>` : '';
+      const eff = P.dur(id) ? ` <span style="color:#aaa;font-size:11px">${(P.dur(id) * HPD).toFixed(0)}h</span>` : '';
+      return `<div onclick="openTicketPanel('${id}')" style="cursor:pointer;padding:5px 8px 5px 22px;display:flex;gap:8px;align-items:center;border-radius:4px" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+        ${statusBadge(t.status)}
+        <span style="font-weight:600;color:#1565c0">${id}</span>
+        <span style="flex:1;min-width:0">${star}${escapeHtml(t.title)}</span>${eff}${nstr}
+      </div>`;
+    }).join('');
+    const open = w === 0 ? ' open' : '';
+    return `<details${open} style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:10px">
+      <summary style="cursor:pointer;padding:10px 12px">
+        <span style="display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <strong style="color:#334155">Stage ${w + 1}</strong>
+          <span style="display:inline-block;width:120px;height:12px;background:#f1f5f9;border-radius:3px"><span style="display:block;height:100%;width:${bar.toFixed(1)}%;min-width:3px;background:#3b82f6;border-radius:3px"></span></span>
+          <span style="font-size:12.5px;color:#334155">${count} · <span style="color:#0d9488;font-weight:600">Σ ${(stageDays[w] * HPD).toFixed(0)}h ≈ ${stageDays[w].toFixed(0)}d</span>${note}${critNote}</span>
+        </span>
+      </summary>
+      <div style="padding:2px 6px 8px">${rows}</div>
+    </details>`;
+  }).join('');
+  el.innerHTML = `<div style="max-width:1000px;margin:0 auto">
+    <p style="font-size:12px;color:#777;margin:4px 0 12px">A <strong>stage</strong> groups tickets that don't depend on each other, so they can run at once. <strong>Click a ticket to open it and start work.</strong> <span style="color:#b45309">needs</span> points to earlier stages that must finish first. Respects the filters above.</p>
+    ${blocks}</div>`;
+}
+
+function setTicketView(v) {
+  ticketView = v;
+  localStorage.setItem('hate:ticketview', v);
+  const l = document.getElementById('view-list'), p = document.getElementById('view-plan');
+  l.style.background = v === 'list' ? '#2563eb' : '#fff'; l.style.color = v === 'list' ? '#fff' : '#334155';
+  p.style.background = v === 'plan' ? '#2563eb' : '#fff'; p.style.color = v === 'plan' ? '#fff' : '#334155';
+  renderTickets();
+}
+document.getElementById('view-list').addEventListener('click', () => setTicketView('list'));
+document.getElementById('view-plan').addEventListener('click', () => setTicketView('plan'));
+(function initTicketView() {
+  const v = ticketView, l = document.getElementById('view-list'), p = document.getElementById('view-plan');
+  l.style.background = v === 'list' ? '#2563eb' : '#fff'; l.style.color = v === 'list' ? '#fff' : '#334155';
+  p.style.background = v === 'plan' ? '#2563eb' : '#fff'; p.style.color = v === 'plan' ? '#fff' : '#334155';
+})();
+
 document.getElementById('filter-status').addEventListener('change', loadTickets);
 document.getElementById('filter-type').addEventListener('change', loadTickets);
 document.getElementById('filter-phase').addEventListener('change', loadTickets);
@@ -977,7 +1118,7 @@ document.getElementById('filter-sort').addEventListener('change', (e) => {
   localStorage.setItem(SORT_STORAGE_KEY, e.target.value);
   // No need to refetch — re-render the visible set with the new sort.
   if (!allTickets.length) return;
-  renderTicketTable(visibleTickets());
+  renderTickets();
 });
 
 // ── Ticket detail panel ──────────────────────────────

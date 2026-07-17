@@ -81,6 +81,10 @@
               <option value="work">Sort: Work order</option>
             </select>
             <label class="toggle-label"><input type="checkbox" id="filter-hide-closed" checked> Hide closed</label>
+            <span style="margin-left:auto;display:inline-flex;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden;font-size:13px" title="List = flat table · Plan = tickets grouped into dependency stages">
+              <button type="button" id="view-list" data-view="list" style="border:0;padding:5px 12px;cursor:pointer;background:#2563eb;color:#fff">List</button>
+              <button type="button" id="view-plan" data-view="plan" style="border:0;padding:5px 12px;cursor:pointer;background:#fff;color:#334155">Plan</button>
+            </span>
           </div>
           <div id="ticket-list-container">
             <table id="ticket-table">
@@ -92,6 +96,7 @@
               </thead>
               <tbody id="ticket-tbody"></tbody>
             </table>
+            <div id="ticket-plan" class="hidden" style="overflow-y:auto;padding:12px 20px"></div>
           </div>
         </div>
 
