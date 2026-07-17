@@ -57,8 +57,25 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Post("/check-conflicts", checkScheduleConflicts)
 	r.Post("/balance", balanceProject)
 	r.Get("/phase-rollup", getPhaseRollup)
+	r.Get("/test-summary", getTestSummary)
 	r.Get("/cosmic", getCosmic)
 	r.Put("/cosmic-estimate", updateCosmicEstimate)
+}
+
+// getTestSummary handles GET /api/projects/{projectId}/test-summary.
+// Per-ticket QA test-case tallies plus the cases themselves, for the Test cases tab.
+func getTestSummary(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	tickets, err := ticket.ReadAllTickets(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, pm.ComputeTestSummary(tickets))
 }
 
 // getPhaseRollup handles GET /api/projects/{projectId}/phase-rollup.
@@ -257,7 +274,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		cfg, err := ticket.ReadConfig(root)
 		projectName := projectID
 		var effortToDays map[string]float64
-		var workHours, adminHours *float64
+		var workHours, adminHours, qaHours *float64
 		if err == nil {
 			if cfg.ProjectName != "" {
 				projectName = cfg.ProjectName
@@ -265,11 +282,12 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 			effortToDays = cfg.EffortToDays
 			workHours = cfg.EffectiveWorkHours()
 			adminHours = cfg.AdminHours
+			qaHours = cfg.QAHours
 		}
-		reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, workHours, adminHours)) +
+		reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, workHours, adminHours, qaHours)) +
 			pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(tickets, effortToDays)) +
 			pm.RenderBlockedHTML(pm.ComputeBlocked(tickets)) +
-			pm.RenderTestSummaryHTML(pm.ComputeTestSummary(tickets)) +
+			pm.RenderTestSummaryLineHTML(pm.ComputeTestSummary(tickets)) +
 			pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(tickets, effortToDays)) +
 			pm.RenderOverridesHTML(pm.ComputeOverrides(tickets)) +
 			pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
@@ -296,16 +314,17 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		costTickets = []*ticket.Ticket{}
 	}
 	var effortToDays map[string]float64
-	var workHours, adminHours *float64
+	var workHours, adminHours, qaHours *float64
 	if cfg, err := ticket.ReadConfig(root); err == nil {
 		effortToDays = cfg.EffortToDays
 		workHours = cfg.EffectiveWorkHours()
 		adminHours = cfg.AdminHours
+		qaHours = cfg.QAHours
 	}
-	reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, workHours, adminHours)) +
+	reportsHTML := pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, workHours, adminHours, qaHours)) +
 		pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(costTickets, effortToDays)) +
 		pm.RenderBlockedHTML(pm.ComputeBlocked(costTickets)) +
-		pm.RenderTestSummaryHTML(pm.ComputeTestSummary(costTickets)) +
+		pm.RenderTestSummaryLineHTML(pm.ComputeTestSummary(costTickets)) +
 		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, effortToDays)) +
 		pm.RenderOverridesHTML(pm.ComputeOverrides(costTickets)) +
 		pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))

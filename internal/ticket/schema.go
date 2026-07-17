@@ -99,6 +99,9 @@ type TimeEntry struct {
 	// ExtendReason is set when this entry was logged past the ticket's effort
 	// allotment under strict time enforcement — the recorded authorization.
 	ExtendReason string `json:"extend_reason,omitempty"`
+	// Bucket is the hour-budget pool this entry burns ("work" | "admin" | "qa"),
+	// stamped from the ticket's status/type/tags at log time (see TimeBucket).
+	Bucket string `json:"bucket,omitempty"`
 }
 
 // TestCase is one QA test case on a ticket: how to exercise the work and what to

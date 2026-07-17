@@ -117,6 +117,9 @@ type ProjectConfig struct {
 	// nil = pool has no budget set.
 	WorkHours  *float64 `json:"work_hours,omitempty"`
 	AdminHours *float64 `json:"admin_hours,omitempty"`
+	// QAHours is the QA/testing pool: burned by time logged in qa_testing/rework
+	// or on qa-tagged tickets. Bid separately from the CFP-sized build work.
+	QAHours *float64 `json:"qa_hours,omitempty"`
 	// MaxHours is the deprecated single cap, kept so existing configs migrate:
 	// it seeds WorkHours until the budget is saved through the new settings.
 	MaxHours *float64 `json:"max_hours,omitempty"`

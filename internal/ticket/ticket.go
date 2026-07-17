@@ -811,6 +811,24 @@ func roundToQuarter(hours float64) float64 {
 // AddTimeEntry adds a time entry to a ticket. extendReason is non-empty only
 // when the entry was authorized past the ticket's allotment under strict time
 // enforcement; it is recorded on the entry and in the activity detail.
+// TimeBucket classifies which hour-budget pool a ticket's time burns at the
+// moment it's logged: "qa" when the ticket is in a QA status (qa_testing/rework)
+// or carries a `qa` tag, "admin" for administration/meeting tickets, else "work".
+func TimeBucket(t *Ticket) string {
+	if t.Status == "qa_testing" || t.Status == "rework" {
+		return "qa"
+	}
+	for _, tag := range t.Tags {
+		if tag == "qa" {
+			return "qa"
+		}
+	}
+	if t.Type == "administration" || t.Type == "meeting" {
+		return "admin"
+	}
+	return "work"
+}
+
 func AddTimeEntry(repoRoot, ticketID, date string, hours float64, description, author, extendReason string) (*Ticket, error) {
 	if err := ValidateDate(date); err != nil {
 		return nil, err
@@ -833,6 +851,7 @@ func AddTimeEntry(repoRoot, ticketID, date string, hours float64, description, a
 		Author:       author,
 		LoggedAt:     NowISO(),
 		ExtendReason: extendReason,
+		Bucket:       TimeBucket(t),
 	})
 	detail := fmt.Sprintf("%gh on %s: %s", hours, date, description)
 	if extendReason != "" {

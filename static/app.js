@@ -425,12 +425,14 @@ function switchTab(tab) {
   document.getElementById('tab-overview').classList.toggle('hidden', tab !== 'overview');
   document.getElementById('tab-billing').classList.toggle('hidden', tab !== 'billing');
   document.getElementById('tab-cosmic').classList.toggle('hidden', tab !== 'cosmic');
+  document.getElementById('tab-testcases').classList.toggle('hidden', tab !== 'testcases');
 
   if (tab === 'tickets' && currentProject) loadTickets();
   if (tab === 'dashboard' && currentProject) loadDashboard();
   if (tab === 'overview' && currentProject) loadOverview();
   if (tab === 'billing' && currentProject) loadBilling();
   if (tab === 'cosmic' && currentProject) loadCosmic();
+  if (tab === 'testcases' && currentProject) loadTestCases();
 }
 
 // Show or hide the Billing tab per the app setting. Hidden by default.
@@ -689,11 +691,8 @@ async function loadTickets() {
     } catch { /* leave the previous map in place */ }
     populatePhaseFilter(allTickets);
     populateTagFilter(allTickets);
-    const hideClosed = document.getElementById('filter-hide-closed').checked;
-    const tagFilter = document.getElementById('filter-tag').value;
-    let visible = hideClosed ? allTickets.filter(t => t.status !== 'closed' && t.status !== 'complete') : allTickets;
-    if (tagFilter) visible = visible.filter(t => (t.tags || []).includes(tagFilter));
-    renderTicketTable(visible);
+    populateAssigneeFilter(allTickets);
+    renderTicketTable(visibleTickets());
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="8" style="padding:16px;color:red">${e.message}</td></tr>`;
   }
@@ -926,10 +925,43 @@ function populateTagFilter(tickets) {
   sel.value = current;
 }
 
+// Assignee filter: people who actually have tickets, by name (value = email),
+// plus an Unassigned option when any ticket has no assignee.
+function populateAssigneeFilter(tickets) {
+  const sel = document.getElementById('filter-assignee');
+  const current = sel.value;
+  const emails = [...new Set(tickets.map(t => t.assignee).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">All assignees</option>';
+  if (tickets.some(t => !t.assignee)) {
+    const o = document.createElement('option');
+    o.value = '__unassigned__'; o.textContent = 'Unassigned';
+    sel.appendChild(o);
+  }
+  emails.forEach(email => {
+    const o = document.createElement('option');
+    o.value = email; o.textContent = resolveResourceName(email);
+    sel.appendChild(o);
+  });
+  sel.value = [...sel.options].some(o => o.value === current) ? current : '';
+}
+
+// The client-side filters applied to allTickets: hide-closed, tag, assignee.
+function visibleTickets() {
+  const hideClosed = document.getElementById('filter-hide-closed').checked;
+  const tagFilter = document.getElementById('filter-tag').value;
+  const assigneeFilter = document.getElementById('filter-assignee').value;
+  let visible = hideClosed ? allTickets.filter(t => t.status !== 'closed' && t.status !== 'complete') : allTickets;
+  if (tagFilter) visible = visible.filter(t => (t.tags || []).includes(tagFilter));
+  if (assigneeFilter === '__unassigned__') visible = visible.filter(t => !t.assignee);
+  else if (assigneeFilter) visible = visible.filter(t => t.assignee === assigneeFilter);
+  return visible;
+}
+
 document.getElementById('filter-status').addEventListener('change', loadTickets);
 document.getElementById('filter-type').addEventListener('change', loadTickets);
 document.getElementById('filter-phase').addEventListener('change', loadTickets);
 document.getElementById('filter-tag').addEventListener('change', loadTickets);
+document.getElementById('filter-assignee').addEventListener('change', loadTickets);
 document.getElementById('filter-hide-closed').addEventListener('change', loadTickets);
 
 // Sort preference is per-browser, not per-project — a PM picking "due date"
@@ -945,9 +977,7 @@ document.getElementById('filter-sort').addEventListener('change', (e) => {
   localStorage.setItem(SORT_STORAGE_KEY, e.target.value);
   // No need to refetch — re-render the visible set with the new sort.
   if (!allTickets.length) return;
-  const hideClosed = document.getElementById('filter-hide-closed').checked;
-  const visible = hideClosed ? allTickets.filter(t => t.status !== 'closed' && t.status !== 'complete') : allTickets;
-  renderTicketTable(visible);
+  renderTicketTable(visibleTickets());
 });
 
 // ── Ticket detail panel ──────────────────────────────
@@ -2291,6 +2321,7 @@ async function loadEffortSizingSection() {
     const hb = await API.get(`/api/projects/${currentProject.id}/hour-budget`);
     document.getElementById('work-hours').value = hb.work_hours ?? '';
     document.getElementById('admin-hours').value = hb.admin_hours ?? '';
+    document.getElementById('qa-hours').value = hb.qa_hours ?? '';
     mhEmpty.classList.add('hidden');
     mhInputs.classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
@@ -2354,12 +2385,13 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         if (!Number.isFinite(v) || v <= 0) throw new Error(`${label} must be a number greater than 0 (or blank to clear)`);
         return v;
       };
-      let workHours, adminHours;
+      let workHours, adminHours, qaHours;
       try {
         workHours = parsePool('work-hours', 'Work hours');
         adminHours = parsePool('admin-hours', 'Admin / meeting hours');
+        qaHours = parsePool('qa-hours', 'QA hours');
       } catch (err) { showToast(err.message, 'error'); return; }
-      await API.put(`/api/projects/${currentProject.id}/hour-budget`, { work_hours: workHours, admin_hours: adminHours });
+      await API.put(`/api/projects/${currentProject.id}/hour-budget`, { work_hours: workHours, admin_hours: adminHours, qa_hours: qaHours });
     }
     if (currentProject && !document.getElementById('strict-time-inputs').classList.contains('hidden')) {
       await API.put(`/api/projects/${currentProject.id}/strict-time`, {
@@ -2679,6 +2711,70 @@ function generateBillingCSV() {
 document.getElementById('billing-start').addEventListener('change', loadBilling);
 document.getElementById('billing-end').addEventListener('change', loadBilling);
 document.getElementById('billing-author').addEventListener('change', renderBilling);
+
+// ── Test cases tab ────────────────────────────────────
+async function loadTestCases() {
+  if (!currentProject) return;
+  const el = document.getElementById('testcases-content');
+  el.innerHTML = '<p style="color:#999;padding:16px">Loading…</p>';
+  try {
+    const rows = await API.get(`/api/projects/${currentProject.id}/test-summary`);
+    renderTestCases(rows);
+  } catch (e) {
+    el.innerHTML = `<p style="color:red;padding:16px">${e.message}</p>`;
+  }
+}
+
+function tcResultBadge(status) {
+  if (status === 'pass') return '<span style="background:#16a34a;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:700">PASS</span>';
+  if (status === 'fail') return '<span style="background:#dc2626;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:700">FAIL</span>';
+  return '<span style="color:#bbb;font-size:12px">untested</span>';
+}
+
+function renderTestCases(rows) {
+  const el = document.getElementById('testcases-content');
+  if (!rows.length) {
+    el.innerHTML = '<p style="color:#999;padding:16px">No active tickets have test cases yet. Add them on a ticket, or let the agent draft them.</p>';
+    return;
+  }
+  const agg = rows.reduce((a, r) => ({ total: a.total + r.total, pass: a.pass + r.pass, fail: a.fail + r.fail, untested: a.untested + r.untested }), { total: 0, pass: 0, fail: 0, untested: 0 });
+  const who = e => e ? e.split('@')[0] : '—';
+  const blocks = rows.map(r => {
+    const caseRows = (r.cases || []).map((c, i) => `
+      <tr>
+        <td style="padding:5px 8px;color:#bbb;vertical-align:top">${i + 1}</td>
+        <td style="padding:5px 8px;vertical-align:top">${escapeHtml(c.step)}</td>
+        <td style="padding:5px 8px;color:#555;vertical-align:top">${escapeHtml(c.expected)}</td>
+        <td style="padding:5px 8px;white-space:nowrap;vertical-align:top">${tcResultBadge(c.status)}</td>
+        <td style="padding:5px 8px;color:#777;vertical-align:top">${escapeHtml(c.comment || '')}</td>
+      </tr>`).join('');
+    return `
+      <details style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:10px;padding:0 12px">
+        <summary style="cursor:pointer;padding:12px 0;font-size:14px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+          <a onclick="event.preventDefault();event.stopPropagation();openTicketPanel('${r.ticket_id}')" href="#" style="color:#1565c0;font-weight:600;text-decoration:none">${r.ticket_id}</a>
+          <span style="flex:1;min-width:120px">${escapeHtml(r.title)}</span>
+          <span style="color:#888;font-size:12px">${escapeHtml(who(r.assignee))}</span>
+          <span style="font-size:12px;white-space:nowrap">
+            <span style="color:#16a34a;font-weight:600">${r.pass}✓</span>
+            <span style="color:#dc2626;font-weight:600">${r.fail}✗</span>
+            <span style="color:#b45309">${r.untested} untested</span>
+          </span>
+        </summary>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin:0 0 12px">
+          <thead><tr style="text-align:left;color:#666;border-bottom:1px solid #eee">
+            <th style="padding:5px 8px">#</th><th style="padding:5px 8px">Step / action</th><th style="padding:5px 8px">Expected result</th><th style="padding:5px 8px">Result</th><th style="padding:5px 8px">Comment</th>
+          </tr></thead>
+          <tbody>${caseRows}</tbody>
+        </table>
+      </details>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="max-width:1000px;margin:0 auto">
+      <h2 style="font-size:18px;margin:0 0 4px">Test cases</h2>
+      <p style="color:#666;font-size:13px;margin:0 0 16px">${agg.total} cases across ${rows.length} ticket${rows.length !== 1 ? 's' : ''} — <span style="color:#16a34a;font-weight:600">${agg.pass} pass</span> · <span style="color:#dc2626;font-weight:600">${agg.fail} fail</span> · <span style="color:#b45309;font-weight:600">${agg.untested} untested</span></p>
+      ${blocks}
+    </div>`;
+}
 
 // ── COSMIC calibration (experimental) ─────────────────
 const fmtCosmicH = n => (n || 0).toFixed(1);

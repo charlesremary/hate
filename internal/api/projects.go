@@ -864,6 +864,7 @@ func getHourBudget(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"work_hours":  cfg.EffectiveWorkHours(),
 		"admin_hours": cfg.AdminHours,
+		"qa_hours":    cfg.QAHours,
 	})
 }
 
@@ -880,11 +881,12 @@ func updateHourBudget(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		WorkHours  *float64 `json:"work_hours"`
 		AdminHours *float64 `json:"admin_hours"`
+		QAHours    *float64 `json:"qa_hours"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	for name, v := range map[string]*float64{"work_hours": req.WorkHours, "admin_hours": req.AdminHours} {
+	for name, v := range map[string]*float64{"work_hours": req.WorkHours, "admin_hours": req.AdminHours, "qa_hours": req.QAHours} {
 		if v != nil && *v <= 0 {
 			respondError(w, http.StatusBadRequest, name+" must be greater than 0 (or null to clear)")
 			return
@@ -897,6 +899,7 @@ func updateHourBudget(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg.WorkHours = req.WorkHours
 	cfg.AdminHours = req.AdminHours
+	cfg.QAHours = req.QAHours
 	cfg.MaxHours = nil // migrated into WorkHours; stop shadowing
 	if err := ticket.WriteConfig(root, cfg); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -905,6 +908,7 @@ func updateHourBudget(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"work_hours":  cfg.WorkHours,
 		"admin_hours": cfg.AdminHours,
+		"qa_hours":    cfg.QAHours,
 	})
 }
 

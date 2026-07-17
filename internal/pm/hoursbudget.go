@@ -68,27 +68,44 @@ func newPoolBudget(budget *float64, spent float64) PoolBudget {
 	return p
 }
 
-// HoursBudget tracks logged hours against the project's two hour pools: work
-// (task/dev_task/design_task) and admin/meeting (administration/meeting).
+// HoursBudget tracks logged hours against the project's three hour pools: work
+// (build), admin/meeting (overhead), and QA (testing).
 type HoursBudget struct {
 	Work  PoolBudget `json:"work"`
 	Admin PoolBudget `json:"admin"`
+	QA    PoolBudget `json:"qa"`
 }
 
-// ComputeHoursBudget buckets every logged hour into the work or admin/meeting
-// pool by ticket type and compares each to its budget.
-func ComputeHoursBudget(tickets []*ticket.Ticket, workHours, adminHours *float64) HoursBudget {
-	var workSpent, adminSpent float64
+// ComputeHoursBudget buckets every logged hour into the work, admin/meeting, or
+// QA pool and compares each to its budget. Each time entry carries the bucket it
+// was stamped with at log time (QA when logged in qa_testing/rework or on a
+// qa-tagged ticket); legacy entries with no stamp fall back to type.
+func ComputeHoursBudget(tickets []*ticket.Ticket, workHours, adminHours, qaHours *float64) HoursBudget {
+	var workSpent, adminSpent, qaSpent float64
 	for _, t := range tickets {
-		if isAdminMeeting(t) {
-			adminSpent += cosmicLoggedHours(t)
-		} else {
-			workSpent += cosmicLoggedHours(t)
+		for _, te := range t.TimeEntries {
+			bucket := te.Bucket
+			if bucket == "" { // legacy entry: infer from ticket type
+				if isAdminMeeting(t) {
+					bucket = "admin"
+				} else {
+					bucket = "work"
+				}
+			}
+			switch bucket {
+			case "qa":
+				qaSpent += te.Hours
+			case "admin":
+				adminSpent += te.Hours
+			default:
+				workSpent += te.Hours
+			}
 		}
 	}
 	return HoursBudget{
 		Work:  newPoolBudget(workHours, workSpent),
 		Admin: newPoolBudget(adminHours, adminSpent),
+		QA:    newPoolBudget(qaHours, qaSpent),
 	}
 }
 
@@ -140,9 +157,10 @@ func renderPool(label string, p PoolBudget) string {
 // to drop into either dashboard flavor (same idiom as RenderProjectCostHTML).
 func RenderHoursBudgetHTML(b HoursBudget) string {
 	header := `<h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:14px">Hours Budget &mdash; logged vs available</h3>`
+	unset := func(p PoolBudget) bool { return p.Budget == nil || *p.Budget <= 0 }
 	hint := ""
-	if (b.Work.Budget == nil || *b.Work.Budget <= 0) && (b.Admin.Budget == nil || *b.Admin.Budget <= 0) {
-		hint = `<p style="font-size:12px;color:#999;margin-top:2px">Set <strong>Work hours</strong> and <strong>Admin / meeting hours</strong> in Settings to track burn-down against each pool.</p>`
+	if unset(b.Work) && unset(b.Admin) && unset(b.QA) {
+		hint = `<p style="font-size:12px;color:#999;margin-top:2px">Set <strong>Work hours</strong>, <strong>Admin / meeting hours</strong>, and <strong>QA hours</strong> in Settings to track burn-down against each pool.</p>`
 	}
 	return fmt.Sprintf(`
 <div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
@@ -150,7 +168,8 @@ func RenderHoursBudgetHTML(b HoursBudget) string {
   %s
   %s
   %s
-</div>`, header, renderPool("Work", b.Work), renderPool("Admin / meeting", b.Admin), hint)
+  %s
+</div>`, header, renderPool("Work", b.Work), renderPool("Admin / meeting", b.Admin), renderPool("QA", b.QA), hint)
 }
 
 // ---------------------------------------------------------------------------
@@ -333,7 +352,7 @@ const hoursAtRiskThreshold = 90.0
 type HoursAtRiskRow struct {
 	TicketID    string  `json:"ticket_id"`
 	Title       string  `json:"title"`
-	Status      string  `json:"status"`
+	Assignee    string  `json:"assignee"`
 	Allocated   float64 `json:"allocated_hours"`
 	Spent       float64 `json:"spent_hours"`
 	PercentUsed float64 `json:"percent_used"`
@@ -361,8 +380,12 @@ func ComputeHoursAtRisk(tickets []*ticket.Ticket, effortToDays map[string]float6
 		if pct < hoursAtRiskThreshold {
 			continue
 		}
+		assignee := ""
+		if t.Assignee != nil {
+			assignee = *t.Assignee
+		}
 		rows = append(rows, HoursAtRiskRow{
-			TicketID: t.ID, Title: t.Title, Status: t.Status,
+			TicketID: t.ID, Title: t.Title, Assignee: assignee,
 			Allocated: allot, Spent: spent, PercentUsed: pct,
 		})
 	}
@@ -381,16 +404,22 @@ func RenderHoursAtRiskHTML(rows []HoursAtRiskRow) string {
 			color = "#ef4444" // over
 		}
 		remaining := r.Allocated - r.Spent
+		assignee := r.Assignee
+		if assignee == "" {
+			assignee = "—"
+		} else if at := strings.IndexByte(assignee, '@'); at > 0 {
+			assignee = assignee[:at]
+		}
 		body += fmt.Sprintf(
 			`<tr>`+
 				`<td style="padding:6px 8px;white-space:nowrap">%s</td>`+
 				`<td style="padding:6px 8px">%s</td>`+
-				`<td style="padding:6px 8px;text-transform:uppercase;color:#999">%s</td>`+
+				`<td style="padding:6px 8px;color:#666">%s</td>`+
 				`<td style="padding:6px 8px;text-align:right">%.1f</td>`+
 				`<td style="padding:6px 8px;text-align:right">%.1f</td>`+
 				`<td style="padding:6px 8px;text-align:right;color:%s;font-weight:600">%.0f%%</td>`+
 				`<td style="padding:6px 8px;text-align:right;color:%s">%+.1f</td></tr>`,
-			esc(r.TicketID), esc(r.Title), esc(strings.ReplaceAll(r.Status, "_", " ")),
+			esc(r.TicketID), esc(r.Title), esc(assignee),
 			r.Allocated, r.Spent, color, r.PercentUsed, color, remaining)
 	}
 	inner := ""
@@ -401,7 +430,7 @@ func RenderHoursAtRiskHTML(rows []HoursAtRiskRow) string {
     <thead><tr style="text-align:left;color:#666;border-bottom:1px solid #eee">
       <th style="padding:6px 8px">Ticket</th>
       <th style="padding:6px 8px">Title</th>
-      <th style="padding:6px 8px">Status</th>
+      <th style="padding:6px 8px">Assignee</th>
       <th style="padding:6px 8px;text-align:right">Allocated</th>
       <th style="padding:6px 8px;text-align:right">Logged</th>
       <th style="padding:6px 8px;text-align:right">Used</th>

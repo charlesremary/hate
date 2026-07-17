@@ -110,6 +110,7 @@ AMPL-7k3x  "Onboarding revamp"        tags: cfp:42          ← parent (size liv
 | `nonfunc` | child | Non-functional work (perf, security, hardening). 0 CFP. Hours. |
 | `type:<name>` | parent | Deliverable type for cost rollup, e.g. `type:kb-article`. |
 | `backlog` | any | Out of committed scope — excluded from completion %, schedule, capacity. |
+| `qa` | any | Routes the ticket's logged time to the **QA hours** pool (also applied automatically while a ticket is in QA Testing / Rework). See §5. |
 
 Rules that keep the data clean:
 
@@ -180,6 +181,25 @@ h-per-CFP band); the whole point of classing hours cleanly is to **replace that
 assumption with your project's measured wrap**. Blend config hours into
 `functional` and the wrap number becomes meaningless — which is why every child
 gets exactly one class and hours never land on the parent (§3).
+
+### QA effort is its own hours pool
+
+QA/testing effort is **bid and tracked separately** from the CFP-sized build work,
+in a dedicated **QA hours** pool (set in Settings alongside Work and Admin/meeting).
+Keeping it out of the functional hours keeps the h/CFP calibration honest — QA isn't
+blended into the code rate.
+
+- **Time logged while a ticket is in `qa_testing` or `rework` automatically burns
+  the QA pool**; time logged during `in_progress` burns Work. So a single dev_task's
+  hours split themselves into build vs. QA by *when* they were logged — no tagging
+  needed for the common case.
+- For a **standalone** QA/test ticket (one that never passes through another
+  ticket's QA status), tag it **`qa`** to route its logged time to the QA pool.
+- The forcing function already exists: `qa_testing` is a work status, so the
+  "log time to promote out of a work status" rule guarantees QA time is logged
+  before the ticket can leave QA. The QA pool just gives those hours a home to
+  reconcile **bid vs. actual** (shown on the PM dashboard's Hours Budget, now three
+  pools: Work / Admin-meeting / QA).
 
 ---
 
