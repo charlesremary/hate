@@ -5,21 +5,28 @@ package main
 
 import (
 	"embed"
+	"flag"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"hate/internal/api"
+	"hate/internal/config"
 )
 
 //go:embed static/*
 var staticFiles embed.FS
 
 func main() {
+	portFlag := flag.Int("port", 0, "HTTP port to listen on (default 8000, or $PORT)")
+	flag.Parse()
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -48,7 +55,16 @@ func main() {
 		w.Write(data)
 	})
 
+	// Port: -port flag wins, else $PORT, else 8000.
 	port := 8000
-	fmt.Printf("hate running on http://localhost:%d\n", port)
+	if p := os.Getenv("PORT"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 {
+			port = n
+		}
+	}
+	if *portFlag > 0 {
+		port = *portFlag
+	}
+	fmt.Printf("hate v%s running on http://localhost:%d\n", config.AppVersion, port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), r))
 }
