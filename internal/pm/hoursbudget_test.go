@@ -25,7 +25,7 @@ func TestComputeHoursBudget(t *testing.T) {
 	}
 
 	work, admin := 50.0, 8.0
-	b := ComputeHoursBudget(tickets, &work, &admin)
+	b := ComputeHoursBudget(tickets, &work, &admin, nil)
 	if b.Work.Spent != 40 || b.Work.Remaining != 10 || b.Work.PercentUsed != 80 { // 40/50
 		t.Errorf("work = spent %.1f/rem %.1f/pct %.1f, want 40/10/80", b.Work.Spent, b.Work.Remaining, b.Work.PercentUsed)
 	}
@@ -34,7 +34,7 @@ func TestComputeHoursBudget(t *testing.T) {
 	}
 
 	// No budgets set: pools still total their spend, nothing to burn against.
-	nb := ComputeHoursBudget(tickets, nil, nil)
+	nb := ComputeHoursBudget(tickets, nil, nil, nil)
 	if nb.Work.Budget != nil || nb.Work.Spent != 40 || nb.Work.PercentUsed != 0 {
 		t.Errorf("no-budget work = %+v, want spent 40, pct 0, nil budget", nb.Work)
 	}
