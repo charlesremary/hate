@@ -142,11 +142,13 @@ func ganttBarColor(status string, critical bool) (string, string) {
 	return fill, stroke
 }
 
-// renderGanttPanel renders the Gantt tab body (SVG + toolbar + legend).
-func renderGanttPanel(snapshot *Snapshot) string {
+// renderGanttPanel renders the Gantt tab body (SVG + toolbar + legend). note is
+// the descriptor shown top-left (baselined vs projected); exportURL is the
+// draw.io download link.
+func renderGanttPanel(snapshot *Snapshot, note, exportURL string) string {
 	rows, chartStart, chartEnd := ganttData(snapshot)
 	if len(rows) == 0 {
-		return `<div style="padding:24px;color:#9ca3af">No scheduled tasks with baseline dates to chart yet.</div>`
+		return `<div style="padding:24px;color:#9ca3af">No scheduled tasks to chart yet — add effort sizes (and dependencies) to your tickets.</div>`
 	}
 	totalDays := daysBetween(chartStart, chartEnd) + 1
 	ppd := ganttPxPerDay(totalDays)
@@ -283,7 +285,6 @@ func renderGanttPanel(snapshot *Snapshot) string {
 
 	sb.WriteString(`</svg>`)
 
-	exportURL := fmt.Sprintf("/api/projects/%s/gantt.drawio", esc(snapshot.ProjectID))
 	legend := `<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#6b7280;margin:10px 0 0">
       <span><span style="display:inline-block;width:22px;height:8px;background:#e5e7eb;border-radius:2px;vertical-align:middle"></span> planned</span>
       <span><span style="display:inline-block;width:22px;height:8px;background:#3b82f6;border-radius:2px;vertical-align:middle"></span> actual / projected</span>
@@ -293,13 +294,13 @@ func renderGanttPanel(snapshot *Snapshot) string {
     </div>`
 	return fmt.Sprintf(`
 <div style="padding:16px 24px 8px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-    <div style="font-size:13px;color:#6b7280">Baselined schedule &mdash; read-only. Reschedule by editing tickets.</div>
-    <a href="%s" download="gantt.drawio" class="gantt-export-btn" style="text-decoration:none;background:#1976d2;color:#fff;padding:7px 14px;border-radius:6px;font-size:13px">Export to draw.io</a>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px">
+    <div style="font-size:13px;color:#6b7280">%s</div>
+    <a href="%s" download="gantt.drawio" class="gantt-export-btn" style="text-decoration:none;background:#1976d2;color:#fff;padding:7px 14px;border-radius:6px;font-size:13px;white-space:nowrap">Export to draw.io</a>
   </div>
   <div style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;background:#fff">%s</div>
   %s
-</div>`, exportURL, sb.String(), legend)
+</div>`, html.EscapeString(note), exportURL, sb.String(), legend)
 }
 
 // runeTruncate shortens s to n runes with an ellipsis.

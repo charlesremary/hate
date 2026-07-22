@@ -33,7 +33,7 @@ func ganttFixture() *Snapshot {
 }
 
 func TestRenderGanttPanel(t *testing.T) {
-	svg := renderGanttPanel(ganttFixture())
+	svg := renderGanttPanel(ganttFixture(), "Baselined schedule — read-only.", "/api/projects/TEST/gantt.drawio")
 	wants := []string{
 		`class="gantt-svg"`,
 		`/api/projects/TEST/gantt.drawio`, // export button href

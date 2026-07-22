@@ -947,7 +947,9 @@ func GenerateDashboard(snapshot *Snapshot, costHTML string) string {
 
 	statusHTML := renderStatusPanel(snapshot)
 	depHTML := renderDependencyPanel(snapshot)
-	ganttHTML := renderGanttPanel(snapshot)
+	ganttHTML := renderGanttPanel(snapshot,
+		"Baselined schedule — read-only. Reschedule by editing tickets.",
+		fmt.Sprintf("/api/projects/%s/gantt.drawio", snapshot.ProjectID))
 
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">

@@ -266,15 +266,40 @@ func getGanttDrawio(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Baselined snapshot if there is one; otherwise the floating projected
+	// schedule from ?start= (default today), so export works pre-baseline too.
 	snapshot, err := pm.LoadLatestSnapshot(root)
 	if err != nil || snapshot == nil {
-		respondError(w, http.StatusNotFound, "No snapshot yet — create a baseline and run a snapshot first.")
-		return
+		tickets, terr := ticket.ReadAllTickets(root)
+		if terr != nil {
+			respondError(w, http.StatusInternalServerError, terr.Error())
+			return
+		}
+		projectName := projectID
+		var effortToDays map[string]float64
+		if cfg, cerr := ticket.ReadConfig(root); cerr == nil {
+			if cfg.ProjectName != "" {
+				projectName = cfg.ProjectName
+			}
+			effortToDays = cfg.EffortToDays
+		}
+		snapshot, _ = pm.ProjectSchedule(projectID, projectName, tickets, effortToDays, ganttStart(r))
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-gantt.drawio"`, projectID))
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(pm.RenderGanttDrawio(snapshot)))
+}
+
+// ganttStart resolves the projection start date from ?start=YYYY-MM-DD,
+// defaulting to today.
+func ganttStart(r *http.Request) time.Time {
+	if s := r.URL.Query().Get("start"); s != "" {
+		if d, err := time.Parse("2006-01-02", s); err == nil {
+			return d
+		}
+	}
+	return time.Now()
 }
 
 // getDashboard handles GET /api/projects/{projectId}/dashboard
@@ -304,7 +329,13 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 			adminHours = cfg.AdminHours
 			qaHours = cfg.QAHours
 		}
-		reportsHTML := pm.RenderExecPlanHTML(tickets, effortToDays) +
+		start := ganttStart(r)
+		exportURL := fmt.Sprintf("/api/projects/%s/gantt.drawio", projectID)
+		if s := r.URL.Query().Get("start"); s != "" {
+			exportURL += "?start=" + s
+		}
+		reportsHTML := pm.RenderProjectedGanttHTML(projectID, projectName, tickets, effortToDays, start, exportURL) +
+			pm.RenderExecPlanHTML(tickets, effortToDays) +
 			pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, workHours, adminHours, qaHours)) +
 			pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(tickets, effortToDays)) +
 			pm.RenderBlockedHTML(pm.ComputeBlocked(tickets)) +
