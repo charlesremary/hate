@@ -277,6 +277,13 @@ func ganttSVG(rows []ganttRow, chartStart, chartEnd time.Time, snapshotDate stri
 	sb.WriteString(fmt.Sprintf(`<line x1="0" y1="%d" x2="%d" y2="%d" stroke="#d1d5db" stroke-width="1"/>`, gTopAxis-2, svgW, gTopAxis-2))
 	sb.WriteString(fmt.Sprintf(`<line x1="%d" y1="0" x2="%d" y2="%d" stroke="#d1d5db" stroke-width="1"/>`, gGutter, gGutter, axisBottom))
 
+	// --- Zebra row backgrounds (drawn first, so connectors/bars sit on top). ---
+	for i := range rows {
+		if i%2 == 1 {
+			sb.WriteString(fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" fill="#f9fafb"/>`, gGutter, rows[i].y, chartW, gRowH))
+		}
+	}
+
 	// --- Stage header bands. ---
 	for _, h := range headers {
 		sb.WriteString(fmt.Sprintf(`<rect x="0" y="%d" width="%d" height="%d" fill="#eef2f7"/>`, h.y, svgW, gStageH))
@@ -312,9 +319,6 @@ func ganttSVG(rows []ganttRow, chartStart, chartEnd time.Time, snapshotDate stri
 	for i := range rows {
 		r := rows[i]
 		yc := r.y + gRowH/2
-		if i%2 == 1 {
-			sb.WriteString(fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" fill="#f9fafb"/>`, gGutter, r.y, chartW, gRowH))
-		}
 		title := runeTruncate(r.task.Title, gLabelChars)
 		labelColor := "#111827"
 		if r.critical {
