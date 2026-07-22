@@ -208,10 +208,11 @@ func stageTally(rows []ganttRow) (count map[int]int, days map[int]int) {
 // renderGanttPanel renders the Gantt tab body (SVG + toolbar + legend). note is
 // the descriptor shown top-left (baselined vs projected); exportURL is the
 // draw.io download link.
-func renderGanttPanel(snapshot *Snapshot, note, exportURL string) string {
-	rows, chartStart, chartEnd := ganttData(snapshot)
+// ganttSVG builds the stage-grouped, time-scaled SVG for a set of rows (already
+// grouped by ganttData). Returns "" when there are no rows.
+func ganttSVG(rows []ganttRow, chartStart, chartEnd time.Time, snapshotDate string) string {
 	if len(rows) == 0 {
-		return `<div style="padding:24px;color:#9ca3af">No scheduled tasks to chart yet — add effort sizes (and dependencies) to your tickets.</div>`
+		return ""
 	}
 	totalDays := daysBetween(chartStart, chartEnd) + 1
 	ppd := ganttPxPerDay(totalDays)
@@ -264,7 +265,7 @@ func renderGanttPanel(snapshot *Snapshot, note, exportURL string) string {
 		}
 		m = m.AddDate(0, 1, 0)
 	}
-	today := parseDate(snapshot.SnapshotDate)
+	today := parseDate(snapshotDate)
 	if today.IsZero() {
 		today = chartStart
 	}
@@ -366,7 +367,47 @@ func renderGanttPanel(snapshot *Snapshot, note, exportURL string) string {
 	}
 
 	sb.WriteString(`</svg>`)
+	return sb.String()
+}
 
+// criticalOnly returns a snapshot filtered to the critical-path tasks (and the
+// dependencies among them) — the source for the critical-path-only view.
+func criticalOnly(s *Snapshot) *Snapshot {
+	cp := map[string]bool{}
+	for _, id := range s.CriticalPathIDs {
+		cp[id] = true
+	}
+	out := &Snapshot{ProjectID: s.ProjectID, ProjectName: s.ProjectName, SnapshotDate: s.SnapshotDate, CriticalPathIDs: s.CriticalPathIDs}
+	for _, t := range s.Tasks {
+		if !cp[t.TaskID] {
+			continue
+		}
+		tt := t
+		var deps []string
+		for _, d := range t.Dependencies {
+			if cp[d] {
+				deps = append(deps, d)
+			}
+		}
+		tt.Dependencies = deps
+		out.Tasks = append(out.Tasks, tt)
+	}
+	return out
+}
+
+// renderGanttPanel renders the Gantt tab body: a Full plan / Critical path
+// toggle over two SVGs, the draw.io export button, and a legend.
+func renderGanttPanel(snapshot *Snapshot, note, exportURL string) string {
+	rows, cs, ce := ganttData(snapshot)
+	if len(rows) == 0 {
+		return `<div style="padding:24px;color:#9ca3af">No scheduled tasks to chart yet — add effort sizes (and dependencies) to your tickets.</div>`
+	}
+	full := ganttSVG(rows, cs, ce, snapshot.SnapshotDate)
+	cpRows, ccs, cce := ganttData(criticalOnly(snapshot))
+	cp := ganttSVG(cpRows, ccs, cce, snapshot.SnapshotDate)
+	if cp == "" {
+		cp = `<div style="padding:24px;color:#9ca3af">No critical path identified for this schedule.</div>`
+	}
 	legend := `<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#6b7280;margin:10px 0 0">
       <span><span style="display:inline-block;width:22px;height:8px;background:#e5e7eb;border-radius:2px;vertical-align:middle"></span> planned</span>
       <span><span style="display:inline-block;width:22px;height:8px;background:#3b82f6;border-radius:2px;vertical-align:middle"></span> actual / projected</span>
@@ -375,15 +416,31 @@ func renderGanttPanel(snapshot *Snapshot, note, exportURL string) string {
       <span><span style="color:#7c3aed">&#9670;</span> milestone</span>
       <span>Stages = parallel groups (tasks that can run at once)</span>
     </div>`
+	const btn = `border:none;padding:6px 13px;font-size:13px;cursor:pointer;`
 	return fmt.Sprintf(`
 <div style="padding:16px 24px 8px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px;flex-wrap:wrap">
     <div style="font-size:13px;color:#6b7280">%s</div>
-    <a href="%s" download="gantt.drawio" class="gantt-export-btn" style="text-decoration:none;background:#1976d2;color:#fff;padding:7px 14px;border-radius:6px;font-size:13px;white-space:nowrap">Export to draw.io</a>
+    <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:inline-flex;border:1px solid #d1d5db;border-radius:6px;overflow:hidden">
+        <button type="button" onclick="ganttView(this,'full')" style="%sbackground:#1976d2;color:#fff">Full plan</button>
+        <button type="button" onclick="ganttView(this,'cp')" style="%sbackground:#fff;color:#374151;border-left:1px solid #d1d5db">Critical path</button>
+      </div>
+      <a href="%s" download="gantt.drawio" style="text-decoration:none;background:#1976d2;color:#fff;padding:7px 14px;border-radius:6px;font-size:13px;white-space:nowrap">Export to draw.io</a>
+    </div>
   </div>
-  <div style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;background:#fff">%s</div>
+  <div id="gantt-full" style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;background:#fff">%s</div>
+  <div id="gantt-cp" style="display:none;overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;background:#fff">%s</div>
   %s
-</div>`, html.EscapeString(note), exportURL, sb.String(), legend)
+  <script>
+  function ganttView(btn, which){
+    document.getElementById('gantt-full').style.display = which==='full'?'block':'none';
+    document.getElementById('gantt-cp').style.display = which==='cp'?'block':'none';
+    var bs = btn.parentNode.querySelectorAll('button');
+    for (var i=0;i<bs.length;i++){ var on = bs[i]===btn; bs[i].style.background = on?'#1976d2':'#fff'; bs[i].style.color = on?'#fff':'#374151'; }
+  }
+  </script>
+</div>`, html.EscapeString(note), btn, btn, exportURL, full, cp, legend)
 }
 
 // runeTruncate shortens s to n runes with an ellipsis.
@@ -427,6 +484,15 @@ func plif(n int) string {
 // a today line, and finish-to-start dependency edges. draw.io reads this XML
 // directly (no deflate needed).
 func RenderGanttDrawio(snapshot *Snapshot) string {
+	return `<mxfile host="hate" type="device">` +
+		ganttDrawioDiagram(snapshot.ProjectName+" — Full plan", snapshot) +
+		ganttDrawioDiagram("Critical path", criticalOnly(snapshot)) +
+		`</mxfile>`
+}
+
+// ganttDrawioDiagram builds one <diagram> (a draw.io tab) for the given
+// snapshot's rows.
+func ganttDrawioDiagram(name string, snapshot *Snapshot) string {
 	const (
 		gut  = 340
 		rowH = 24
@@ -436,11 +502,11 @@ func RenderGanttDrawio(snapshot *Snapshot) string {
 	rows, chartStart, chartEnd := ganttData(snapshot)
 	esc := html.EscapeString
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf(`<mxfile host="hate" type="device"><diagram name="%s Gantt"><mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/>`,
-		esc(snapshot.ProjectName)))
+	b.WriteString(fmt.Sprintf(`<diagram name="%s"><mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/>`,
+		esc(name)))
 
 	if len(rows) == 0 {
-		b.WriteString(`<mxCell id="empty" value="No scheduled tasks." style="text;html=1;align=left;" vertex="1" parent="1"><mxGeometry x="20" y="20" width="400" height="24" as="geometry"/></mxCell></root></mxGraphModel></diagram></mxfile>`)
+		b.WriteString(`<mxCell id="empty" value="No tasks." style="text;html=1;align=left;" vertex="1" parent="1"><mxGeometry x="20" y="20" width="400" height="24" as="geometry"/></mxCell></root></mxGraphModel></diagram>`)
 		return b.String()
 	}
 
@@ -550,7 +616,7 @@ func RenderGanttDrawio(snapshot *Snapshot) string {
 		}
 	}
 
-	b.WriteString(`</root></mxGraphModel></diagram></mxfile>`)
+	b.WriteString(`</root></mxGraphModel></diagram>`)
 	return b.String()
 }
 

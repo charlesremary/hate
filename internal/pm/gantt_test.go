@@ -38,6 +38,10 @@ func TestRenderGanttPanel(t *testing.T) {
 		`class="gantt-svg"`,
 		`/api/projects/TEST/gantt.drawio`, // export button href
 		`Export to draw.io`,
+		`Full plan`,      // view toggle
+		`Critical path`,  // view toggle
+		`id="gantt-cp"`,  // critical-path view container
+		`function ganttView`,
 		`Stage 1`, // parallel-group band
 		`Stage 2`,
 		`#dc2626`, // critical-path red stroke
@@ -75,13 +79,14 @@ func TestRenderGanttDrawioIsValidXML(t *testing.T) {
 	// so the A→B dependency edge runs t0→t2.
 	wants := []string{
 		`<mxfile`,
-		`<diagram name="Test Project Gantt">`,
-		`source="t0" target="t2"`, // dependency edge A→B
-		`Stage 1`,                 // stage band
+		`<diagram name="Test Project — Full plan">`, // full-plan tab
+		`<diagram name="Critical path">`,            // critical-path tab
+		`source="t0" target="t2"`,                   // dependency edge A→B (full plan)
+		`Stage 1`,                                   // stage band
 		`Stage 2`,
-		`rhombus`,    // milestone
-		`+3d`,        // slip cell
-		`Aug 2026`,   // month label
+		`rhombus`,  // milestone
+		`+3d`,      // slip cell
+		`Aug 2026`, // month label
 	}
 	for _, w := range wants {
 		if !strings.Contains(out, w) {
