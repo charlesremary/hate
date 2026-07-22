@@ -38,6 +38,8 @@ func TestRenderGanttPanel(t *testing.T) {
 		`class="gantt-svg"`,
 		`/api/projects/TEST/gantt.drawio`, // export button href
 		`Export to draw.io`,
+		`Stage 1`, // parallel-group band
+		`Stage 2`,
 		`#dc2626`, // critical-path red stroke
 		`#7c3aed`, // milestone diamond fill
 		`+3d`,     // slip label
@@ -69,16 +71,18 @@ func TestRenderGanttDrawioIsValidXML(t *testing.T) {
 		}
 	}
 
+	// Stage grouping: A & the milestone are stage 0 (t0, t1), B is stage 1 (t2),
+	// so the A→B dependency edge runs t0→t2.
 	wants := []string{
 		`<mxfile`,
 		`<diagram name="Test Project Gantt">`,
-		`source="t0" target="t1"`, // dependency edge A→B
-		`rhombus`,                 // milestone
-		`+3d`,                     // slip cell
-		`Jan 2006`,                // month label format artifact? no — check a real month
+		`source="t0" target="t2"`, // dependency edge A→B
+		`Stage 1`,                 // stage band
+		`Stage 2`,
+		`rhombus`,    // milestone
+		`+3d`,        // slip cell
+		`Aug 2026`,   // month label
 	}
-	// The fixture spans Aug 2026; assert the month label instead of the format string.
-	wants[len(wants)-1] = "Aug 2026"
 	for _, w := range wants {
 		if !strings.Contains(out, w) {
 			t.Errorf("draw.io export missing %q", w)
