@@ -83,6 +83,7 @@ type ProjectPathRequest struct {
 
 // RegisterProjectRoutes registers all project API routes on the given router.
 func RegisterProjectRoutes(r chi.Router) {
+	r.Get("/api/version", getVersion)
 	r.Route("/api/projects", func(r chi.Router) {
 		r.Get("/", listProjects)
 		r.Post("/", createProject)
@@ -370,6 +371,12 @@ func unhideProject(w http.ResponseWriter, r *http.Request) {
 func getSettings(w http.ResponseWriter, r *http.Request) {
 	cfg := config.LoadConfig()
 	respondJSON(w, http.StatusOK, cfg)
+}
+
+// getVersion handles GET /api/version — the build version baked into this
+// binary, shown in Settings so a stale copy is identifiable.
+func getVersion(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, http.StatusOK, map[string]string{"version": config.AppVersion})
 }
 
 // updateSettings handles PUT /api/projects/settings

@@ -11,6 +11,18 @@ import (
 	"sort"
 )
 
+// ============================================================================
+// AppVersion is the build version shown in Settings. It exists so a running
+// binary can be identified as current — if a copied executable is missing
+// features, its Settings version tells you it's a stale build.
+//
+//	>>> BUMP THIS on EVERY new executable build (make all / make native).  <<<
+//	>>> Increment the patch (1.0.1 → 1.0.2 → …) each rebuild.               <<<
+//
+// (See the note in the Makefile, which also reminds you.)
+// ============================================================================
+const AppVersion = "1.0.1"
+
 // AppConfigPath is the path to the application-level config file.
 var AppConfigPath = filepath.Join(homeDir(), ".pm-agent", "config.json")
 

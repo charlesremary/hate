@@ -2392,6 +2392,11 @@ document.getElementById('btn-settings').addEventListener('click', async () => {
   document.getElementById('settings-view').classList.remove('hidden');
 
   try {
+    const v = await API.get('/api/version');
+    document.getElementById('app-version').textContent = 'v' + (v.version || '?');
+  } catch (e) { document.getElementById('app-version').textContent = 'v?'; }
+
+  try {
     const cfg = await API.get('/api/projects/settings');
     document.getElementById('settings-projects-root').value = cfg.projects_root || '';
     document.getElementById('show-billing').checked = cfg.show_billing || false;
