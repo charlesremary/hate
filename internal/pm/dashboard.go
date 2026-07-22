@@ -947,6 +947,7 @@ func GenerateDashboard(snapshot *Snapshot, costHTML string) string {
 
 	statusHTML := renderStatusPanel(snapshot)
 	depHTML := renderDependencyPanel(snapshot)
+	ganttHTML := renderGanttPanel(snapshot)
 
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
@@ -971,10 +972,15 @@ func GenerateDashboard(snapshot *Snapshot, costHTML string) string {
 
 <div class="tabs">
   <div class="tab active" data-tab="status" onclick="showTab('status')">Project Status</div>
+  <div class="tab" data-tab="gantt" onclick="showTab('gantt')">Gantt</div>
   <div class="tab" data-tab="deps" onclick="showTab('deps')">Dependencies &amp; Critical Path</div>
 </div>
 
 <div id="panel-status" class="panel active">
+  %s
+</div>
+
+<div id="panel-gantt" class="panel">
   %s
 </div>
 
@@ -1033,6 +1039,7 @@ var PROJECT_ID = '%s';
 		projID, projName,
 		snapDate, hcolor, hlabel,
 		statusHTML,
+		ganttHTML,
 		depHTML,
 		costHTML,
 		projID,

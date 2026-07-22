@@ -49,6 +49,7 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Get("/snapshot", getSnapshot)
 	r.Post("/snapshot", createSnapshot)
 	r.Get("/dashboard", getDashboard)
+	r.Get("/gantt.drawio", getGanttDrawio)
 	r.Post("/baseline", createBaseline)
 	r.Post("/baseline-now", baselineFromTickets)
 	r.Post("/report", generateReport)
@@ -255,6 +256,25 @@ func createSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, snapshot)
+}
+
+// getGanttDrawio handles GET /api/projects/{projectId}/gantt.drawio — the
+// baselined Gantt exported as an editable draw.io file (download).
+func getGanttDrawio(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	snapshot, err := pm.LoadLatestSnapshot(root)
+	if err != nil || snapshot == nil {
+		respondError(w, http.StatusNotFound, "No snapshot yet — create a baseline and run a snapshot first.")
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-gantt.drawio"`, projectID))
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(pm.RenderGanttDrawio(snapshot)))
 }
 
 // getDashboard handles GET /api/projects/{projectId}/dashboard
