@@ -827,7 +827,7 @@ function setParent(id, raw) {
 
 function renderTicketTable(tickets) {
   const tbody = document.getElementById('ticket-tbody');
-  const mode = document.getElementById('filter-sort').value || 'start';
+  const mode = document.getElementById('filter-sort').value || 'work';
   const byId = new Map((allTickets || []).map(t => [t.id, t]));
   const kidCount = childCountMap();
 
@@ -1107,7 +1107,9 @@ document.getElementById('filter-hide-closed').addEventListener('change', loadTic
 
 // Sort preference is per-browser, not per-project — a PM picking "due date"
 // usually wants it for all their projects.
-const SORT_STORAGE_KEY = 'hate:sort';
+// Bumped to v2 when Work order became the default sort — resets any stale saved
+// preference once so the new default takes effect.
+const SORT_STORAGE_KEY = 'hate:sort:v2';
 (function restoreSortPreference() {
   const saved = localStorage.getItem(SORT_STORAGE_KEY);
   if (!saved) return;
