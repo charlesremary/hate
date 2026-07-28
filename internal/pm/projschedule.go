@@ -144,11 +144,16 @@ func ProjectSchedule(projectID, projectName string, tickets []*ticket.Ticket, ef
 		SnapshotDate: fmtDate(start),
 	}
 	for _, t := range scope {
+		phase := ""
+		if t.Phase != nil {
+			phase = *t.Phase
+		}
 		snap.Tasks = append(snap.Tasks, SnapshotTask{
 			TaskID:       t.ID,
 			Title:        t.Title,
 			Owner:        ownerOf(t),
 			Status:       ganttStatus(t.Status),
+			Phase:        phase,
 			Dependencies: preds[t.ID],
 			Baseline: BaselineInfo{
 				PlannedStart: fmtDate(startT[t.ID]),

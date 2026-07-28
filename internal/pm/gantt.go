@@ -27,7 +27,8 @@ type ganttRow struct {
 	barEnd       time.Time // actual/projected end when known, else planned end
 	milestone    bool
 	critical     bool
-	wave         int // parallel-group / stage (longest dependency chain)
+	phase        string // project phase, for within-stage ordering
+	wave         int    // parallel-group / stage (longest dependency chain)
 	y            int
 }
 
@@ -112,6 +113,7 @@ func ganttData(snapshot *Snapshot) (rows []ganttRow, chartStart, chartEnd time.T
 		row := ganttRow{
 			task: t, plannedStart: ps, plannedEnd: pe,
 			barEnd: pe, milestone: t.IsMilestone, critical: cp[t.TaskID],
+			phase: t.Phase,
 		}
 		if t.Current.ActualStart != nil {
 			row.actualStart = parseDate(*t.Current.ActualStart)
@@ -131,10 +133,20 @@ func ganttData(snapshot *Snapshot) (rows []ganttRow, chartStart, chartEnd time.T
 	for i := range rows {
 		rows[i].wave = waves[rows[i].task.TaskID]
 	}
-	// Group by stage, then earliest start, then title.
+	// Group by stage, then by project phase (so "00 - …" leads regardless of
+	// start date; unphased sorts last), then earliest start, then title.
+	phaseKey := func(p string) string {
+		if p == "" {
+			return "~" // sort unphased last
+		}
+		return p
+	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].wave != rows[j].wave {
 			return rows[i].wave < rows[j].wave
+		}
+		if pi, pj := phaseKey(rows[i].phase), phaseKey(rows[j].phase); pi != pj {
+			return pi < pj
 		}
 		if !rows[i].plannedStart.Equal(rows[j].plannedStart) {
 			return rows[i].plannedStart.Before(rows[j].plannedStart)

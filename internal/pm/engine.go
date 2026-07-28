@@ -49,14 +49,14 @@ type SlipEvent struct {
 
 // Baseline represents the project baseline plan.
 type Baseline struct {
-	CreatedDate string         `json:"created_date"`
-	CreatedBy   string         `json:"created_by"`
-	ProjectID   string         `json:"project_id"`
-	ProjectName string         `json:"project_name"`
-	ProjectType string         `json:"project_type"`
-	PlannedStart string        `json:"planned_start"`
-	PlannedEnd  string         `json:"planned_end"`
-	Tasks       []BaselineTask `json:"tasks"`
+	CreatedDate  string         `json:"created_date"`
+	CreatedBy    string         `json:"created_by"`
+	ProjectID    string         `json:"project_id"`
+	ProjectName  string         `json:"project_name"`
+	ProjectType  string         `json:"project_type"`
+	PlannedStart string         `json:"planned_start"`
+	PlannedEnd   string         `json:"planned_end"`
+	Tasks        []BaselineTask `json:"tasks"`
 }
 
 // BaselineInfo holds baseline date info for a snapshot task.
@@ -79,6 +79,7 @@ type SnapshotTask struct {
 	Title          string       `json:"title"`
 	Owner          string       `json:"owner"`
 	Status         string       `json:"status"`
+	Phase          string       `json:"phase,omitempty"` // project phase, for within-stage ordering
 	Dependencies   []string     `json:"dependencies"`
 	IsMilestone    bool         `json:"is_milestone"`
 	Baseline       BaselineInfo `json:"baseline"`
@@ -205,20 +206,20 @@ func DetectSlipEvents(baselineTasks []BaselineTask, currentTasks map[string]map[
 				seqNum := seqByProject[projID]
 
 				newEvents = append(newEvents, SlipEvent{
-					SlipEventID:     fmt.Sprintf("SE-%s-%03d", projID, seqNum),
-					TaskID:          taskID,
-					ProjectID:       projID,
-					DetectedDate:    fmtDate(today),
-					OriginalDueDate: fmtDate(baselineEnd),
-					RevisedDueDate:  fmtDate(currentDue),
-					SlipDays:        slipDays,
-					Status:          "unresolved",
-					ReasonCategory:  nil,
-					ReasonNarrative: nil,
-					AcknowledgedBy:  nil,
+					SlipEventID:      fmt.Sprintf("SE-%s-%03d", projID, seqNum),
+					TaskID:           taskID,
+					ProjectID:        projID,
+					DetectedDate:     fmtDate(today),
+					OriginalDueDate:  fmtDate(baselineEnd),
+					RevisedDueDate:   fmtDate(currentDue),
+					SlipDays:         slipDays,
+					Status:           "unresolved",
+					ReasonCategory:   nil,
+					ReasonNarrative:  nil,
+					AcknowledgedBy:   nil,
 					AcknowledgedDate: nil,
-					ReviewedBy:      nil,
-					LinkedTickets:   []string{},
+					ReviewedBy:       nil,
+					LinkedTickets:    []string{},
 				})
 			}
 		}
@@ -714,20 +715,20 @@ func EnrichSnapshotWithCriticalPath(snapshot *Snapshot) {
 
 // SlipLedgerRow represents a flattened row for the report table.
 type SlipLedgerRow struct {
-	TaskID              string   `json:"task_id"`
-	Title               string   `json:"title"`
-	Owner               string   `json:"owner"`
-	Status              string   `json:"status"`
-	BaselineStart       string   `json:"baseline_start"`
-	BaselineEnd         string   `json:"baseline_end"`
-	BaselineDays        int      `json:"baseline_days"`
-	ActualStart         string   `json:"actual_start"`
-	ActualEnd           string   `json:"actual_end"`
-	ProjectedEnd        string   `json:"projected_end"`
-	SlipDays            int      `json:"slip_days"`
-	SlipSummary         string   `json:"slip_summary"`
-	HasUnresolved       bool     `json:"has_unresolved"`
-	UnresolvedEventIDs  []string `json:"unresolved_event_ids"`
+	TaskID             string   `json:"task_id"`
+	Title              string   `json:"title"`
+	Owner              string   `json:"owner"`
+	Status             string   `json:"status"`
+	BaselineStart      string   `json:"baseline_start"`
+	BaselineEnd        string   `json:"baseline_end"`
+	BaselineDays       int      `json:"baseline_days"`
+	ActualStart        string   `json:"actual_start"`
+	ActualEnd          string   `json:"actual_end"`
+	ProjectedEnd       string   `json:"projected_end"`
+	SlipDays           int      `json:"slip_days"`
+	SlipSummary        string   `json:"slip_summary"`
+	HasUnresolved      bool     `json:"has_unresolved"`
+	UnresolvedEventIDs []string `json:"unresolved_event_ids"`
 }
 
 // SlipLedgerRows flattens snapshot tasks into rows for the report table.
@@ -770,17 +771,17 @@ func SlipLedgerRows(snapshot *Snapshot) []SlipLedgerRow {
 		}
 
 		rows = append(rows, SlipLedgerRow{
-			TaskID:        task.TaskID,
-			Title:         task.Title,
-			Owner:         task.Owner,
-			Status:        task.Status,
-			BaselineStart: task.Baseline.PlannedStart,
-			BaselineEnd:   task.Baseline.PlannedEnd,
-			BaselineDays:  task.Baseline.PlannedDays,
-			ActualStart:   actualStart,
-			ActualEnd:     actualEnd,
-			ProjectedEnd:  projectedEnd,
-			SlipDays:      task.SlipDays,
+			TaskID:             task.TaskID,
+			Title:              task.Title,
+			Owner:              task.Owner,
+			Status:             task.Status,
+			BaselineStart:      task.Baseline.PlannedStart,
+			BaselineEnd:        task.Baseline.PlannedEnd,
+			BaselineDays:       task.Baseline.PlannedDays,
+			ActualStart:        actualStart,
+			ActualEnd:          actualEnd,
+			ProjectedEnd:       projectedEnd,
+			SlipDays:           task.SlipDays,
 			SlipSummary:        slipSummary,
 			HasUnresolved:      hasUnresolved,
 			UnresolvedEventIDs: unresolvedIDs,
