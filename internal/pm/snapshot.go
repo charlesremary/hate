@@ -322,9 +322,17 @@ func CreateBaselineFromTickets(projectRoot, projectID, projectName, createdBy st
 		// may be fractional, but the baseline schedules on whole calendar days
 		// (AddDate / business-day loops), so round to the nearest day, floored
 		// at 1 so a sized ticket always spans a day.
+		// A legacy t-shirt effort was already sized in days of work, so it keeps
+		// its configured days (as before the estimate rework); converting it to
+		// hours and back through a part-time person's daily hours would inflate
+		// it. Real hour estimates go through the assignee's daily hours.
 		plannedDays := 5
-		if hours, _ := EstimatedHours(t, estCtx); hours > 0 {
-			plannedDays = int(math.Round(HoursToDays(hours, t.Assignee, resources)))
+		if hours, src := EstimatedHours(t, estCtx); hours > 0 {
+			if src == SourceConverted || src == SourceLegacy {
+				plannedDays = int(math.Round(hours / HoursPerDay))
+			} else {
+				plannedDays = int(math.Round(HoursToDays(hours, t.Assignee, resources)))
+			}
 			if plannedDays < 1 {
 				plannedDays = 1
 			}
