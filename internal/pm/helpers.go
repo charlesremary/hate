@@ -15,7 +15,11 @@ var ValidSlipCategories = []string{
 	"estimation_error", "external_dependency", "scope_change",
 	"resource_diversion", "technical_blocker", "environment_tooling",
 	"client_delay", "requirements_change",
+	SlipCategoryRebaseline,
 }
+
+// SlipCategoryRebaseline marks slip events closed by a re-baseline.
+const SlipCategoryRebaseline = "rebaseline"
 
 // BaselineExists checks whether a baseline.json file exists for the project.
 func BaselineExists(projectRoot string) bool {

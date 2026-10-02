@@ -4,7 +4,10 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -52,6 +55,8 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Get("/gantt.drawio", getGanttDrawio)
 	r.Post("/baseline", createBaseline)
 	r.Post("/baseline-now", baselineFromTickets)
+	r.Post("/rebaseline", rebaseline)
+	r.Get("/baselines", listBaselines)
 	r.Post("/report", generateReport)
 	r.Get("/slip", listSlipEvents)
 	r.Patch("/slip/{slipEventId}", resolveSlip)
@@ -129,7 +134,8 @@ func getSnapshot(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, snapshot)
 }
 
-// createSnapshot handles POST /api/projects/{projectId}/snapshot
+// createSnapshot handles POST /api/projects/{projectId}/snapshot. Commits
+// slip_events.json when the snapshot detected new slips.
 func createSnapshot(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
@@ -137,7 +143,7 @@ func createSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshot, err := pm.RunSnapshot(projectID, root)
+	snapshot, err := pm.TakeSnapshot(projectID, root)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "No baseline") {
 			respondError(w, http.StatusNotFound, err.Error())
@@ -197,13 +203,18 @@ func ganttStart(r *http.Request) time.Time {
 	return time.Now()
 }
 
-// getDashboard handles GET /api/projects/{projectId}/dashboard
+// getDashboard handles GET /api/projects/{projectId}/dashboard. With a
+// baseline and no snapshot for today, it takes today's snapshot first.
 func getDashboard(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
 	if !ok {
 		return
 	}
+	if _, err := pm.AutoSnapshot(projectID, root); err != nil {
+		log.Printf("auto-snapshot (%s): %v", projectID, err)
+	}
+	stripHTML := pm.RenderPlanStripHTML(projectID, pm.ReadPlanStatus(root))
 
 	// If no baseline exists, show the pre-baseline simple dashboard
 	if !pm.BaselineExists(root) {
@@ -244,7 +255,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 			pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(tickets, estCtx)) +
 			pm.RenderOverridesHTML(pm.ComputeOverrides(tickets)) +
 			pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
-		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, forecastCardHTML(projectID, root, tickets, cfg), reportsHTML)
+		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, stripHTML+forecastCardHTML(projectID, root, tickets, cfg), reportsHTML)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(html))
@@ -255,9 +266,8 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil || snapshot == nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		html := "<html><body><p>No snapshot yet. " +
-			"<a href='/api/projects/" + projectID + "/snapshot' " +
-			"onclick=\"fetch(this.href,{method:'POST'});return false;\">Run snapshot</a></p></body></html>"
+		html := "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body style=\"font-family:-apple-system,sans-serif;background:#f4f5f7\">" +
+			stripHTML + "<p style=\"margin:20px 24px\">No snapshot yet. Take one from the Plan strip.</p></body></html>"
 		w.Write([]byte(html))
 		return
 	}
@@ -289,7 +299,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, estCtx)) +
 		pm.RenderOverridesHTML(pm.ComputeOverrides(costTickets)) +
 		pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))
-	html := pm.GenerateDashboard(snapshot, forecastCardHTML(projectID, root, costTickets, cfg), reportsHTML)
+	html := pm.GenerateDashboard(snapshot, stripHTML+forecastCardHTML(projectID, root, costTickets, cfg), reportsHTML)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(html))
@@ -303,9 +313,9 @@ func createBaseline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Guard: baseline is immutable
+	// Guard: replacing a baseline goes through POST /rebaseline (with a reason).
 	if pm.BaselineExists(root) {
-		respondError(w, http.StatusConflict, "Baseline already exists. Cannot re-baseline.")
+		respondError(w, http.StatusConflict, "Baseline already exists. Use POST /rebaseline to replace it.")
 		return
 	}
 
@@ -338,7 +348,12 @@ func createBaseline(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:           createdBy,
 	}
 
+	unlock := pm.LockPlan(root)
 	baseline, err := pm.RunWBS(params, root, templateDir)
+	if err == nil {
+		pm.CommitBaseline(root, fmt.Sprintf("baseline: %s from template %s", req.ProjectName, req.TemplateID))
+	}
+	unlock()
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			respondError(w, http.StatusNotFound, err.Error())
@@ -350,7 +365,21 @@ func createBaseline(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, baseline)
 }
 
-// baselineFromTickets handles POST /api/projects/{projectId}/baseline-now
+// readOptionalAuthor reads an optional {"author": ...} body (empty or absent
+// is fine).
+func readOptionalAuthor(r *http.Request) string {
+	var req struct {
+		Author string `json:"author"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	return req.Author
+}
+
+// baselineFromTickets handles POST /api/projects/{projectId}/baseline-now.
+// Optional body {"author"}; defaults to the project's git identity. Commits
+// baseline.json (and .tkt/pm/.gitignore).
 func baselineFromTickets(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
@@ -369,7 +398,8 @@ func baselineFromTickets(w http.ResponseWriter, r *http.Request) {
 		projectName = cfg.ProjectName
 	}
 
-	baseline, err := pm.CreateBaselineFromTickets(root, projectID, projectName, "")
+	author := pm.ResolveAuthor(root, readOptionalAuthor(r))
+	baseline, err := pm.BaselineNow(root, projectID, projectName, author)
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			respondError(w, http.StatusConflict, err.Error())
@@ -422,6 +452,7 @@ func resolveSlip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	defer pm.LockPlan(root)()
 	events, err := pm.ReadSlipEvents(root)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "No slip events file found.")
@@ -432,10 +463,11 @@ func resolveSlip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	acknowledgedBy := "api-user"
-	if req.AcknowledgedBy != nil && *req.AcknowledgedBy != "" {
-		acknowledgedBy = *req.AcknowledgedBy
+	requestedBy := ""
+	if req.AcknowledgedBy != nil {
+		requestedBy = *req.AcknowledgedBy
 	}
+	acknowledgedBy := pm.ResolveAuthor(root, requestedBy)
 
 	found := false
 	todayStr := time.Now().Format("2006-01-02")
@@ -460,9 +492,66 @@ func resolveSlip(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	pm.CommitSlipEvents(root, fmt.Sprintf("slip %s resolved: %s", slipEventID, req.ReasonCategory))
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"updated": slipEventID,
 		"status":  "resolved",
 	})
+}
+
+// rebaseline handles POST /api/projects/{projectId}/rebaseline.
+// Body: {"reason": "...", "author"?}. The reason must be at least 5 characters
+// (400); 409 without a baseline. Archives the current baseline to
+// .tkt/pm/baselines/<date>-<n>.json, closes its unresolved slip events as
+// "rebaseline", baselines the current tickets and commits it all in one commit.
+func rebaseline(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+		Author string `json:"author"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if _, err := pm.ValidRebaselineReason(req.Reason); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	projectName := projectID
+	if cfg, err := ticket.ReadConfig(root); err == nil && cfg.ProjectName != "" {
+		projectName = cfg.ProjectName
+	}
+	res, err := pm.Rebaseline(root, projectID, projectName, req.Reason, pm.ResolveAuthor(root, req.Author))
+	switch {
+	case errors.Is(err, pm.ErrNoBaseline):
+		respondError(w, http.StatusConflict, err.Error())
+		return
+	case errors.Is(err, pm.ErrRebaselineReason):
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	case err != nil:
+		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, res)
+}
+
+// listBaselines handles GET /api/projects/{projectId}/baselines: the archived
+// (replaced) baselines, oldest first.
+func listBaselines(w http.ResponseWriter, r *http.Request) {
+	root, ok := getProjectRoot(w, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	list, err := pm.ListBaselineArchive(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, list)
 }

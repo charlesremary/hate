@@ -45,6 +45,24 @@ type SlipEvent struct {
 	AcknowledgedDate *string  `json:"acknowledged_date"`
 	ReviewedBy       *string  `json:"reviewed_by"`
 	LinkedTickets    []string `json:"linked_tickets"`
+	// SupersededBy is the archived baseline id (YYYY-MM-DD-N) this event was
+	// measured against, set when the project is re-baselined. Superseded events
+	// stay in the audit trail but no longer count toward the current baseline.
+	SupersededBy *string `json:"superseded_by,omitempty"`
+}
+
+// Current reports whether the event belongs to the current baseline.
+func (e SlipEvent) Current() bool { return e.SupersededBy == nil }
+
+// CurrentSlipEvents returns the events measured against the current baseline.
+func CurrentSlipEvents(events []SlipEvent) []SlipEvent {
+	out := make([]SlipEvent, 0, len(events))
+	for _, e := range events {
+		if e.Current() {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // Baseline represents the project baseline plan.
@@ -144,7 +162,7 @@ func DetectSlipEvents(baselineTasks []BaselineTask, currentTasks map[string]map[
 	// Build lookup of existing unresolved events by task_id
 	unresolvedByTask := map[string][]SlipEvent{}
 	for _, ev := range existingSlipEvents {
-		if ev.Status == "unresolved" {
+		if ev.Status == "unresolved" && ev.Current() {
 			unresolvedByTask[ev.TaskID] = append(unresolvedByTask[ev.TaskID], ev)
 		}
 	}
@@ -187,7 +205,7 @@ func DetectSlipEvents(baselineTasks []BaselineTask, currentTasks map[string]map[
 			// Total slip days already explained by resolved events for this task
 			explainedDays := 0
 			for _, ev := range existingSlipEvents {
-				if ev.TaskID == taskID && ev.Status == "resolved" {
+				if ev.TaskID == taskID && ev.Status == "resolved" && ev.Current() {
 					explainedDays += ev.SlipDays
 				}
 			}

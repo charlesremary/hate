@@ -57,7 +57,14 @@ A project is an ordinary Git repository. HATE owns a few paths inside it:
 ```
 <project-repo>/
 ├── .tkt/
-│   └── config.json          # project config: client, prefix, resources, repos…
+│   ├── config.json          # project config: client, prefix, resources, repos…
+│   └── pm/                  # plan artifacts (see "Baseline, snapshots and slips")
+│       ├── baseline.json    # the current baseline (committed)
+│       ├── slip_events.json # slip ledger (committed)
+│       ├── baselines/       # archived baselines, <date>-<n>.json (committed)
+│       ├── forecast_history.json
+│       ├── .gitignore       # ignores snapshots/
+│       └── snapshots/       # one derived snapshot per day (not committed)
 ├── tickets/
 │   ├── AMPL-7k3x.json       # one file per ticket (the source of truth)
 │   └── AMPL-9f2a.json
@@ -225,6 +232,36 @@ every dashboard view:
 Known simplifications: a flat daily capacity (no holidays, PTO, or per-day
 variation), remaining = estimate − logged (a ticket past its estimate but still
 open counts as unestimated), and a greedy one-ticket-at-a-time order rather than an optimiser.
+
+## Baseline, snapshots and slips
+
+The **Plan strip** at the top of the PM dashboard (both flavors, above Schedule
+vs request) is the one place for these: the baseline (date, author, ticket count,
+planned end) or *No baseline* with **Baseline now**; the last snapshot (auto /
+manual / re-baseline) with **Take snapshot**; the unresolved slip count, linking
+to the slip ledger; and **Re-baseline…**.
+
+- **Baseline** (`.tkt/pm/baseline.json`): frozen from the current tickets by
+  `POST …/baseline-now` (or from a template by `POST …/baseline`) and committed.
+- **Snapshots** (`.tkt/pm/snapshots/<date>.json`): today's tickets compared with
+  the baseline. Opening the dashboard takes one automatically when a baseline
+  exists and there is none for today (per-project lock, at most once a day);
+  `POST …/snapshot` takes one on demand. Snapshots are derived and noisy, so
+  `.tkt/pm/.gitignore` (created with the baseline or the first snapshot) ignores
+  `snapshots/`.
+- **Slip events** (`.tkt/pm/slip_events.json`): a snapshot opens one when a
+  task's due date passes its baseline end without explanation; resolving it
+  (`PATCH …/slip/{id}`) needs a reason category and narrative. New slips and
+  resolutions are committed.
+- **Re-baseline** (`POST …/rebaseline {reason}`, reason ≥ 5 characters): the
+  current baseline is archived to `.tkt/pm/baselines/<date>-<n>.json` with the
+  reason, author and time; unresolved slips against it are resolved as
+  `rebaseline` with the reason (kept in the ledger, marked `superseded_by`); a new
+  baseline is frozen from the current tickets; one commit,
+  `re-baseline: <reason>`. `GET …/baselines` lists the archive.
+
+All of these commits go through `ticket.GitCommit` with only the plan files, so
+nothing else staged in the repo is swept in.
 
 ## Estimating
 

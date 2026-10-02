@@ -1800,26 +1800,6 @@ function loadDashboard() {
   frame.src = `/api/projects/${currentProject.id}/dashboard`;
 }
 
-// ── Snapshot button ──────────────────────────────────
-document.getElementById('btn-run-snapshot').addEventListener('click', async () => {
-  if (!currentProject) return;
-  const btn = document.getElementById('btn-run-snapshot');
-  btn.disabled = true; btn.textContent = '⟳ Running…';
-  try {
-    const snap = await API.post(`/api/projects/${currentProject.id}/snapshot`);
-    showToast(`Snapshot complete — health: ${snap.computed_health}`);
-    // Refresh health badge
-    currentProject.health = snap.computed_health;
-    document.getElementById('project-health-badge').outerHTML =
-      `<span id="project-health-badge">${healthBadge(snap.computed_health)}</span>`;
-    if (currentTab === 'dashboard') loadDashboard();
-  } catch (e) {
-    const msg = e.message.includes('baseline') ? 'No baseline yet — use PM Dashboard to baseline first' : e.message;
-    showToast(msg, 'error');
-  }
-  finally { btn.disabled = false; btn.textContent = '⟳ Snapshot'; }
-});
-
 // ── Phase rollup ─────────────────────────────────────
 let lastPhaseRollup = null;
 

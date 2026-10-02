@@ -149,7 +149,7 @@ func renderStatusPanel(snapshot *Snapshot) string {
 
 	// Task table
 	sb.WriteString(`
-    <div class="table-wrap">
+    <div class="table-wrap" id="slip-ledger">
       <table class="task-table">
         <thead>
           <tr>
@@ -910,26 +910,12 @@ const dashboardJS = `
       var data = await resp.json();
       if (!resp.ok) { alert(data.detail || 'Error'); return; }
       closeResolveModal();
-      // The resolution is saved to the slip ledger, but the dashboard's health and
-      // unresolved count come from the latest snapshot — ask whether to refresh now
-      // or batch up more resolutions and snapshot once at the end.
-      document.getElementById('snapshot-prompt-overlay').style.display = 'flex';
-    } catch(e) { alert(e.message); }
-  }
-  function closeSnapshotPrompt() {
-    document.getElementById('snapshot-prompt-overlay').style.display = 'none';
-  }
-  async function runSnapshotNow() {
-    try {
-      var resp = await fetch('/api/projects/' + PROJECT_ID + '/snapshot', { method: 'POST' });
-      var data = await resp.json();
-      if (!resp.ok) { alert(data.detail || 'Snapshot failed'); return; }
+      // The resolution is committed to the slip ledger; the health and counts
+      // come from the snapshot, so retake it before reloading.
+      await fetch('/api/projects/' + PROJECT_ID + '/snapshot', { method: 'POST' });
       location.reload();
     } catch(e) { alert(e.message); }
   }
-  document.getElementById('snapshot-prompt-overlay').addEventListener('click', function(e) {
-    if (e.target === document.getElementById('snapshot-prompt-overlay')) closeSnapshotPrompt();
-  });
 `
 
 // ---------------------------------------------------------------------------
@@ -937,8 +923,8 @@ const dashboardJS = `
 // ---------------------------------------------------------------------------
 
 // GenerateDashboard returns a complete self-contained HTML string for the PM dashboard.
-// topHTML (the Schedule vs request card) sits right under the header, above
-// the tabs; costHTML holds the report sections.
+// topHTML (the Plan strip, then the Schedule vs request card) sits right
+// under the header, above the tabs; costHTML holds the report sections.
 func GenerateDashboard(snapshot *Snapshot, topHTML, costHTML string) string {
 	health := snapshot.ComputedHealth
 	hcolor := healthColors[health]
@@ -1018,18 +1004,6 @@ func GenerateDashboard(snapshot *Snapshot, topHTML, costHTML string) string {
     <div style="display:flex;gap:8px">
       <button onclick="submitResolve()" style="background:#1976d2;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px">Resolve</button>
       <button onclick="closeResolveModal()" style="background:#fff;color:#333;border:1px solid #ccc;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px">Cancel</button>
-    </div>
-  </div>
-</div>
-
-<!-- Snapshot prompt modal (shown after a slip event is resolved) -->
-<div id="snapshot-prompt-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:center;justify-content:center">
-  <div style="background:#fff;border-radius:8px;padding:24px;width:460px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-    <h3 style="margin-bottom:12px;font-size:16px">Resolution saved</h3>
-    <p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:16px">The slip event has been resolved in the ledger. The dashboard's health and unresolved-event count won't reflect it until a new snapshot is run.<br><br>Run a snapshot now, or keep resolving events and snapshot once you're done?</p>
-    <div style="display:flex;gap:8px">
-      <button onclick="runSnapshotNow()" style="background:#1976d2;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px">Run Snapshot Now</button>
-      <button onclick="closeSnapshotPrompt()" style="background:#fff;color:#333;border:1px solid #ccc;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px">Wait</button>
     </div>
   </div>
 </div>

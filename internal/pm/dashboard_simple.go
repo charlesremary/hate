@@ -12,8 +12,8 @@ import (
 )
 
 // GenerateSimpleDashboard returns a self-contained HTML dashboard for pre-baseline view.
-// topHTML (the Schedule vs request card) sits right under the header; costHTML
-// holds the report sections.
+// topHTML (the Plan strip, then the Schedule vs request card) sits right under
+// the header; costHTML holds the report sections.
 func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName, topHTML, costHTML string) string {
 	// Backlog-tagged tickets are out of committed scope — exclude them from every
 	// rollup (count, completion, status mix, table). Surface how many were hidden.
@@ -149,17 +149,6 @@ table { width: 100%%; border-collapse: collapse; background: #fff; border-radius
 th { background: #263238; color: #fff; padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500; }
 td { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
 tr:hover td { background: #f5f5f5; }
-.baseline-section { background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 8px; padding: 20px 24px; margin: 0 24px 20px; }
-.baseline-section h3 { color: #e65100; margin-bottom: 8px; font-size: 15px; text-transform: none; letter-spacing: 0; }
-.baseline-section p { color: #555; font-size: 13px; margin-bottom: 14px; }
-.btn { display: inline-block; padding: 8px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; text-decoration: none; }
-.btn-primary { background: #1976d2; color: #fff; }
-.btn-primary:hover { background: #1565c0; }
-.btn-secondary { background: #fff; color: #333; border: 1px solid #ccc; margin-left: 8px; }
-.btn-secondary:hover { background: #f5f5f5; }
-.toast { position: fixed; bottom: 24px; right: 24px; background: #333; color: #fff; padding: 10px 18px; border-radius: 6px; font-size: 13px; display: none; z-index: 999; }
-.toast.error { background: #c62828; }
-.toast.show { display: block; }
 </style>
 </head>
 <body>
@@ -198,33 +187,6 @@ tr:hover td { background: #f5f5f5; }
 
 %s
 
-<div class="baseline-section">
-    <h3>Ready to Baseline?</h3>
-    <p>Baselining locks in the current plan as the schedule to track against. Once set, it cannot be changed.
-       Slip tracking, critical path analysis, and health metrics will activate after baselining.</p>
-    <button class="btn btn-primary" onclick="baselineNow()">Baseline Now</button>
-</div>
-
-<div id="toast" class="toast"></div>
-
-<script>
-function showToast(msg, isError) {
-    var t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = 'toast show' + (isError ? ' error' : '');
-    setTimeout(function() { t.className = 'toast'; }, 3000);
-}
-
-async function baselineNow() {
-    try {
-        var r = await fetch('/api/projects/%s/baseline-now', { method: 'POST' });
-        var data = await r.json();
-        if (!r.ok) { showToast(data.detail || 'Error', true); return; }
-        showToast('Baseline created! Reloading...');
-        setTimeout(function() { location.reload(); }, 1000);
-    } catch (e) { showToast(e.message, true); }
-}
-</script>
 </body>
 </html>`,
 		projectID,
@@ -238,6 +200,5 @@ async function baselineNow() {
 		barSegments.String(),
 		legendItems.String(),
 		costHTML,
-		projectID,
 	)
 }

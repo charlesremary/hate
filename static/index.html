@@ -48,7 +48,6 @@
             <span id="sync-status" class="sync-status"></span>
             <button class="btn-secondary" id="btn-sync" title="Pull & push changes">⇅ Sync</button>
             <button class="btn-secondary" id="btn-team" title="Manage team">👤 Team</button>
-            <button class="btn-secondary" id="btn-run-snapshot">⟳ Snapshot</button>
             <button class="btn-secondary" id="btn-phase-rollup" title="Roll tickets up by phase — hours-weighted % complete, with CSV export">Σ Phases</button>
           </div>
         </header>
@@ -573,11 +572,14 @@
             <h3>Baselining</h3>
             <p>A <strong>baseline</strong> is a frozen copy of the plan — every task's planned
               start, planned end, planned days, and dependencies — captured at one moment. It's the
-              yardstick everything else is measured against. <strong>The baseline is immutable:</strong>
-              once created, it cannot be changed or re-created.</p>
-            <p>Open the <strong>PM Dashboard</strong> tab. Before a baseline exists you'll see a
-              pre-baseline view with a <strong>Baseline Now</strong> button — it freezes the current
-              tickets as the plan. When baselining this way:</p>
+              yardstick everything else is measured against. A baseline is never edited: the only
+              way to change it is a <strong>Re-baseline</strong>, which archives it with a reason
+              and freezes a new one (see <em>The Plan strip</em> below).</p>
+            <p>Open the <strong>PM Dashboard</strong> tab. Before a baseline exists the
+              <strong>Plan strip</strong> at the top says <em>No baseline</em> and offers
+              <strong>Baseline now</strong> — it freezes the current tickets as the plan and
+              commits <code>.tkt/pm/baseline.json</code> to the project's git history. When
+              baselining this way:</p>
             <ul>
               <li>Planned days come from each ticket's <strong>estimated hours</strong> divided by
                 the assignee's daily hours (8 if unknown), rounded to whole days, minimum 1. A wrap
@@ -595,12 +597,12 @@
               <p style="margin:0 0 8px"><strong>⚠ Before you baseline — read this.</strong></p>
               <p style="margin:0 0 8px">The baseline is built from two inputs: each ticket's
                 <strong>planned start date</strong> and its <strong>estimated hours</strong>. The baseline
-                is immutable — once frozen, every later snapshot is measured against it, and there is
-                no way to correct a bad baseline. If the inputs are wrong, every snapshot from then
-                on will show slip that isn't really slip.</p>
+                is frozen — every later snapshot is measured against it, and the only correction is a
+                Re-baseline, which is recorded with its reason for everyone to see. If the inputs are
+                wrong, every snapshot until then will show slip that isn't really slip.</p>
               <p style="margin:0 0 8px"><strong>Start dates matter as much as estimates.</strong> Two
                 tickets with the same estimate land in very different places on the schedule depending
-                on when each one starts. Walk the ticket list before clicking <em>Baseline Now</em>
+                on when each one starts. Walk the ticket list before clicking <em>Baseline now</em>
                 and ask: is this start date realistic? Does it account for predecessor work, the
                 assignee's availability, and the project's actual kickoff?</p>
               <p style="margin:0"><strong>Estimates are hours of work, not wall-clock time.</strong>
@@ -700,11 +702,43 @@
               the Manage modal. Closing is reversible — the same modal has a <strong>Reopen</strong>
               button that lifts the lock and restores write access.</p>
 
+            <h3>The Plan strip</h3>
+            <p>The top of the <strong>PM Dashboard</strong>, above <em>Schedule vs request</em>, is
+              the one place for the baseline, snapshots and slips:</p>
+            <ul>
+              <li><strong>Baseline</strong> — its date, who made it, how many tickets it covers and its
+                planned end; or <em>No baseline</em> with <strong>Baseline now</strong>.</li>
+              <li><strong>Last snapshot</strong> — its date and how it was taken (<em>auto</em>,
+                <em>manual</em> or <em>re-baseline</em>), with <strong>Take snapshot</strong> to run one
+                now.</li>
+              <li><strong>Unresolved slips</strong> — the count of open slip events; click it to jump to
+                the slip ledger.</li>
+              <li><strong>Re-baseline…</strong> — replace the baseline (below).</li>
+            </ul>
+            <p><strong>Auto-snapshot.</strong> Once a project has a baseline, opening the dashboard
+              takes that day's snapshot if there isn't one yet — at most once a day, so slips are
+              detected without anyone remembering to click. <strong>Take snapshot</strong> refreshes it
+              later in the day.</p>
+            <p><strong>The committed audit trail.</strong> The baseline, the slip events (new slips and
+              their resolutions) and archived baselines are committed to the project's git history as
+              they change, each commit touching only those files. Daily snapshot files are derived and
+              change every day, so they stay out of git: <code>.tkt/pm/.gitignore</code> ignores
+              <code>snapshots/</code>.</p>
+            <p><strong>Re-baseline.</strong> When the plan genuinely changes (the client moved scope, a
+              new phase was added), click <strong>Re-baseline…</strong> and give a reason of at least 5
+              characters. The current baseline is archived to
+              <code>.tkt/pm/baselines/&lt;date&gt;-&lt;n&gt;.json</code> with the reason, who did it and
+              when; any unresolved slip events against it are closed as <code>rebaseline</code> with the
+              reason as the explanation (they stay in the ledger); a new baseline is frozen from the
+              current tickets; and all of it is one commit, <code>re-baseline: &lt;reason&gt;</code>.
+              The strip counts the earlier baselines. Re-baselining resets the yardstick, so use it for
+              real plan changes, not to make slips disappear — the reason is in the history.</p>
+
             <h3>Snapshots</h3>
-            <p>A <strong>snapshot</strong> compares today's ticket state against the baseline. Run
-              one with the <strong>⟳ Snapshot</strong> button in the project header (or let the
-              Scheduler run them automatically — see below). Each snapshot is saved by date under
-              <code>.tkt/pm/snapshots/</code>. A snapshot computes:</p>
+            <p>A <strong>snapshot</strong> compares today's ticket state against the baseline. One is
+              taken automatically the first time the dashboard opens each day; take another with
+              <strong>Take snapshot</strong> in the Plan strip. Each snapshot is saved by date under
+              <code>.tkt/pm/snapshots/</code> (not committed). A snapshot computes:</p>
             <ul>
               <li><strong>Slip days</strong> — for each task, how far its current due date is past
                 its baseline planned end.</li>
@@ -735,17 +769,13 @@
               <code>external_dependency</code>, <code>scope_change</code>,
               <code>resource_diversion</code>, <code>technical_blocker</code>,
               <code>environment_tooling</code>, <code>client_delay</code>,
-              <code>requirements_change</code>.</p>
+              <code>requirements_change</code> (and <code>rebaseline</code>, set by a re-baseline).
+              New slip events and every resolution are committed.</p>
             <p><strong>Where to resolve them.</strong> Open the <strong>PM Dashboard</strong> tab and
-              find the slip ledger — every unresolved event has a <strong>Resolve</strong> button.
-              Pick a category, write the explanation, and submit.</p>
-            <p><strong>Resolving doesn't refresh the dashboard on its own.</strong> The resolution is
-              written to the slip ledger immediately, but the dashboard's health color and
-              unresolved-event count are read from the latest <em>snapshot</em> — so they won't
-              change until a new snapshot is run. After you resolve an event, a prompt asks whether
-              to <strong>Run Snapshot Now</strong> or <strong>Wait</strong>. Run it now to see the
-              effect immediately; choose Wait if you're working through several events and would
-              rather snapshot once at the end.</p>
+              click the unresolved count in the Plan strip to jump to the slip ledger — every
+              unresolved event has a <strong>Resolve</strong> button. Pick a category, write the
+              explanation, and submit. The resolution is committed, a fresh snapshot is taken and the
+              dashboard reloads, so health and counts reflect it straight away.</p>
 
             <h3>How the schedule is calculated</h3>
             <p><strong>Planned schedule (WBS from a template).</strong> Tasks are ordered by their
@@ -767,8 +797,8 @@
 
             <h3>Scheduler</h3>
             <p>Under ⚙ Settings you can enable <strong>automatic snapshots</strong> on an interval
-              (in hours), so health and projections stay current without anyone clicking
-              ⟳ Snapshot. <strong>Run Now</strong> triggers a snapshot run for all projects
+              (in hours), so health and projections stay current without anyone opening the
+              dashboard. <strong>Run Now</strong> triggers a snapshot run for all projects
               immediately.</p>
           </section>
 

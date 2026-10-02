@@ -185,8 +185,15 @@ func ReadAllTickets(projectRoot string) ([]*ticket.Ticket, error) {
 // Run snapshot
 // ---------------------------------------------------------------------------
 
-// RunSnapshot builds and writes a new snapshot from tkt ticket files.
+// RunSnapshot builds and writes a new snapshot from tkt ticket files. It does
+// not commit; see TakeSnapshot / AutoSnapshot for the committed, locked path.
 func RunSnapshot(projectID, projectRoot string) (*Snapshot, error) {
+	return runSnapshot(projectID, projectRoot, "")
+}
+
+// runSnapshot is RunSnapshot with the snapshot's generated_by set to how it was
+// taken ("auto", "manual", "re-baseline"); empty keeps the engine default.
+func runSnapshot(projectID, projectRoot, generatedBy string) (*Snapshot, error) {
 	today := time.Now()
 	todayStr := today.Format("2006-01-02")
 
@@ -222,7 +229,8 @@ func RunSnapshot(projectID, projectRoot string) (*Snapshot, error) {
 		baseline.Tasks[i].ProjectID = projectID
 	}
 
-	// Detect new slip events
+	// Detect new slip events (sequence numbers run over the whole file;
+	// events superseded by a re-baseline are otherwise ignored)
 	newEvents := DetectSlipEvents(baseline.Tasks, currentTasks, slipEvents)
 	if len(newEvents) > 0 {
 		slipEvents = append(slipEvents, newEvents...)
@@ -239,7 +247,11 @@ func RunSnapshot(projectID, projectRoot string) (*Snapshot, error) {
 	}
 
 	// Build snapshot
-	snapshot := BuildSnapshot(baseline, currentTasks, slipEvents, today)
+	snapshot := BuildSnapshot(baseline, currentTasks, CurrentSlipEvents(slipEvents), today)
+
+	if generatedBy != "" {
+		snapshot.GeneratedBy = generatedBy
+	}
 
 	// Enrich with critical path
 	EnrichSnapshotWithCriticalPath(&snapshot)
@@ -265,13 +277,25 @@ func RunSnapshot(projectID, projectRoot string) (*Snapshot, error) {
 // Create baseline from tickets
 // ---------------------------------------------------------------------------
 
-// CreateBaselineFromTickets creates a baseline.json from the current state of tkt tickets.
+// CreateBaselineFromTickets creates a baseline.json from the current state of
+// tkt tickets. It refuses when a baseline already exists (see Rebaseline).
 func CreateBaselineFromTickets(projectRoot, projectID, projectName, createdBy string) (*Baseline, error) {
-	bp := BaselinePath(projectRoot)
-	if _, err := os.Stat(bp); err == nil {
-		return nil, fmt.Errorf("baseline already exists. Cannot re-baseline")
+	if BaselineExists(projectRoot) {
+		return nil, fmt.Errorf("baseline already exists. Use re-baseline to replace it")
 	}
+	baseline, err := buildBaselineFromTickets(projectRoot, projectID, projectName, createdBy)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeBaseline(projectRoot, baseline); err != nil {
+		return nil, err
+	}
+	return baseline, nil
+}
 
+// buildBaselineFromTickets computes a baseline from the current tickets
+// without writing it.
+func buildBaselineFromTickets(projectRoot, projectID, projectName, createdBy string) (*Baseline, error) {
 	tickets, err := ReadAllTickets(projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read tickets: %w", err)
@@ -411,19 +435,22 @@ func CreateBaselineFromTickets(projectRoot, projectID, projectName, createdBy st
 		PlannedEnd:   projectEnd,
 		Tasks:        baselineTasks,
 	}
+	return baseline, nil
+}
 
-	// Write baseline
+// writeBaseline writes baseline.json.
+func writeBaseline(projectRoot string, baseline *Baseline) error {
+	bp := BaselinePath(projectRoot)
 	if err := os.MkdirAll(filepath.Dir(bp), 0755); err != nil {
-		return nil, fmt.Errorf("failed to create PM directory: %w", err)
+		return fmt.Errorf("failed to create PM directory: %w", err)
 	}
 	bdata, err := json.MarshalIndent(baseline, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal baseline: %w", err)
+		return fmt.Errorf("failed to marshal baseline: %w", err)
 	}
 	bdata = append(bdata, '\n')
 	if err := os.WriteFile(bp, bdata, 0644); err != nil {
-		return nil, fmt.Errorf("failed to write baseline: %w", err)
+		return fmt.Errorf("failed to write baseline: %w", err)
 	}
-
-	return baseline, nil
+	return nil
 }
