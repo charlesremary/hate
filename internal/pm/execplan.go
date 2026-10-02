@@ -16,10 +16,12 @@ import (
 // grouped into parallel stages. A stage (topological wave) is a batch of tickets
 // whose blockers are all satisfied, so they can run at once; a stage opens once
 // the previous one's work is done. Each stage is a collapsible row whose header
-// carries the stage's ticket count, total effort (Σ), and an effort bar; the
-// effort-weighted critical path is flagged. Derived purely from `predecessors`,
+// carries the stage's ticket count, total estimated hours (Σ), and a bar; the
+// duration-weighted critical path is flagged. Durations are EstimatedHours at
+// each assignee's daily hours. Derived purely from `predecessors`,
 // so it works pre-baseline. Backlog tickets and feature parents are excluded.
-func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float64) string {
+func RenderExecPlanHTML(tickets []*ticket.Ticket, resources []ticket.Resource, ctx EstimateContext) string {
+	ctx = ctx.prepared()
 	byID := map[string]*ticket.Ticket{}
 	for _, t := range tickets {
 		if ticket.IsBacklog(t) {
@@ -63,15 +65,16 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 		return best
 	}
 
-	// Effort (person-days) per ticket, and effort-weighted earliest finish for
-	// the critical path.
-	dur := func(id string) float64 {
-		t := byID[id]
-		if t.Effort == nil {
-			return 0
-		}
-		return effortDaysFor(*t.Effort, effortToDays)
+	// Estimated hours and person-days (at the assignee's daily hours) per
+	// ticket, and duration-weighted earliest finish for the critical path.
+	hoursOf := map[string]float64{}
+	daysOf := map[string]float64{}
+	for id, t := range byID {
+		h, _ := EstimatedHours(t, ctx)
+		hoursOf[id] = h
+		daysOf[id] = HoursToDays(h, t.Assignee, resources)
 	}
+	dur := func(id string) float64 { return daysOf[id] }
 	ef := map[string]float64{}
 	var efOf func(id string, stk map[string]bool) float64
 	efOf = func(id string, stk map[string]bool) float64 {
@@ -101,7 +104,7 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 	}
 	sort.Strings(ids)
 
-	// Critical path: backtrack the single longest effort-weighted chain.
+	// Critical path: backtrack the single longest duration-weighted chain.
 	var endNode string
 	maxEF := -1.0
 	for _, id := range ids {
@@ -142,9 +145,10 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 		}
 	}
 
-	// Group schedulable tickets by stage, tallying per-stage effort.
+	// Group schedulable tickets by stage, tallying per-stage hours and days.
 	stageIDs := map[int][]string{}
 	stageDays := map[int]float64{}
+	stageHours := map[int]float64{}
 	maxWave := 0
 	maxStageDays := 0.0
 	for _, id := range ids {
@@ -154,6 +158,7 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 		w := wave[id]
 		stageIDs[w] = append(stageIDs[w], id)
 		stageDays[w] += dur(id)
+		stageHours[w] += hoursOf[id]
 		if w > maxWave {
 			maxWave = w
 		}
@@ -192,8 +197,8 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 			nstr = fmt.Sprintf(` <span style="color:#b45309;font-size:11px">needs %s</span>`, esc(strings.Join(needs, ", ")))
 		}
 		eff := ""
-		if d := dur(id); d > 0 {
-			eff = fmt.Sprintf(` <span style="color:#aaa;font-size:11px">%.0fh</span>`, d*HoursPerDay)
+		if h := hoursOf[id]; h > 0 {
+			eff = fmt.Sprintf(` <span style="color:#aaa;font-size:11px">%.1fh</span>`, h)
 		}
 		return fmt.Sprintf(`<div style="padding:3px 4px 3px 24px;font-size:13px"><span style="%s">%s%s</span> %s%s%s</div>`,
 			style, star, esc(id), esc(trunc(t.Title)), eff, nstr)
@@ -233,9 +238,9 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 			`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">`+
 				`<div style="width:62px;font-weight:600;color:#334155">Stage %d</div>`+
 				`<div style="flex:1;min-width:90px;max-width:230px;background:#f1f5f9;border-radius:3px"><div style="height:14px;width:%.1f%%;min-width:3px;background:#3b82f6;border-radius:3px"></div></div>`+
-				`<div style="color:#334155;font-size:12.5px">%s &middot; <span style="color:#0d9488;font-weight:600">&Sigma; %.0fh &asymp; %.0fd</span>%s%s</div>`+
+				`<div style="color:#334155;font-size:12.5px">%s &middot; <span style="color:#0d9488;font-weight:600">&Sigma; %.1fh &asymp; %.1fd</span>%s%s</div>`+
 				`</div>`,
-			w+1, barPct, count, stageDays[w]*HoursPerDay, stageDays[w], note, critNote)
+			w+1, barPct, count, stageHours[w], stageDays[w], note, critNote)
 		sb.WriteString(fmt.Sprintf(`<details style="margin:0;border-bottom:1px solid #f1f5f9"><summary style="cursor:pointer;padding:7px 4px">%s</summary><div style="padding:2px 0 10px">%s</div></details>`,
 			header, body.String()))
 	}
@@ -243,8 +248,8 @@ func RenderExecPlanHTML(tickets []*ticket.Ticket, effortToDays map[string]float6
 	critCount := len(critical)
 	head := fmt.Sprintf(
 		`<p style="font-size:13px;color:#555;margin:0 0 8px"><strong>Critical path:</strong> `+
-			`<span style="color:#dc2626;font-weight:600">%d tickets ★</span> &middot; ~%.0f effort-days &mdash; the longest dependency chain (the fastest this could finish even with unlimited people).</p>`+
-			`<p style="font-size:12px;color:#555;margin:0 0 12px"><strong>A stage groups tickets that don't depend on each other</strong>, so a stage's tickets can run at the same time. A ticket's stage number is how deep its longest chain of prerequisites is &mdash; it can't start until the earlier stages it <span style="color:#b45309">needs</span> are done. Bar length &amp; <span style="color:#0d9488">&Sigma;</span> = the stage's total effort (person-days @ 8h/day). Expand a stage for its tickets; <span style="color:#dc2626">★</span> = critical path.</p>`,
+			`<span style="color:#dc2626;font-weight:600">%d tickets ★</span> &middot; ~%.1f person-days &mdash; the longest dependency chain (the fastest this could finish even with unlimited people).</p>`+
+			`<p style="font-size:12px;color:#555;margin:0 0 12px"><strong>A stage groups tickets that don't depend on each other</strong>, so a stage's tickets can run at the same time. A ticket's stage number is how deep its longest chain of prerequisites is &mdash; it can't start until the earlier stages it <span style="color:#b45309">needs</span> are done. Bar length &amp; <span style="color:#0d9488">&Sigma;</span> = the stage's total estimated hours (person-days at each assignee's daily hours). Expand a stage for its tickets; <span style="color:#dc2626">★</span> = critical path.</p>`,
 		critCount, maxEF)
 
 	return execPlanCard(head + sb.String())

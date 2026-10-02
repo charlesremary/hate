@@ -487,3 +487,45 @@ form input:focus, form select:focus, form textarea:focus {
   border-color: #e0e0e0;
   text-decoration: line-through;
 }
+
+/* ── Estimation: class / estimate_hours ─────────────── */
+.nt-class-group { margin-bottom: 12px; font-size: 13px; color: var(--text-muted); }
+.nt-radios { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
+form .nt-radios label { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--text); cursor: pointer; }
+.est-muted { color: #999; font-size: 12px; }
+.est-warn { color: #e65100; font-size: 12px; }
+.est-gap-badge { background: #fff3e0; color: #e65100; }
+.est-alert {
+  background: #fff3e0; border-left: 4px solid #e65100; border-radius: 4px;
+  padding: 8px 12px; margin-bottom: 10px; font-size: 13px; color: var(--text);
+}
+.btn-xs { padding: 2px 8px; font-size: 12px; }
+.migration-banner {
+  display: flex; align-items: center; gap: 12px;
+  background: #fff8e1; border-left: 4px solid var(--yellow);
+  padding: 8px 14px; font-size: 13px; color: var(--text);
+}
+.migration-banner a { color: var(--accent); font-weight: 600; }
+.migration-dismiss { margin-left: auto; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; }
+.migration-banner .btn-xs { margin-left: auto; }
+
+/* ── COSMIC: Monte Carlo panel ──────────────────────── */
+.slice-badge { background: #ede7f6; color: #5e35b1; }
+.mc-card {
+  background: var(--surface); border-radius: 8px; box-shadow: var(--shadow);
+  padding: 20px 24px; max-width: 760px; margin-bottom: 20px;
+}
+.mc-heading { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); margin-bottom: 12px; }
+.mc-inputs { display: flex; gap: 40px; flex-wrap: wrap; margin-bottom: 14px; font-size: 13px; }
+.mc-label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.mc-check { display: block; margin: 3px 0; cursor: pointer; }
+.mc-error { color: var(--red); font-size: 13px; padding: 8px 0; }
+.mc-table { max-width: 420px; }
+.mc-notes { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-top: 8px; }
+.mc-hist { display: block; width: 100%; max-width: 480px; height: auto; margin-top: 12px; overflow: visible; }
+.mc-bar { fill: var(--accent); opacity: .35; }
+.mc-axis { stroke: var(--border); stroke-width: 1; }
+.mc-axis-label, .mc-mark-label { font-size: 10px; fill: var(--text-muted); }
+.mc-mark { stroke-width: 1.5; stroke-dasharray: 3 2; }
+.mc-mark-p50 { stroke: var(--accent); }
+.mc-mark-p85 { stroke: #e65100; }

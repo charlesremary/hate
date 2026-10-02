@@ -58,7 +58,9 @@ type AppSettingsRequest struct {
 	ProjectsRoot *string                 `json:"projects_root"`
 	Scheduler    *map[string]interface{} `json:"scheduler"`
 	ShowBilling  *bool                   `json:"show_billing"`
-	ShowCosmic   *bool                   `json:"show_cosmic"`
+	// ShowCosmic is ignored: the COSMIC tab is always shown. Still accepted
+	// (and stored) so older clients that send it don't break.
+	ShowCosmic *bool `json:"show_cosmic"`
 }
 
 // GitIdentityRequest is the body for POST git-identity.
@@ -773,7 +775,8 @@ func whoami(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// validEffortSizes is the canonical t-shirt size set the UI exposes.
+// validEffortSizes is the retired t-shirt size set. The effort_to_days map now
+// only converts legacy effort on old wrap/unclassed tickets at read time.
 var validEffortSizes = map[string]bool{"xs": true, "s": true, "m": true, "l": true, "xl": true}
 
 // getEffortToDays handles GET /api/projects/{projectId}/effort-to-days.

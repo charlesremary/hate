@@ -52,7 +52,6 @@ type balanceTicket struct {
 	newStart       time.Time
 	newDue         time.Time
 	priorityRank   int // lower = higher priority
-	effortDays     float64
 }
 
 // priorityRank for sort: critical=0, high=1, medium=2, low=3, unknown=4.
@@ -100,7 +99,8 @@ func alignToWeekday(d time.Time) time.Time {
 //
 // Returns a report with proposed changes; the caller decides whether to apply
 // them. The algorithm itself is read-only.
-func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, effortToDays map[string]float64, projectStart time.Time) BalanceReport {
+func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, ctx EstimateContext, projectStart time.Time) BalanceReport {
+	ctx = ctx.prepared()
 	if projectStart.IsZero() {
 		projectStart = time.Now().UTC()
 	}
@@ -148,25 +148,20 @@ func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 			terminalDue[t.ID] = d
 			continue
 		}
-		// Schedulable ticket — must have effort + assignee.
+		// Schedulable ticket — must have an estimate + assignee.
 		if t.Assignee == nil || *t.Assignee == "" {
 			report.Skipped = append(report.Skipped, BalanceSkip{
 				TicketID: t.ID, Title: t.Title, Reason: "no assignee",
 			})
 			continue
 		}
-		effort := ""
-		if t.Effort != nil {
-			effort = *t.Effort
-		}
-		days := effortDaysFor(effort, effortToDays)
-		if days <= 0 {
+		hours, _ := EstimatedHours(t, ctx)
+		if hours <= 0 {
 			report.Skipped = append(report.Skipped, BalanceSkip{
-				TicketID: t.ID, Title: t.Title, Reason: "no effort size set",
+				TicketID: t.ID, Title: t.Title, Reason: "no estimate",
 			})
 			continue
 		}
-		hours := days * HoursPerDay
 		// Filter predecessors to those that actually exist in our set.
 		preds := []string{}
 		for _, pid := range t.Predecessors {
@@ -179,7 +174,6 @@ func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 			assignee:       *t.Assignee,
 			predecessors:   preds,
 			priorityRank:   priorityRank(t.Priority),
-			effortDays:     days,
 		}
 		bts = append(bts, bt)
 		btsByID[t.ID] = bt
@@ -267,8 +261,8 @@ func BalanceProject(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 		if a.priorityRank != b.priorityRank {
 			return a.priorityRank < b.priorityRank
 		}
-		if a.effortDays != b.effortDays {
-			return a.effortDays > b.effortDays
+		if a.hoursNeeded != b.hoursNeeded {
+			return a.hoursNeeded > b.hoursNeeded
 		}
 		return a.t.ID < b.t.ID
 	}

@@ -14,7 +14,7 @@ import (
 
 // A projected schedule is a "floating" plan: rather than a committed baseline,
 // it forward-schedules the current tickets from a start date (default today)
-// using effort durations and predecessor chaining, entirely in memory. Nothing
+// using estimated durations and predecessor chaining, entirely in memory. Nothing
 // is written and no dates are stored — open it tomorrow and it slides a day.
 // This lets a project with no real dates still produce a Gantt / draw.io
 // artifact, clearly labelled as a projection rather than a commitment.
@@ -41,11 +41,13 @@ func ownerOf(t *ticket.Ticket) string {
 	return t.Creator
 }
 
-// ProjectSchedule forward-schedules committed tickets from `start` using effort
-// durations (business days, min 1) and finish-to-start predecessor chaining. It
+// ProjectSchedule forward-schedules committed tickets from `start` using
+// estimated durations (EstimatedHours at the assignee's daily hours, rounded to
+// whole business days, min 1) and finish-to-start predecessor chaining. It
 // returns an in-memory projected Snapshot (with critical path computed) and the
 // number of unsized tickets that were assumed to be 1 day. Nothing is persisted.
-func ProjectSchedule(projectID, projectName string, tickets []*ticket.Ticket, effortToDays map[string]float64, start time.Time) (*Snapshot, int) {
+func ProjectSchedule(projectID, projectName string, tickets []*ticket.Ticket, resources []ticket.Resource, ctx EstimateContext, start time.Time) (*Snapshot, int) {
+	ctx = ctx.prepared()
 	byID := map[string]*ticket.Ticket{}
 	var scope []*ticket.Ticket
 	for _, t := range tickets {
@@ -61,12 +63,13 @@ func ProjectSchedule(projectID, projectName string, tickets []*ticket.Ticket, ef
 	unsized := 0
 	dur := map[string]int{}
 	for _, t := range scope {
-		if t.Effort == nil || *t.Effort == "" {
+		hours, _ := EstimatedHours(t, ctx)
+		if hours <= 0 {
 			unsized++
 			dur[t.ID] = 1
 			continue
 		}
-		d := int(math.Round(effortDaysFor(*t.Effort, effortToDays)))
+		d := int(math.Round(HoursToDays(hours, t.Assignee, resources)))
 		if d < 1 {
 			d = 1
 		}
@@ -177,7 +180,7 @@ func projectedNote(start time.Time, unsized int) string {
 
 // RenderProjectedGanttHTML builds the floating schedule and renders the Gantt
 // panel for the pre-baseline dashboard.
-func RenderProjectedGanttHTML(projectID, projectName string, tickets []*ticket.Ticket, effortToDays map[string]float64, start time.Time, exportURL string) string {
-	snap, unsized := ProjectSchedule(projectID, projectName, tickets, effortToDays, start)
+func RenderProjectedGanttHTML(projectID, projectName string, tickets []*ticket.Ticket, resources []ticket.Resource, ctx EstimateContext, start time.Time, exportURL string) string {
+	snap, unsized := ProjectSchedule(projectID, projectName, tickets, resources, ctx, start)
 	return renderGanttPanel(snap, projectedNote(start, unsized), exportURL)
 }

@@ -81,7 +81,7 @@ func getTestSummary(w http.ResponseWriter, r *http.Request) {
 
 // getPhaseRollup handles GET /api/projects/{projectId}/phase-rollup.
 // Pure analysis: groups the current tickets by phase and returns an
-// effort-weighted percent-complete per phase. Nothing is written.
+// hours-weighted percent-complete per phase. Nothing is written.
 func getPhaseRollup(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
@@ -98,11 +98,7 @@ func getPhaseRollup(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	effortToDays := cfg.EffortToDays
-	if effortToDays == nil {
-		effortToDays = ticket.DefaultEffortToDays
-	}
-	report := pm.PhaseRollup(tickets, effortToDays)
+	report := pm.PhaseRollup(tickets, pm.ProjectEstimateContext(root, tickets, cfg))
 	respondJSON(w, http.StatusOK, report)
 }
 
@@ -139,10 +135,6 @@ func balanceProject(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	effortToDays := cfg.EffortToDays
-	if effortToDays == nil {
-		effortToDays = ticket.DefaultEffortToDays
-	}
 	// Project start: earliest existing planned_start across non-terminal
 	// tickets, or today if none.
 	var earliest time.Time
@@ -161,7 +153,7 @@ func balanceProject(w http.ResponseWriter, r *http.Request) {
 	if earliest.IsZero() {
 		earliest = time.Now().UTC()
 	}
-	report := pm.BalanceProject(tickets, cfg.Resources, effortToDays, earliest)
+	report := pm.BalanceProject(tickets, cfg.Resources, pm.ProjectEstimateContext(root, tickets, cfg), earliest)
 
 	if !req.Apply {
 		respondJSON(w, http.StatusOK, report)
@@ -206,11 +198,7 @@ func checkScheduleConflicts(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	effortToDays := cfg.EffortToDays
-	if effortToDays == nil {
-		effortToDays = ticket.DefaultEffortToDays
-	}
-	report := pm.CheckScheduleConflicts(tickets, cfg.Resources, effortToDays, time.Time{})
+	report := pm.CheckScheduleConflicts(tickets, cfg.Resources, pm.ProjectEstimateContext(root, tickets, cfg), time.Time{})
 	respondJSON(w, http.StatusOK, report)
 }
 
@@ -276,14 +264,18 @@ func getGanttDrawio(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		projectName := projectID
-		var effortToDays map[string]float64
-		if cfg, cerr := ticket.ReadConfig(root); cerr == nil {
+		cfg, cerr := ticket.ReadConfig(root)
+		var resources []ticket.Resource
+		if cerr == nil {
 			if cfg.ProjectName != "" {
 				projectName = cfg.ProjectName
 			}
-			effortToDays = cfg.EffortToDays
+			resources = cfg.Resources
+		} else {
+			cfg = nil
 		}
-		snapshot, _ = pm.ProjectSchedule(projectID, projectName, tickets, effortToDays, ganttStart(r))
+		estCtx := pm.ProjectEstimateContext(root, tickets, cfg)
+		snapshot, _ = pm.ProjectSchedule(projectID, projectName, tickets, resources, estCtx, ganttStart(r))
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-gantt.drawio"`, projectID))
@@ -318,29 +310,32 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg, err := ticket.ReadConfig(root)
 		projectName := projectID
-		var effortToDays map[string]float64
+		var resources []ticket.Resource
 		var workHours, adminHours, qaHours *float64
 		if err == nil {
 			if cfg.ProjectName != "" {
 				projectName = cfg.ProjectName
 			}
-			effortToDays = cfg.EffortToDays
+			resources = cfg.Resources
 			workHours = cfg.EffectiveWorkHours()
 			adminHours = cfg.AdminHours
 			qaHours = cfg.QAHours
+		} else {
+			cfg = nil
 		}
+		estCtx := pm.ProjectEstimateContext(root, tickets, cfg)
 		start := ganttStart(r)
 		exportURL := fmt.Sprintf("/api/projects/%s/gantt.drawio", projectID)
 		if s := r.URL.Query().Get("start"); s != "" {
 			exportURL += "?start=" + s
 		}
-		reportsHTML := pm.RenderProjectedGanttHTML(projectID, projectName, tickets, effortToDays, start, exportURL) +
-			pm.RenderExecPlanHTML(tickets, effortToDays) +
+		reportsHTML := pm.RenderProjectedGanttHTML(projectID, projectName, tickets, resources, estCtx, start, exportURL) +
+			pm.RenderExecPlanHTML(tickets, resources, estCtx) +
 			pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, workHours, adminHours, qaHours)) +
-			pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(tickets, effortToDays)) +
+			pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(tickets, estCtx)) +
 			pm.RenderBlockedHTML(pm.ComputeBlocked(tickets)) +
 			pm.RenderTestSummaryLineHTML(pm.ComputeTestSummary(tickets)) +
-			pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(tickets, effortToDays)) +
+			pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(tickets, estCtx)) +
 			pm.RenderOverridesHTML(pm.ComputeOverrides(tickets)) +
 			pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
 		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, reportsHTML)
@@ -365,20 +360,24 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		costTickets = []*ticket.Ticket{}
 	}
-	var effortToDays map[string]float64
+	var resources []ticket.Resource
 	var workHours, adminHours, qaHours *float64
-	if cfg, err := ticket.ReadConfig(root); err == nil {
-		effortToDays = cfg.EffortToDays
+	cfg, cfgErr := ticket.ReadConfig(root)
+	if cfgErr == nil {
+		resources = cfg.Resources
 		workHours = cfg.EffectiveWorkHours()
 		adminHours = cfg.AdminHours
 		qaHours = cfg.QAHours
+	} else {
+		cfg = nil
 	}
-	reportsHTML := pm.RenderExecPlanHTML(costTickets, effortToDays) +
+	estCtx := pm.ProjectEstimateContext(root, costTickets, cfg)
+	reportsHTML := pm.RenderExecPlanHTML(costTickets, resources, estCtx) +
 		pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, workHours, adminHours, qaHours)) +
-		pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(costTickets, effortToDays)) +
+		pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(costTickets, estCtx)) +
 		pm.RenderBlockedHTML(pm.ComputeBlocked(costTickets)) +
 		pm.RenderTestSummaryLineHTML(pm.ComputeTestSummary(costTickets)) +
-		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, effortToDays)) +
+		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, estCtx)) +
 		pm.RenderOverridesHTML(pm.ComputeOverrides(costTickets)) +
 		pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))
 	html := pm.GenerateDashboard(snapshot, reportsHTML)

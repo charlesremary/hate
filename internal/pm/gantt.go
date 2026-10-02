@@ -416,7 +416,7 @@ func criticalOnly(s *Snapshot) *Snapshot {
 func renderGanttPanel(snapshot *Snapshot, note, exportURL string) string {
 	rows, cs, ce := ganttData(snapshot)
 	if len(rows) == 0 {
-		return `<div style="padding:24px;color:#9ca3af">No scheduled tasks to chart yet — add effort sizes (and dependencies) to your tickets.</div>`
+		return `<div style="padding:24px;color:#9ca3af">No scheduled tasks to chart yet — add estimates (and dependencies) to your tickets.</div>`
 	}
 	full := ganttSVG(rows, cs, ce, snapshot.SnapshotDate)
 	cpRows, ccs, cce := ganttData(criticalOnly(snapshot))

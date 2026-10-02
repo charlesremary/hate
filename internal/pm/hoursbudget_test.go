@@ -43,29 +43,50 @@ func TestComputeHoursBudget(t *testing.T) {
 	}
 }
 
-// TestComputeEstimateVariance checks the over/under split: only completed sized
-// tickets land in the tables, in-flight overruns become warnings, and the
-// data-gap buckets (no time, unsized, on-target) are counted, not miscounted.
+// wrapT builds a wrap (config) ticket with an hours estimate (nil = none).
+func wrapT(id, status string, est *float64, logged ...float64) *ticket.Ticket {
+	tk := &ticket.Ticket{ID: id, Status: status, Tags: []string{ticket.ClassConfig}, EstimateHours: est}
+	for _, h := range logged {
+		tk.TimeEntries = append(tk.TimeEntries, ticket.TimeEntry{Hours: h})
+	}
+	return tk
+}
+
+// TestComputeEstimateVariance checks the over/under split: only completed
+// estimated WRAP tickets land in the tables, in-flight overruns become
+// warnings, the data-gap buckets (no time, unsized, on-target) are counted, and
+// functional / unclassed tickets never get per-ticket rows.
 func TestComputeEstimateVariance(t *testing.T) {
-	xs, s, m := "xs", "s", "m"
+	xs, m := "xs", "m"
 	cancel := "descoped"
 
 	tickets := []*ticket.Ticket{
-		{ID: "OVER", Effort: &m, Status: "complete", TimeEntries: te(30)},    // proj 24, +6 overran
-		{ID: "UNDER", Effort: &m, Status: "complete", TimeEntries: te(20)},   // proj 24, -4 underran
-		{ID: "EXACT", Effort: &s, Status: "complete", TimeEntries: te(16)},   // proj 16, on target
-		{ID: "WIP", Effort: &xs, Status: "in_progress", TimeEntries: te(12)}, // proj 8, +4 in-progress-over
-		{ID: "WIPOK", Effort: &m, Status: "in_progress", TimeEntries: te(5)}, // under, not done → ignored
-		{ID: "NOTIME", Effort: &s, Status: "complete"},                       // completed, 0 hours → data gap
-		{ID: "UNSIZED", Status: "complete", TimeEntries: te(9)},              // completed, no size
+		wrapT("OVER", "complete", f64(24), 30),    // +6 overran
+		wrapT("UNDER", "complete", f64(24), 20),   // -4 underran
+		wrapT("EXACT", "complete", f64(16), 16),   // on target
+		wrapT("WIP", "in_progress", f64(8), 12),   // +4 in-progress-over
+		wrapT("WIPOK", "in_progress", f64(24), 5), // under, not done → ignored
+		wrapT("NOTIME", "complete", f64(16)),      // completed, 0 hours → data gap
+		wrapT("UNSIZED", "complete", nil, 9),      // completed wrap, no estimate
+		// Converted: wrap with only a legacy effort (xs = 8h) → source "converted".
+		{ID: "CONV", Status: "complete", Tags: []string{ticket.ClassNonfunc}, Effort: &xs, TimeEntries: te(10)},
+		// Not wrap → no per-ticket row even with a legacy effort.
+		{ID: "LEGACY", Status: "complete", Effort: &m, TimeEntries: te(99)},
+		{ID: "FUNC", Status: "complete", Tags: []string{ticket.ClassFunctional}, TimeEntries: te(99)},
 		// Excluded from scope entirely.
-		{ID: "CANC", Effort: &m, Status: "closed", CancellationReason: &cancel, TimeEntries: te(99)},
+		{ID: "CANC", Status: "closed", Tags: []string{ticket.ClassConfig}, EstimateHours: f64(24), CancellationReason: &cancel, TimeEntries: te(99)},
 	}
 
-	v := ComputeEstimateVariance(tickets, ticket.DefaultEffortToDays)
+	v := ComputeEstimateVariance(tickets, NewEstimateContext(tickets, 0, nil))
 
-	if len(v.Overran) != 1 || v.Overran[0].ID != "OVER" || v.Overran[0].VarianceHours != 6 {
-		t.Errorf("overran = %+v, want [OVER +6]", v.Overran)
+	if len(v.Overran) != 2 || v.Overran[0].ID != "OVER" || v.Overran[0].VarianceHours != 6 {
+		t.Errorf("overran = %+v, want [OVER +6, CONV +2]", v.Overran)
+	}
+	if len(v.Overran) == 2 && (v.Overran[1].ID != "CONV" || v.Overran[1].Source != SourceConverted || v.Overran[1].EstimateHours != 8) {
+		t.Errorf("overran[1] = %+v, want CONV converted 8h", v.Overran[1])
+	}
+	if v.Overran[0].Source != SourceEstimate {
+		t.Errorf("OVER source = %q, want estimate", v.Overran[0].Source)
 	}
 	if len(v.Underran) != 1 || v.Underran[0].ID != "UNDER" || v.Underran[0].VarianceHours != -4 {
 		t.Errorf("underran = %+v, want [UNDER -4]", v.Underran)
@@ -73,8 +94,8 @@ func TestComputeEstimateVariance(t *testing.T) {
 	if len(v.InProgressOver) != 1 || v.InProgressOver[0].ID != "WIP" {
 		t.Errorf("inProgressOver = %+v, want [WIP]", v.InProgressOver)
 	}
-	if v.TotalOverrunHours != 6 || v.TotalUnderrunHours != 4 {
-		t.Errorf("totals = +%.1f/-%.1f, want +6/-4", v.TotalOverrunHours, v.TotalUnderrunHours)
+	if v.TotalOverrunHours != 8 || v.TotalUnderrunHours != 4 {
+		t.Errorf("totals = +%.1f/-%.1f, want +8/-4", v.TotalOverrunHours, v.TotalUnderrunHours)
 	}
 	if v.OnTargetCount != 1 {
 		t.Errorf("onTarget = %d, want 1", v.OnTargetCount)
@@ -87,19 +108,52 @@ func TestComputeEstimateVariance(t *testing.T) {
 	}
 }
 
-// TestComputeHoursAtRisk lists active sized tickets at ≥90% of allotment,
-// including over 100%, most-consumed first; completed/unsized are excluded.
-func TestComputeHoursAtRisk(t *testing.T) {
-	xs := "xs" // 1 day → 8h allotment at HoursPerDay=8
+// TestEstimateVarianceFeatures: the per-feature code section compares CFP x
+// rate with functional hours, only for features whose functional children are
+// all done (dev_complete or later).
+func TestEstimateVarianceFeatures(t *testing.T) {
 	tickets := []*ticket.Ticket{
-		{ID: "NEAR", Effort: &xs, Status: "in_progress", TimeEntries: te(7.5)}, // 93.8% → in
-		{ID: "OVER", Effort: &xs, Status: "in_progress", TimeEntries: te(10)},  // 125% → in
-		{ID: "LOW", Effort: &xs, Status: "in_progress", TimeEntries: te(4)},    // 50% → out
-		{ID: "DONE", Effort: &xs, Status: "complete", TimeEntries: te(8)},      // completed → out
-		{ID: "UNSIZED", Status: "in_progress", TimeEntries: te(99)},            // no allotment → out
+		{ID: "F1", Title: "Done feature", Tags: []string{"cfp:10"}},
+		{ID: "a", Status: "dev_complete", Tags: []string{"parent:F1", ticket.ClassFunctional}, TimeEntries: te(2)},
+		{ID: "b", Status: "complete", Tags: []string{"parent:F1", ticket.ClassFunctional}, TimeEntries: te(2)},
+		{ID: "w", Status: "in_progress", Tags: []string{"parent:F1", ticket.ClassConfig}, EstimateHours: f64(1), TimeEntries: te(1)}, // wrap: not part of the done rule
+
+		{ID: "F2", Title: "Open feature", Tags: []string{"cfp:8"}},
+		{ID: "c", Status: "complete", Tags: []string{"parent:F2", ticket.ClassFunctional}, TimeEntries: te(1)},
+		{ID: "d", Status: "rework", Tags: []string{"parent:F2", ticket.ClassFunctional}, TimeEntries: te(1)},
+	}
+	v := ComputeEstimateVariance(tickets, NewEstimateContext(tickets, 0.3, nil))
+	if len(v.Features) != 1 {
+		t.Fatalf("features = %+v, want only F1", v.Features)
+	}
+	f := v.Features[0]
+	if f.ID != "F1" || f.CFP != 10 || !approx(f.EstimateHours, 3) || f.SpentHours != 4 || !approx(f.VarianceHours, 1) || f.Rate != 0.3 {
+		t.Errorf("F1 row = %+v, want cfp 10, est 3, spent 4, var +1, rate 0.3", f)
+	}
+	// Functional children never get per-ticket variance rows.
+	for _, r := range append(append(v.Overran, v.Underran...), v.InProgressOver...) {
+		if r.ID == "a" || r.ID == "b" || r.ID == "c" || r.ID == "d" {
+			t.Errorf("functional ticket %s got a per-ticket row", r.ID)
+		}
+	}
+}
+
+// TestComputeHoursAtRisk lists active wrap tickets at ≥90% of allotment,
+// including over 100%, most-consumed first; completed, unestimated, functional
+// and unclassed tickets are excluded.
+func TestComputeHoursAtRisk(t *testing.T) {
+	xs := "xs"
+	tickets := []*ticket.Ticket{
+		wrapT("NEAR", "in_progress", f64(8), 7.5),                                                                 // 93.8% → in
+		wrapT("OVER", "in_progress", f64(8), 10),                                                                  // 125% → in
+		wrapT("LOW", "in_progress", f64(8), 4),                                                                    // 50% → out
+		wrapT("DONE", "complete", f64(8), 8),                                                                      // completed → out
+		wrapT("UNSIZED", "in_progress", nil, 99),                                                                  // no allotment → out
+		{ID: "LEGACY", Status: "in_progress", Effort: &xs, TimeEntries: te(99)},                                   // unclassed → no allotment
+		{ID: "FUNC", Status: "in_progress", Tags: []string{ticket.ClassFunctional, "cfp:1"}, TimeEntries: te(99)}, // functional → never gated
 	}
 
-	rows := ComputeHoursAtRisk(tickets, ticket.DefaultEffortToDays)
+	rows := ComputeHoursAtRisk(tickets, NewEstimateContext(tickets, 0, nil))
 	if len(rows) != 2 {
 		t.Fatalf("got %d at-risk rows, want 2 (%+v)", len(rows), rows)
 	}
@@ -138,16 +192,14 @@ func TestComputeOverrides(t *testing.T) {
 
 // TestEstimateVarianceSortOrder confirms the biggest miss surfaces first in each list.
 func TestEstimateVarianceSortOrder(t *testing.T) {
-	m, l := "m", "l" // 24h, 40h
-
 	tickets := []*ticket.Ticket{
-		{ID: "SMALL_OVER", Effort: &m, Status: "complete", TimeEntries: te(26)},  // +2
-		{ID: "BIG_OVER", Effort: &m, Status: "complete", TimeEntries: te(40)},    // +16
-		{ID: "SMALL_UNDER", Effort: &m, Status: "complete", TimeEntries: te(22)}, // -2
-		{ID: "BIG_UNDER", Effort: &l, Status: "complete", TimeEntries: te(10)},   // -30
+		wrapT("SMALL_OVER", "complete", f64(24), 26),  // +2
+		wrapT("BIG_OVER", "complete", f64(24), 40),    // +16
+		wrapT("SMALL_UNDER", "complete", f64(24), 22), // -2
+		wrapT("BIG_UNDER", "complete", f64(40), 10),   // -30
 	}
 
-	v := ComputeEstimateVariance(tickets, ticket.DefaultEffortToDays)
+	v := ComputeEstimateVariance(tickets, NewEstimateContext(tickets, 0, nil))
 
 	if v.Overran[0].ID != "BIG_OVER" {
 		t.Errorf("overran[0] = %s, want BIG_OVER", v.Overran[0].ID)

@@ -32,6 +32,8 @@ const (
 	classFunctional = "functional"
 	classConfig     = "config"
 	classNonfunc    = "nonfunc"
+	// CalibrationSliceTag marks a feature in a project's calibration slice.
+	CalibrationSliceTag = "calibration-slice"
 )
 
 // CosmicAssumed holds the borrowed-industry knobs we're trying to replace with
@@ -57,6 +59,9 @@ type CosmicFeature struct {
 	TotalHours      float64  `json:"total_hours"`
 	HPerCFP         *float64 `json:"h_per_cfp"` // nil if no functional hours
 	WrapPct         *float64 `json:"wrap_pct"`  // nil if no functional hours
+	// CalibrationSlice marks a feature tagged calibration-slice (built first
+	// on a new kind of project to measure its own rates).
+	CalibrationSlice bool `json:"calibration_slice"`
 }
 
 // CosmicAggregate is the project-level number you actually recalibrate from.
@@ -76,42 +81,15 @@ type CosmicAggregate struct {
 	WrapPct         *float64 `json:"wrap_pct"`
 }
 
-// CosmicEstimate is the manual initial-estimate projection: from the total CFP and
-// a borrowed code rate (h/CFP) + wrap %, the projected project hours. The inputs
-// are persisted per-project; the hours are computed. Inputs are nil until set.
-type CosmicEstimate struct {
-	HPerCFP    *float64 `json:"h_per_cfp"`  // input: borrowed code rate
-	WrapPct    *float64 `json:"wrap_pct"`   // input: borrowed wrap %
-	TotalCFP   int      `json:"total_cfp"`  // from the project's cfp: tags
-	CodeHours  float64  `json:"code_hours"` // totalCFP × h/CFP
-	WrapHours  float64  `json:"wrap_hours"` // codeHours × wrap%
-	TotalHours float64  `json:"total_hours"`
-}
-
-// BuildCosmicEstimate projects hours from total CFP and the borrowed rates.
-// With no h/CFP set, the hours stay zero (nothing to project from).
-func BuildCosmicEstimate(totalCFP int, hPerCFP, wrapPct *float64) CosmicEstimate {
-	e := CosmicEstimate{HPerCFP: hPerCFP, WrapPct: wrapPct, TotalCFP: totalCFP}
-	if hPerCFP != nil && *hPerCFP > 0 {
-		e.CodeHours = float64(totalCFP) * *hPerCFP
-		w := 0.0
-		if wrapPct != nil && *wrapPct > 0 {
-			w = *wrapPct
-		}
-		e.WrapHours = e.CodeHours * w / 100
-		e.TotalHours = e.CodeHours + e.WrapHours
-	}
-	return e
-}
-
 // CosmicReport is the full calibration payload.
 type CosmicReport struct {
 	Features  []CosmicFeature `json:"features"`
 	Aggregate CosmicAggregate `json:"aggregate"`
 	Assumed   CosmicAssumed   `json:"assumed"`
-	// Estimate is the manual initial-estimate projection (inputs persisted on the
-	// project). Populated by the API handler, which has the config.
-	Estimate CosmicEstimate `json:"estimate"`
+	// Calibration slice: features tagged calibration-slice, and how many of
+	// them have all their functional tickets done.
+	SliceTotal int `json:"slice_total"`
+	SliceDone  int `json:"slice_done"`
 }
 
 func cosmicTagValue(tags []string, prefix string) (string, bool) {
@@ -121,6 +99,15 @@ func cosmicTagValue(tags []string, prefix string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func hasTag(tags []string, tag string) bool {
+	for _, t := range tags {
+		if t == tag {
+			return true
+		}
+	}
+	return false
 }
 
 func cosmicClassOf(tags []string) string {
@@ -168,7 +155,13 @@ func ComputeCosmic(tickets []*ticket.Ticket) CosmicReport {
 		if err != nil || cfp <= 0 {
 			continue
 		}
-		f := CosmicFeature{ID: t.ID, Title: t.Title, CFP: cfp}
+		f := CosmicFeature{ID: t.ID, Title: t.Title, CFP: cfp, CalibrationSlice: hasTag(t.Tags, CalibrationSliceTag)}
+		if f.CalibrationSlice {
+			report.SliceTotal++
+			if FeatureFunctionalDone(t, tickets) {
+				report.SliceDone++
+			}
+		}
 		// Self-contained feature: the sized ticket's OWN hours count by its own
 		// class tag (a "feature of one" — no children required). A cfp ticket with
 		// hours but no class is still flagged as parent_hours (genuinely mis-logged).

@@ -10,7 +10,7 @@ import (
 	"hate/internal/ticket"
 )
 
-// PhaseProgress is the effort-weighted rollup for a single phase.
+// PhaseProgress is the hours-weighted rollup for a single phase.
 type PhaseProgress struct {
 	Phase string `json:"phase"` // raw phase value; "" for tickets with no phase
 	Label string `json:"label"` // human-readable; "(no phase)" when Phase is ""
@@ -22,12 +22,12 @@ type PhaseProgress struct {
 	BlockedCount    int `json:"blocked_count"`
 	CancelledCount  int `json:"cancelled_count"` // force-closed / descoped; excluded from %
 
-	TotalEffortDays float64 `json:"total_effort_days"` // sum of effort-days in scope
-	DoneEffortDays  float64 `json:"done_effort_days"`  // effort-days of complete tickets
-	NoEffortCount   int     `json:"no_effort_count"`   // in-scope tickets with no effort size
+	EstHoursTotal float64 `json:"est_hours_total"` // sum of estimated hours in scope
+	EstHoursDone  float64 `json:"est_hours_done"`  // estimated hours of complete tickets
+	UnsizedCount  int     `json:"unsized_count"`   // in-scope work tickets with no estimate
 
 	PercentComplete float64 `json:"percent_complete"` // 0..100
-	EffortBased     bool    `json:"effort_based"`     // false → % fell back to ticket count
+	HoursBased      bool    `json:"hours_based"`      // false → % fell back to ticket count
 
 	PlannedStart string `json:"planned_start"` // earliest planned_start_date in phase
 	DueDate      string `json:"due_date"`      // latest due_date in phase
@@ -36,9 +36,9 @@ type PhaseProgress struct {
 // RollupReport is the per-phase progress rollup for a project.
 type RollupReport struct {
 	GeneratedAt     string          `json:"generated_at"`
-	Basis           string          `json:"basis"`            // "effort-weighted"
+	Basis           string          `json:"basis"`            // "hours-weighted"
 	TotalTickets    int             `json:"total_tickets"`    // in-scope (cancelled excluded)
-	PercentComplete float64         `json:"percent_complete"` // project-level, effort-weighted
+	PercentComplete float64         `json:"percent_complete"` // project-level, hours-weighted
 	Phases          []PhaseProgress `json:"phases"`
 }
 
@@ -56,22 +56,24 @@ func isComplete(t *ticket.Ticket) bool {
 }
 
 // PhaseRollup groups tickets by their phase field and computes an
-// effort-weighted percent-complete per phase, plus a status breakdown and
+// hours-weighted percent-complete per phase, plus a status breakdown and
 // rolled-up start/due dates.
 //
 // Decisions baked in (see the article series / README for the why):
-//   - Percent is effort-weighted: done effort-days ÷ total effort-days, using the
-//     project's effort_to_days mapping. Completion is binary (a ticket is done
-//     only once it reaches complete/closed) — no partial credit for in-flight work.
+//   - Percent is hours-weighted: done estimated hours ÷ total estimated hours,
+//     using EstimatedHours. Completion is binary (a ticket is done only once it
+//     reaches complete/closed) — no partial credit for in-flight work.
 //   - Cancelled (force-closed) tickets are treated as descoped: counted on
 //     CancelledCount and excluded from the scope and the percentage.
-//   - Tickets with no effort size contribute nothing to the effort math and are
-//     surfaced via NoEffortCount. A phase whose tickets are entirely unsized has
-//     no effort denominator, so its percentage falls back to ticket count
-//     (EffortBased=false) rather than reporting a misleading zero.
+//   - Tickets with no estimate contribute nothing to the hours math. Work
+//     tickets among them are surfaced via UnsizedCount (parents, meetings, and
+//     admin are never sized, so they aren't counted). A phase with no estimated
+//     hours has no denominator, so its percentage falls back to ticket count
+//     (HoursBased=false) rather than reporting a misleading zero.
 //
 // The algorithm is read-only.
-func PhaseRollup(tickets []*ticket.Ticket, effortToDays map[string]float64) RollupReport {
+func PhaseRollup(tickets []*ticket.Ticket, ctx EstimateContext) RollupReport {
+	ctx = ctx.prepared()
 	byPhase := map[string]*PhaseProgress{}
 	earliest := map[string]string{}
 	latest := map[string]string{}
@@ -103,20 +105,16 @@ func PhaseRollup(tickets []*ticket.Ticket, effortToDays map[string]float64) Roll
 
 		p.TicketCount++
 
-		effort := ""
-		if t.Effort != nil {
-			effort = *t.Effort
+		hours, _ := EstimatedHours(t, ctx)
+		if hours <= 0 && !ctx.idx.hasChildren[t.ID] && t.Type != "meeting" && t.Type != "administration" {
+			p.UnsizedCount++
 		}
-		days := effortDaysFor(effort, effortToDays)
-		if days <= 0 {
-			p.NoEffortCount++
-		}
-		p.TotalEffortDays += days
+		p.EstHoursTotal += hours
 
 		switch {
 		case isComplete(t):
 			p.CompleteCount++
-			p.DoneEffortDays += days
+			p.EstHoursDone += hours
 		case t.Status == "blocked":
 			p.BlockedCount++
 		case t.Status == "not_started":
@@ -138,24 +136,24 @@ func PhaseRollup(tickets []*ticket.Ticket, effortToDays map[string]float64) Roll
 	}
 
 	var phases []PhaseProgress
-	var projTotalEffort, projDoneEffort float64
+	var projTotalHours, projDoneHours float64
 	var projTotalTickets, projDoneTickets int
 	for phase, p := range byPhase {
 		p.PlannedStart = earliest[phase]
 		p.DueDate = latest[phase]
 		switch {
-		case p.TotalEffortDays > 0:
-			p.PercentComplete = round1(float64(p.DoneEffortDays) / float64(p.TotalEffortDays) * 100)
-			p.EffortBased = true
+		case p.EstHoursTotal > 0:
+			p.PercentComplete = round1(p.EstHoursDone / p.EstHoursTotal * 100)
+			p.HoursBased = true
 		case p.TicketCount > 0:
-			// No effort sizing anywhere in this phase — fall back to ticket count.
+			// No estimates anywhere in this phase — fall back to ticket count.
 			p.PercentComplete = round1(float64(p.CompleteCount) / float64(p.TicketCount) * 100)
-			p.EffortBased = false
+			p.HoursBased = false
 		}
 		phases = append(phases, *p)
 
-		projTotalEffort += p.TotalEffortDays
-		projDoneEffort += p.DoneEffortDays
+		projTotalHours += p.EstHoursTotal
+		projDoneHours += p.EstHoursDone
 		projTotalTickets += p.TicketCount
 		projDoneTickets += p.CompleteCount
 	}
@@ -170,13 +168,13 @@ func PhaseRollup(tickets []*ticket.Ticket, effortToDays map[string]float64) Roll
 
 	report := RollupReport{
 		GeneratedAt:  ticket.NowISO(),
-		Basis:        "effort-weighted",
+		Basis:        "hours-weighted",
 		TotalTickets: projTotalTickets,
 		Phases:       phases,
 	}
 	switch {
-	case projTotalEffort > 0:
-		report.PercentComplete = round1(float64(projDoneEffort) / float64(projTotalEffort) * 100)
+	case projTotalHours > 0:
+		report.PercentComplete = round1(projDoneHours / projTotalHours * 100)
 	case projTotalTickets > 0:
 		report.PercentComplete = round1(float64(projDoneTickets) / float64(projTotalTickets) * 100)
 	}

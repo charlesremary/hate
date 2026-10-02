@@ -27,7 +27,10 @@ func changeByID(report BalanceReport, id string) (BalanceChange, bool) {
 // snapshot. Before the fix the terminal branch released the successor on the due
 // date itself (a day early), making the two predecessor kinds inconsistent.
 func TestBalanceTerminalPredecessorOffset(t *testing.T) {
-	xs := "xs"
+	// Each work ticket is a config (wrap) ticket estimated at 8h = 1 day at the
+	// default 8h/day capacity.
+	eight := 8.0
+	wrap := []string{ticket.ClassConfig}
 	// 2026-06-10 is a Wednesday; 2026-06-11 a Thursday. Both weekdays, so no
 	// weekend skipping masks the off-by-one.
 	projectStart := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
@@ -39,18 +42,18 @@ func TestBalanceTerminalPredecessorOffset(t *testing.T) {
 			Priority: "medium", DueDate: &due},
 		// Successor of the terminal predecessor.
 		{ID: "T-sterm", Type: "task", Status: "not_started", Title: "after terminal",
-			Priority: "medium", Effort: &xs, Assignee: strp("a@x"),
+			Priority: "medium", Tags: wrap, EstimateHours: &eight, Assignee: strp("a@x"),
 			Predecessors: []string{"T-pterm"}},
-		// Scheduled predecessor: finishes on the project start day (xs = 1 day).
+		// Scheduled predecessor: finishes on the project start day (8h = 1 day).
 		{ID: "T-psched", Type: "task", Status: "not_started", Title: "live dep",
-			Priority: "medium", Effort: &xs, Assignee: strp("b@x")},
+			Priority: "medium", Tags: wrap, EstimateHours: &eight, Assignee: strp("b@x")},
 		// Successor of the scheduled predecessor.
 		{ID: "T-ssched", Type: "task", Status: "not_started", Title: "after scheduled",
-			Priority: "medium", Effort: &xs, Assignee: strp("c@x"),
+			Priority: "medium", Tags: wrap, EstimateHours: &eight, Assignee: strp("c@x"),
 			Predecessors: []string{"T-psched"}},
 	}
 
-	report := BalanceProject(tickets, nil, ticket.DefaultEffortToDays, projectStart)
+	report := BalanceProject(tickets, nil, NewEstimateContext(tickets, 0, nil), projectStart)
 
 	if report.CycleDetected {
 		t.Fatalf("unexpected cycle detected: %v", report.CycleTicketIDs)
@@ -91,3 +94,28 @@ func TestBalanceTerminalPredecessorOffset(t *testing.T) {
 }
 
 func strp(s string) *string { return &s }
+
+// TestBalanceSkipsUnestimated: a ticket with no estimate is skipped with the
+// "no estimate" reason; a functional child is scheduled from its parent's CFP.
+func TestBalanceSkipsUnestimated(t *testing.T) {
+	start := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	tickets := []*ticket.Ticket{
+		{ID: "F", Type: "task", Status: "not_started", Tags: []string{"cfp:32"}},
+		{ID: "C", Type: "dev_task", Status: "not_started", Priority: "medium", Assignee: strp("a@x"),
+			Tags: []string{"parent:F", ticket.ClassFunctional}},
+		{ID: "U", Type: "task", Status: "not_started", Priority: "medium", Assignee: strp("a@x"),
+			Tags: []string{ticket.ClassConfig}}, // wrap with no estimate
+	}
+	report := BalanceProject(tickets, nil, NewEstimateContext(tickets, 0.25, nil), start)
+	c, ok := changeByID(report, "C")
+	if !ok || c.HoursNeeded != 8 { // 32 CFP x 0.25 / 1 functional child
+		t.Errorf("C change = %+v (ok=%v), want 8 hours needed", c, ok)
+	}
+	var reasons = map[string]string{}
+	for _, s := range report.Skipped {
+		reasons[s.TicketID] = s.Reason
+	}
+	if reasons["U"] != "no estimate" {
+		t.Errorf("U skip reason = %q, want 'no estimate'", reasons["U"])
+	}
+}

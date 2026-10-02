@@ -278,6 +278,7 @@ func CreateBaselineFromTickets(projectRoot, projectID, projectName, createdBy st
 	}
 	// Backlog tickets are out of committed scope — never part of the baseline,
 	// so they don't affect the projected end date, slip, or health.
+	allTickets := tickets
 	committed := make([]*ticket.Ticket, 0, len(tickets))
 	for _, t := range tickets {
 		if !ticket.IsBacklog(t) {
@@ -289,12 +290,18 @@ func CreateBaselineFromTickets(projectRoot, projectID, projectName, createdBy st
 		return nil, fmt.Errorf("no committed tickets to baseline (all are backlog). Untag some, or create non-backlog tickets first")
 	}
 
-	// Read config for effort_to_days
-	effortToDays := map[string]float64{"xs": 1, "s": 2, "m": 3, "l": 5, "xl": 8}
+	// Estimates: EstimatedHours over the whole project (functional children
+	// need their siblings and parent), converted to days at each assignee's
+	// daily hours.
 	cfg, err := ticket.ReadConfig(projectRoot)
-	if err == nil && cfg.EffortToDays != nil {
-		effortToDays = cfg.EffortToDays
+	if err != nil {
+		cfg = nil
 	}
+	var resources []ticket.Resource
+	if cfg != nil {
+		resources = cfg.Resources
+	}
+	estCtx := ProjectEstimateContext(projectRoot, allTickets, cfg)
 
 	today := time.Now()
 	todayStr := today.Format("2006-01-02")
@@ -311,17 +318,15 @@ func CreateBaselineFromTickets(projectRoot, projectID, projectName, createdBy st
 			plannedStartStr = *t.PlannedStartDate
 		}
 
-		// Determine planned days from effort or default. Effort-days may be
-		// fractional (quarter-day granularity), but the baseline schedules on
-		// whole calendar days (AddDate / business-day loops), so round to the
-		// nearest day, floored at 1 so a sized ticket always spans a day.
+		// Determine planned days from the estimate or default. Estimated days
+		// may be fractional, but the baseline schedules on whole calendar days
+		// (AddDate / business-day loops), so round to the nearest day, floored
+		// at 1 so a sized ticket always spans a day.
 		plannedDays := 5
-		if t.Effort != nil && *t.Effort != "" {
-			if d, ok := effortToDays[*t.Effort]; ok {
-				plannedDays = int(math.Round(d))
-				if plannedDays < 1 {
-					plannedDays = 1
-				}
+		if hours, _ := EstimatedHours(t, estCtx); hours > 0 {
+			plannedDays = int(math.Round(HoursToDays(hours, t.Assignee, resources)))
+			if plannedDays < 1 {
+				plannedDays = 1
 			}
 		}
 

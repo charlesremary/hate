@@ -1,7 +1,18 @@
 # Plan: estimation rework (CFP + wrap hours + Monte Carlo)
 
-Status: PLAN ONLY. Nothing here is built yet. Review and decide the open
-questions (end of file) before any code changes.
+Status: IMPLEMENTED in v1.0.5 (2026-10-02), except Phase 0.1b, 0.2 and 0.3,
+which need a second clean project, a spec to count, and per-project review.
+Open questions were resolved with the "lean" option on each (see section 4).
+
+Changes from the plan made during implementation:
+- Platform wrap uses LOGGED hours for done wrap tickets and estimate_hours
+  for the rest. Wrap tickets with only a converted legacy effort (days x 8,
+  far too big: Tactic converted to ~20h per ticket vs ~0.4h actual) or no
+  estimate are counted and flagged, but left out of the sum.
+- "Projected finish" on the COSMIC panel is code-only.
+- The migration (Phase 4.1) is not a write: legacy effort on wrap tickets is
+  converted at read time and flagged ("converted"). No project data is
+  rewritten.
 
 Supersedes: docs/future-wrap-based-estimation.md (that doc describes a
 catalog/profile design that was built and then removed).

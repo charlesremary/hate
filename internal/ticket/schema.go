@@ -54,7 +54,7 @@ var (
 		"title":              nil,
 		"description":        nil,
 		"priority":           Priorities,
-		"effort":             Efforts,
+		"estimate_hours":     nil,
 		"tags":               nil,
 		"planned_start_date": nil,
 		"due_date":           nil,
@@ -96,7 +96,7 @@ type TimeEntry struct {
 	Description string  `json:"description"`
 	Author      string  `json:"author"`
 	LoggedAt    string  `json:"logged_at"`
-	// ExtendReason is set when this entry was logged past the ticket's effort
+	// ExtendReason is set when this entry was logged past a wrap ticket's hours
 	// allotment under strict time enforcement — the recorded authorization.
 	ExtendReason string `json:"extend_reason,omitempty"`
 	// Bucket is the hour-budget pool this entry burns ("work" | "admin" | "qa"),
@@ -128,14 +128,19 @@ type Attachment struct {
 
 // Ticket is the unified ticket struct matching the Python flat schema exactly.
 type Ticket struct {
-	SchemaVersion string   `json:"schema_version"`
-	ID            string   `json:"id"`
-	Type          string   `json:"type"`
-	Status        string   `json:"status"`
-	Title         string   `json:"title"`
-	Description   string   `json:"description"`
-	Priority      string   `json:"priority"`
-	Effort        *string  `json:"effort"`
+	SchemaVersion string `json:"schema_version"`
+	ID            string `json:"id"`
+	Type          string `json:"type"`
+	Status        string `json:"status"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	Priority      string `json:"priority"`
+	// Effort is the retired t-shirt size: read-only legacy data, kept so old
+	// projects stay schedulable (converted at read time, never written).
+	Effort *string `json:"effort"`
+	// EstimateHours is the hours estimate for a WRAP ticket (config/nonfunc).
+	// nil = unsized. >= 0.25 in quarter-hour steps.
+	EstimateHours *float64 `json:"estimate_hours,omitempty"`
 	Tags          []string `json:"tags"`
 	Phase         *string  `json:"phase"`
 	Assignee      *string  `json:"assignee"`
@@ -297,6 +302,9 @@ func ValidateTicket(t *Ticket) []string {
 		}
 		if t.Effort != nil && *t.Effort != "" && !Contains(Efforts, *t.Effort) {
 			errors = append(errors, fmt.Sprintf("Invalid effort: '%s'", *t.Effort))
+		}
+		if err := ValidateEstimateHours(t.EstimateHours); err != nil {
+			errors = append(errors, err.Error())
 		}
 		if t.DefectSeverity != nil && *t.DefectSeverity != "" && !Contains(DefectSeverities, *t.DefectSeverity) {
 			errors = append(errors, fmt.Sprintf("Invalid defect_severity: '%s'", *t.DefectSeverity))

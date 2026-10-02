@@ -6,33 +6,17 @@ package pm
 import (
 	"fmt"
 	"html"
+	"math"
 	"sort"
 	"strings"
 
 	"hate/internal/ticket"
 )
 
-// Estimated hours for a ticket derive from its t-shirt Effort size: the
-// project's effort_to_days mapping (falling back to defaults) converted to hours
-// at HoursPerDay. This is coarse sizing, not a precise estimate — the reports
-// below label their numbers as a "sizing budget," never as a hard estimate.
-
-// estimateHours returns a ticket's projected hours from its effort size, or 0
-// when the ticket carries no effort size.
-func estimateHours(t *ticket.Ticket, effortToDays map[string]float64) float64 {
-	effort := ""
-	if t.Effort != nil {
-		effort = *t.Effort
-	}
-	return effortDaysFor(effort, effortToDays) * HoursPerDay
-}
-
-// EffortHours returns the allotted hours for an effort size (days × HoursPerDay),
-// or 0 when the size is empty/unknown. Same basis as the estimate-variance math,
-// exported so the time-log gate enforces against the same number.
-func EffortHours(effort string, effortToDays map[string]float64) float64 {
-	return effortDaysFor(effort, effortToDays) * HoursPerDay
-}
+// Estimated hours come from EstimatedHours (see estimatehours.go). Per-ticket
+// comparisons (variance rows, hours at risk, strict time) cover WRAP tickets
+// only (config/nonfunc): functional work is estimated at the feature level, so
+// it's compared per feature (CFP x reference rate vs actual functional hours).
 
 // inHoursScope reports whether a ticket counts toward the committed hours
 // budget. Cancelled (descoped) and backlog (uncommitted) tickets are excluded,
@@ -176,21 +160,34 @@ func RenderHoursBudgetHTML(b HoursBudget) string {
 // Feature 2: estimate variance (over/under the sizing budget)
 // ---------------------------------------------------------------------------
 
-// VarianceRow is one ticket's projected-vs-spent comparison.
+// VarianceRow is one wrap ticket's projected-vs-spent comparison.
 type VarianceRow struct {
 	ID            string  `json:"id"`
 	Title         string  `json:"title"`
 	Status        string  `json:"status"`
-	Effort        string  `json:"effort"`
+	Source        string  `json:"source"` // "estimate" | "converted" (legacy effort)
 	EstimateHours float64 `json:"estimate_hours"`
 	SpentHours    float64 `json:"spent_hours"`
 	VarianceHours float64 `json:"variance_hours"` // Spent − Estimate (positive = overran)
 }
 
-// EstimateVariance splits sized tickets into those that overran vs underran
-// their sizing budget. Over/under is only meaningful once a ticket is finished,
-// so the two tables cover completed tickets; in-flight tickets already past
-// their budget are surfaced as an early-warning list instead.
+// FeatureVarianceRow compares a finished feature's code estimate (CFP x the
+// reference rate) with its actual functional hours.
+type FeatureVarianceRow struct {
+	ID            string  `json:"id"`
+	Title         string  `json:"title"`
+	CFP           int     `json:"cfp"`
+	Rate          float64 `json:"rate"` // h/CFP the estimate used
+	EstimateHours float64 `json:"estimate_hours"`
+	SpentHours    float64 `json:"spent_hours"` // functional hours
+	VarianceHours float64 `json:"variance_hours"`
+}
+
+// EstimateVariance splits sized wrap tickets into those that overran vs
+// underran their estimate. Over/under is only meaningful once a ticket is
+// finished, so the two tables cover completed tickets; in-flight tickets
+// already past their estimate are surfaced as an early-warning list instead.
+// Features holds the per-feature code comparison.
 type EstimateVariance struct {
 	Overran        []VarianceRow `json:"overran"`          // completed, spent > estimate
 	Underran       []VarianceRow `json:"underran"`         // completed, spent < estimate
@@ -198,39 +195,43 @@ type EstimateVariance struct {
 
 	OnTargetCount    int `json:"on_target_count"`   // completed, spent == estimate
 	CompletedNoTime  int `json:"completed_no_time"` // completed but no hours logged (data gap)
-	UnsizedCompleted int `json:"unsized_completed"` // completed but no effort size
+	UnsizedCompleted int `json:"unsized_completed"` // completed wrap ticket with no estimate
 
 	TotalOverrunHours  float64 `json:"total_overrun_hours"`  // Σ positive variance (completed)
 	TotalUnderrunHours float64 `json:"total_underrun_hours"` // Σ |negative variance| (completed)
+
+	Features []FeatureVarianceRow `json:"features"` // finished cfp features, biggest miss first
 }
 
-// ComputeEstimateVariance builds the over/under-the-budget report.
-func ComputeEstimateVariance(tickets []*ticket.Ticket, effortToDays map[string]float64) EstimateVariance {
+// ComputeEstimateVariance builds the over/under-the-estimate report.
+func ComputeEstimateVariance(tickets []*ticket.Ticket, ctx EstimateContext) EstimateVariance {
+	ctx = ctx.prepared()
 	var v EstimateVariance
 	for _, t := range tickets {
 		if !inHoursScope(t) {
 			continue
 		}
-		est := estimateHours(t, effortToDays)
+		est, ok := WrapAllotment(t, ctx)
+		if !ok {
+			continue // functional/unclassed: compared per feature below
+		}
+		_, source := EstimatedHours(t, ctx)
 		done := isComplete(t)
 		if est <= 0 {
 			if done {
 				v.UnsizedCompleted++
 			}
-			continue // no budget to compare against
+			continue // no estimate to compare against
 		}
 		spent := cosmicLoggedHours(t)
 		row := VarianceRow{
-			ID: t.ID, Title: t.Title, Status: t.Status,
+			ID: t.ID, Title: t.Title, Status: t.Status, Source: source,
 			EstimateHours: est, SpentHours: spent, VarianceHours: spent - est,
-		}
-		if t.Effort != nil {
-			row.Effort = *t.Effort
 		}
 
 		if !done {
 			// In-flight work can only meaningfully be flagged for already
-			// exceeding its budget; it hasn't "underrun" until it's finished.
+			// exceeding its estimate; it hasn't "underrun" until it's finished.
 			if spent > est {
 				v.InProgressOver = append(v.InProgressOver, row)
 			}
@@ -251,10 +252,32 @@ func ComputeEstimateVariance(tickets []*ticket.Ticket, effortToDays map[string]f
 		}
 	}
 
+	// Per-feature code comparison: finished features only (every functional
+	// ticket dev_complete or later), CFP x reference rate vs functional hours.
+	byID := map[string]*ticket.Ticket{}
+	for _, t := range ctx.Tickets {
+		byID[t.ID] = t
+	}
+	rate := ctx.refRate()
+	for _, f := range ComputeCosmic(ctx.Tickets).Features {
+		ft := byID[f.ID]
+		if ft == nil || !inHoursScope(ft) || f.FunctionalHours <= 0 || !FeatureFunctionalDone(ft, ctx.Tickets) {
+			continue
+		}
+		est := float64(f.CFP) * rate
+		v.Features = append(v.Features, FeatureVarianceRow{
+			ID: f.ID, Title: f.Title, CFP: f.CFP, Rate: rate,
+			EstimateHours: est, SpentHours: f.FunctionalHours, VarianceHours: f.FunctionalHours - est,
+		})
+	}
+
 	// Biggest miss first in each list.
 	sort.SliceStable(v.Overran, func(i, j int) bool { return v.Overran[i].VarianceHours > v.Overran[j].VarianceHours })
 	sort.SliceStable(v.Underran, func(i, j int) bool { return v.Underran[i].VarianceHours < v.Underran[j].VarianceHours })
 	sort.SliceStable(v.InProgressOver, func(i, j int) bool { return v.InProgressOver[i].VarianceHours > v.InProgressOver[j].VarianceHours })
+	sort.SliceStable(v.Features, func(i, j int) bool {
+		return math.Abs(v.Features[i].VarianceHours) > math.Abs(v.Features[j].VarianceHours)
+	})
 	return v
 }
 
@@ -272,7 +295,7 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
 					`<td style="padding:6px 8px;text-align:right">%.1f</td>`+
 					`<td style="padding:6px 8px;text-align:right">%.1f</td>`+
 					`<td style="padding:6px 8px;text-align:right;color:%s;font-weight:600">%+.1f</td></tr>`,
-				esc(r.ID), esc(r.Title), esc(r.Effort), r.EstimateHours, r.SpentHours, color, r.VarianceHours))
+				esc(r.ID), esc(r.Title), esc(r.Source), r.EstimateHours, r.SpentHours, color, r.VarianceHours))
 		}
 		if body.Len() == 0 {
 			return ""
@@ -283,7 +306,7 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
     <thead><tr style="text-align:left;color:#666;border-bottom:1px solid #eee">
       <th style="padding:6px 8px">ID</th>
       <th style="padding:6px 8px">Title</th>
-      <th style="padding:6px 8px;text-align:center">Size</th>
+      <th style="padding:6px 8px;text-align:center">Basis</th>
       <th style="padding:6px 8px;text-align:right">Projected</th>
       <th style="padding:6px 8px;text-align:right">Spent</th>
       <th style="padding:6px 8px;text-align:right">Variance</th>
@@ -296,8 +319,8 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
   </table>`, color, title, body.String(), totalLabel, color, total)
 	}
 
-	overHTML := varianceTable("Overran the budget (completed)", "#ef4444", v.Overran, "Total overrun", v.TotalOverrunHours)
-	underHTML := varianceTable("Underran the budget (completed)", "#22c55e", v.Underran, "Total underrun", -v.TotalUnderrunHours)
+	overHTML := varianceTable("Wrap tickets: overran the estimate (completed)", "#ef4444", v.Overran, "Total overrun", v.TotalOverrunHours)
+	underHTML := varianceTable("Wrap tickets: underran the estimate (completed)", "#22c55e", v.Underran, "Total underrun", -v.TotalUnderrunHours)
 
 	// Early-warning list: in-flight tickets already past their budget.
 	warnHTML := ""
@@ -309,7 +332,7 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
 				esc(r.ID), esc(r.Title), r.EstimateHours, r.SpentHours, r.VarianceHours))
 		}
 		warnHTML = fmt.Sprintf(`
-  <h4 style="font-size:12px;text-transform:uppercase;color:#eab308;letter-spacing:.5px;margin:16px 0 8px">&#9888; In progress, already over budget</h4>
+  <h4 style="font-size:12px;text-transform:uppercase;color:#eab308;letter-spacing:.5px;margin:16px 0 8px">&#9888; In progress, already over estimate</h4>
   <ul style="font-size:13px;color:#444;margin:0 0 4px 18px;padding:0">%s</ul>`, rows.String())
 	}
 
@@ -322,21 +345,53 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
 		notes = append(notes, fmt.Sprintf("%d completed with no logged time (excluded).", v.CompletedNoTime))
 	}
 	if v.UnsizedCompleted > 0 {
-		notes = append(notes, fmt.Sprintf("%d completed without an effort size (no budget to compare).", v.UnsizedCompleted))
+		notes = append(notes, fmt.Sprintf("%d wrap ticket%s completed without an hours estimate (nothing to compare).", v.UnsizedCompleted, pluralS(v.UnsizedCompleted)))
 	}
 	noteHTML := ""
 	if len(notes) > 0 {
 		noteHTML = `<p style="font-size:12px;color:#999;margin-top:12px">` + esc(strings.Join(notes, " ")) + `</p>`
 	}
 
-	inner := overHTML + underHTML + warnHTML
+	// Per-feature code comparison.
+	featHTML := ""
+	if len(v.Features) > 0 {
+		var body strings.Builder
+		for _, f := range v.Features {
+			color := "#22c55e"
+			if f.VarianceHours > 0 {
+				color = "#ef4444"
+			}
+			body.WriteString(fmt.Sprintf(
+				`<tr><td style="padding:6px 8px">%s</td><td style="padding:6px 8px">%s</td>`+
+					`<td style="padding:6px 8px;text-align:right">%d</td>`+
+					`<td style="padding:6px 8px;text-align:right">%.1f</td>`+
+					`<td style="padding:6px 8px;text-align:right">%.1f</td>`+
+					`<td style="padding:6px 8px;text-align:right;color:%s;font-weight:600">%+.1f</td></tr>`,
+				esc(f.ID), esc(f.Title), f.CFP, f.EstimateHours, f.SpentHours, color, f.VarianceHours))
+		}
+		featHTML = fmt.Sprintf(`
+  <h4 style="font-size:12px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin:16px 0 8px">Code by feature (finished features, CFP &times; %.2f h/CFP)</h4>
+  <table style="width:100%%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="text-align:left;color:#666;border-bottom:1px solid #eee">
+      <th style="padding:6px 8px">ID</th>
+      <th style="padding:6px 8px">Feature</th>
+      <th style="padding:6px 8px;text-align:right">CFP</th>
+      <th style="padding:6px 8px;text-align:right">Projected</th>
+      <th style="padding:6px 8px;text-align:right">Code hours</th>
+      <th style="padding:6px 8px;text-align:right">Variance</th>
+    </tr></thead>
+    <tbody>%s</tbody>
+  </table>`, v.Features[0].Rate, body.String())
+	}
+
+	inner := overHTML + underHTML + warnHTML + featHTML
 	if inner == "" {
-		inner = `<p style="padding:4px 0;color:#999;font-size:13px">No completed sized tickets to compare yet.</p>`
+		inner = `<p style="padding:4px 0;color:#999;font-size:13px">No completed estimated tickets or finished features to compare yet.</p>`
 	}
 
 	return fmt.Sprintf(`
 <div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
-  <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:4px">Estimate Variance &mdash; over/under the sizing budget</h3>%s%s
+  <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:4px">Estimate Variance &mdash; over/under the estimate</h3>%s%s
 </div>`, inner, noteHTML)
 }
 
@@ -358,21 +413,19 @@ type HoursAtRiskRow struct {
 	PercentUsed float64 `json:"percent_used"`
 }
 
-// ComputeHoursAtRisk lists active (not completed/closed, not backlog) sized
-// tickets whose logged hours are ≥90% of their allotment — including those
-// already over 100% — most-consumed first.
-func ComputeHoursAtRisk(tickets []*ticket.Ticket, effortToDays map[string]float64) []HoursAtRiskRow {
+// ComputeHoursAtRisk lists active (not completed/closed, not backlog) wrap
+// tickets with an allotment whose logged hours are ≥90% of it — including
+// those already over 100% — most-consumed first. Functional and unclassed
+// tickets have no per-ticket allotment, so they never appear.
+func ComputeHoursAtRisk(tickets []*ticket.Ticket, ctx EstimateContext) []HoursAtRiskRow {
+	ctx = ctx.prepared()
 	var rows []HoursAtRiskRow
 	for _, t := range tickets {
 		if ticket.Contains(ticket.ClosedStatuses, t.Status) || ticket.IsBacklog(t) {
 			continue // only active work is actionable
 		}
-		effort := ""
-		if t.Effort != nil {
-			effort = *t.Effort
-		}
-		allot := EffortHours(effort, effortToDays)
-		if allot <= 0 {
+		allot, ok := WrapAllotment(t, ctx)
+		if !ok || allot <= 0 {
 			continue // no allotment to be at risk against
 		}
 		spent := cosmicLoggedHours(t)

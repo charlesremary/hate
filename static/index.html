@@ -51,7 +51,7 @@
             <button class="btn-secondary" id="btn-run-snapshot">⟳ Snapshot</button>
             <button class="btn-secondary" id="btn-check-schedule" title="Find tickets that over-allocate someone's daily capacity">✓ Check schedule</button>
             <button class="btn-secondary" id="btn-balance" title="Auto-balance the project to fit everyone's real daily capacity">⚖ Balance</button>
-            <button class="btn-secondary" id="btn-phase-rollup" title="Roll tickets up by phase — effort-weighted % complete, with CSV export">Σ Phases</button>
+            <button class="btn-secondary" id="btn-phase-rollup" title="Roll tickets up by phase — hours-weighted % complete, with CSV export">Σ Phases</button>
           </div>
         </header>
 
@@ -61,11 +61,13 @@
           <button class="tab" data-tab="overview">Project Overview</button>
           <button class="tab" data-tab="testcases">Test cases</button>
           <button class="tab hidden" data-tab="billing">Billing</button>
-          <button class="tab hidden" data-tab="cosmic">COSMIC</button>
+          <button class="tab" data-tab="cosmic">COSMIC</button>
         </div>
 
         <!-- Tickets tab -->
         <div id="tab-tickets" class="tab-content">
+          <div id="migration-banner" class="migration-banner hidden"></div>
+          <datalist id="est-hours-options"><option value="0.25"></option><option value="0.5"></option><option value="1"></option><option value="2"></option><option value="4"></option><option value="8"></option></datalist>
           <div class="tickets-toolbar">
             <button class="btn-primary" id="btn-new-ticket">+ New Ticket</button>
             <select id="filter-status"><option value="">All statuses</option></select>
@@ -90,8 +92,8 @@
             <table id="ticket-table">
               <thead>
                 <tr>
-                  <th style="width:36px;padding:0" title="Red ✕ = blocked · Blue ! = hours at risk (≥90% of allotment)"></th><th>ID</th><th>Title</th><th>Phase</th><th>Status</th>
-                  <th>Assignee</th><th>Planned start</th><th>Due</th>
+                  <th style="width:36px;padding:0" title="Red ✕ = blocked · Blue ! = hours at risk (≥90% of a wrap estimate)"></th><th>ID</th><th>Title</th><th>Phase</th><th>Status</th>
+                  <th>Assignee</th><th title="Hour estimate (wrap tickets). Code is sized from the parent feature's CFP.">Est h</th><th>Planned start</th><th>Due</th>
                 </tr>
               </thead>
               <tbody id="ticket-tbody"></tbody>
@@ -125,7 +127,7 @@
           </div>
         </div>
 
-        <!-- COSMIC tab (experimental) -->
+        <!-- COSMIC tab -->
         <div id="tab-cosmic" class="tab-content hidden">
           <div id="cosmic-content" style="flex:1;overflow-y:auto;padding:20px">
             <p style="color:#999;padding:16px">Loading…</p>
@@ -149,7 +151,6 @@
             <input type="text" id="settings-projects-root" placeholder="~/projects">
           </label>
           <label><input type="checkbox" id="show-billing"> Show Billing tab</label>
-          <label><input type="checkbox" id="show-cosmic"> Show COSMIC tab (experimental)</label>
           <fieldset>
             <legend>Scheduler</legend>
             <label><input type="checkbox" id="scheduler-enabled"> Enable automatic snapshots</label>
@@ -167,21 +168,6 @@
                 Older snapshots and the baseline keep the original name as a historical record.
               </p>
             </div>
-          </fieldset>
-          <fieldset id="effort-sizing-fieldset">
-            <legend>Effort sizing <span id="effort-sizing-project" style="font-weight:normal;color:#999"></span></legend>
-            <p id="effort-sizing-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to edit its effort-to-days values.</p>
-            <div id="effort-sizing-inputs" class="hidden" style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
-              <label>XS (days) <input type="number" id="effort-xs" min="0.25" step="0.25"></label>
-              <label>S (days)  <input type="number" id="effort-s"  min="0.25" step="0.25"></label>
-              <label>M (days)  <input type="number" id="effort-m"  min="0.25" step="0.25"></label>
-              <label>L (days)  <input type="number" id="effort-l"  min="0.25" step="0.25"></label>
-              <label>XL (days) <input type="number" id="effort-xl" min="0.25" step="0.25"></label>
-            </div>
-            <p id="effort-sizing-note" class="hidden" style="font-size:12px;color:#999;margin:8px 0 0">
-              Changes apply to new tickets and unbaselined work only — an existing
-              baseline keeps its original planned days. Defaults: xs&nbsp;1, s&nbsp;2, m&nbsp;3, l&nbsp;5, xl&nbsp;8.
-            </p>
           </fieldset>
           <fieldset id="max-hours-fieldset">
             <legend>Hour budget <span id="max-hours-project" style="font-weight:normal;color:#999"></span></legend>
@@ -205,8 +191,9 @@
             <div id="strict-time-inputs" class="hidden">
               <label><input type="checkbox" id="strict-time"> Strict time enforcement</label>
               <p style="font-size:12px;color:#999;margin:8px 0 0">
-                When on, logging time past a ticket's effort allotment (its size &times; hours/day) requires
-                confirming you're authorized and recording a reason. Unsized tickets have no allotment.
+                When on, logging past a wrap ticket's hour estimate (config / non-functional
+                <code>estimate_hours</code>) requires confirming you're authorized and recording a reason.
+                Code tickets and tickets without an estimate are never gated.
               </p>
             </div>
           </fieldset>
@@ -353,8 +340,14 @@
             <h3>Fields</h3>
             <ul>
               <li><strong>Priority</strong> — critical, high, medium, low.</li>
-              <li><strong>Effort</strong> — xs, s, m, l, xl. This is a t-shirt size; the PM engine
-                converts it to planned days (see §6).</li>
+              <li><strong>Class</strong> — Code (<code>functional</code>), Config
+                (<code>config</code>), or Non-functional (<code>nonfunc</code>), stored as a tag. Config
+                and Non-functional are <em>wrap</em> tickets. Leave it empty for a standalone task, a
+                meeting, or a parent feature. See §7.</li>
+              <li><strong>Est. hours</strong> (<code>estimate_hours</code>) — the hour estimate on a
+                wrap ticket: 0.25 or more, in quarter hours. Code tickets have none; they are sized
+                from the parent feature's CFP. (T-shirt <code>effort</code> sizing is retired; an old
+                value shows read-only as <em>legacy</em>.)</li>
               <li><strong>Phase</strong> — a free-text grouping (e.g. "Discovery", "Sprint 1"). Used
                 to filter the ticket list.</li>
               <li><strong>Assignee / Creator</strong> — people from the project's Team list.</li>
@@ -503,10 +496,11 @@
               <strong>Export CSV</strong> to download exactly what's shown. Enable the tab under
               ⚙ Settings → "Show Billing tab".</p>
             <p><strong>Override hours.</strong> The billing table splits each entry's hours into three
-              columns — <strong>Hours</strong> (within the ticket's effort allotment),
+              columns — <strong>Hours</strong> (within a wrap ticket's hour estimate),
               <strong>Override</strong> (hours beyond it), and <strong>Total</strong> — each summed at
-              the bottom. The split is cumulative per ticket against its <code>effort</code> size (an
-              unsized ticket has no allotment, so all its hours read as normal). The <strong>Override
+              the bottom. The split is cumulative per ticket against its <code>estimate_hours</code>
+              (Code tickets and tickets with no estimate have no allotment, so all their hours read as
+              normal). The <strong>Override
               reason</strong> column shows the recorded authorization for any override hours, or
               <span style="color:#ef4444">⚠ no authorization</span> when none was captured — so a biller
               can pay the override hours, question them, or drop them. (Authorizations come from strict
@@ -548,13 +542,14 @@
 
             <h3>Hours-at-risk watchlist</h3>
             <p>The dashboard carries a standing <strong>Hours at risk</strong> watchlist: every active
-              ticket whose logged hours have reached <strong>≥ 90%</strong> of its effort-based
-              allotment (its <code>effort</code> size converted to hours). It's the early-warning list of
-              work about to blow its size, and shows an all-clear state when nothing is at risk.</p>
+              wrap ticket whose logged hours have reached <strong>≥ 90%</strong> of its hour estimate.
+              It's the early-warning list of work about to blow its estimate, and shows an all-clear
+              state when nothing is at risk. Code tickets aren't listed: code is estimated per feature,
+              not per ticket.</p>
 
             <h3>Strict time enforcement</h3>
             <p>With <em>strict time enforcement</em> on (a per-project setting), a time log that would
-              push a sized ticket <strong>past its effort allotment</strong> is blocked unless it's
+              push a wrap ticket <strong>past its hour estimate</strong> is blocked unless it's
               explicitly authorized. Each authorized over-log is recorded and surfaced on the dashboard
               under <strong>Authorized overrides — time logged past allotment</strong>, so going over is
               a deliberate, audited decision rather than silent scope creep. (This is separate from the
@@ -569,12 +564,12 @@
               pre-baseline view with a <strong>Baseline Now</strong> button — it freezes the current
               tickets as the plan. When baselining this way:</p>
             <ul>
-              <li>Planned days come from each ticket's <strong>effort</strong> size, via the
-                <code>effort_to_days</code> map in the project config — by default
-                xs&nbsp;=&nbsp;1, s&nbsp;=&nbsp;2, m&nbsp;=&nbsp;3, l&nbsp;=&nbsp;5, xl&nbsp;=&nbsp;8 days. You can
-                change these values per project under ⚙ Settings → <em>Effort sizing</em>.
-                <strong>The baseline is frozen at the values in effect when you baseline</strong> —
-                editing the map afterwards only affects new tickets and unbaselined work.</li>
+              <li>Planned days come from each ticket's <strong>estimated hours</strong> divided by
+                the assignee's daily hours (8 if unknown), rounded to whole days, minimum 1. A wrap
+                ticket uses its <code>estimate_hours</code>; a Code ticket gets a share of its
+                feature's CFP &times; the reference h/CFP rate (§7).
+                <strong>The baseline is frozen at the estimates in effect when you baseline</strong> —
+                later edits only affect unbaselined work.</li>
               <li>If a ticket has a <strong>due date</strong>, that becomes its planned end and
                 planned days is recalculated from the date range.</li>
               <li>Planned start comes from the ticket's actual or planned start date, falling back
@@ -584,23 +579,22 @@
             <div class="help-callout" style="background:#fff3e0;border-left:4px solid #e65100;padding:12px 16px;margin:12px 0;border-radius:4px">
               <p style="margin:0 0 8px"><strong>⚠ Before you baseline — read this.</strong></p>
               <p style="margin:0 0 8px">The baseline is built from two inputs: each ticket's
-                <strong>planned start date</strong> and its <strong>effort size</strong>. The baseline
+                <strong>planned start date</strong> and its <strong>estimated hours</strong>. The baseline
                 is immutable — once frozen, every later snapshot is measured against it, and there is
                 no way to correct a bad baseline. If the inputs are wrong, every snapshot from then
                 on will show slip that isn't really slip.</p>
-              <p style="margin:0 0 8px"><strong>Start dates matter as much as effort.</strong> Two
-                tickets with the same XL size land in very different places on the schedule depending
+              <p style="margin:0 0 8px"><strong>Start dates matter as much as estimates.</strong> Two
+                tickets with the same estimate land in very different places on the schedule depending
                 on when each one starts. Walk the ticket list before clicking <em>Baseline Now</em>
                 and ask: is this start date realistic? Does it account for predecessor work, the
                 assignee's availability, and the project's actual kickoff?</p>
-              <p style="margin:0"><strong>Effort sizes are days of effort, not wall-clock time.</strong>
-                An L = 5 means roughly five working days of focused work on that ticket — not five
-                calendar days from start to finish. A consultant who's only on this project two days
-                a week, a developer who's split across two projects, or anyone who starts later than
-                planned will all show up as slipping <em>even if their actual effort matches the
-                estimate</em>. If you know up front that an assignee is part-time or shared, reflect
-                that in the start dates (push them out) or in the effort size (round up) before
-                baselining — not after.</p>
+              <p style="margin:0"><strong>Estimates are hours of work, not wall-clock time.</strong>
+                They become days through each person's <em>Daily hours</em> (👤 Team). A consultant
+                who's only on this project two days a week, a developer who's split across two
+                projects, or anyone who starts later than planned will all show up as slipping
+                <em>even if their actual hours match the estimate</em>. If you know up front that an
+                assignee is part-time or shared, lower their daily hours or push the start dates out
+                before baselining — not after.</p>
             </div>
 
             <h3>Capacity &amp; the schedule check</h3>
@@ -608,13 +602,13 @@
               <strong>👤 Team</strong>. This is the per-day capacity used by the
               <strong>✓ Check schedule</strong> button in the project header. The check is a
               one-shot analysis — it does not auto-reschedule.</p>
-            <p>For each non-terminal ticket with a planned start, due date, assignee, and effort,
-              the check converts effort to person-hours (1 size = 8h, e.g. <code>m</code>&nbsp;=&nbsp;24h),
-              divides those hours evenly across the business days from start to due, and sums the
+            <p>For each non-terminal ticket with a planned start, due date, assignee, and an
+              estimate, the check takes its estimated hours (wrap <code>estimate_hours</code>, or the
+              Code share of its feature's CFP), divides those hours evenly across the business days from start to due, and sums the
               daily load per assignee. Any day where assigned hours exceed that person's daily
               capacity is reported with the contributing tickets — click any chip in the report to
               jump to that ticket and push its dates out.</p>
-            <p>Tickets that are missing a date, assignee, or effort are listed as <em>skipped</em>
+            <p>Tickets that are missing a date, assignee, or estimate are listed as <em>skipped</em>
               at the bottom of the report so the check doesn't pretend to be exhaustive.</p>
 
             <h3>Auto-balance — get a realistic baseline schedule</h3>
@@ -627,13 +621,13 @@
                 predecessors finish. If a cycle exists, Balance refuses and reports the offending
                 tickets.</li>
               <li><strong>Within a "ready" batch</strong> (no unfinished predecessors), tickets are
-                ordered <em>priority desc → effort desc → ID</em>. Critical-and-large gets
+                ordered <em>priority desc → estimated hours desc → ID</em>. Critical-and-large gets
                 scheduled first.</li>
               <li><strong>Equal-split capacity.</strong> A person with three ready tickets gets each
                 one a third of their daily hours. As tickets finish, freed capacity flows to the
                 remaining ready set.</li>
               <li><strong>Skips closed/complete tickets</strong> — historical work isn't moved.
-                Tickets missing an effort size or assignee are also skipped and listed in the
+                Tickets missing an estimate or assignee are also skipped and listed in the
                 report.</li>
               <li><strong>Preview first.</strong> Click ⚖ Balance to see the proposed changes,
                 including the original vs proposed project end date. Click <em>Apply</em> to write
@@ -736,8 +730,8 @@
             <h2>7. Sizing &amp; estimating (COSMIC)</h2>
             <p>hate can size features in <strong>COSMIC function points (CFP)</strong> and use them,
               together with the hours you log, to measure how long work actually takes — and then to
-              estimate a new project before you've built it. It all lives on the experimental
-              <strong>COSMIC</strong> tab (enable it under ⚙ Settings → <em>Show COSMIC tab</em>).</p>
+              estimate a new project before you've built it. It all lives on the
+              <strong>COSMIC</strong> tab.</p>
 
             <h3>What a function point is</h3>
             <p>A COSMIC function point measures <strong>functional size</strong> — the
@@ -766,15 +760,25 @@
               <li>Each <strong>child</strong> gets <code>parent:&lt;parent-id&gt;</code> and exactly
                 one <strong>class</strong> tag, and is where hours are logged:
                 <ul>
-                  <li><code>functional</code> — the code (the part CFP measures).</li>
-                  <li><code>config</code> — console / manual / platform setup, including IaC (0 CFP).</li>
-                  <li><code>nonfunc</code> — deploy, run, validate, troubleshoot, hardening (0 CFP).</li>
+                  <li><strong>Code</strong> (<code>functional</code>) — the human loop around
+                    generated code: prompt, review, run, debug. No hour estimate: it's sized from
+                    the parent's CFP.</li>
+                  <li><strong>Config</strong> (<code>config</code>) — console / manual / platform
+                    setup, including IaC (0 CFP). Gets an hour estimate.</li>
+                  <li><strong>Non-functional</strong> (<code>nonfunc</code>) — deploy, run, validate,
+                    troubleshoot, hardening (0 CFP). Gets an hour estimate.</li>
                 </ul>
               </li>
             </ul>
-            <p>The one line to remember: <strong><code>functional</code> = code,
-              <code>config</code> + <code>nonfunc</code> = wrap</strong> (the variable work around the
-              code).</p>
+            <p>The one line to remember: <strong>Code is sized by CFP; wrap (Config +
+              Non-functional) is sized in hours</strong> with <code>estimate_hours</code> (0.25, 0.5,
+              1, 2, 4, 8…). A wrap ticket can also carry an optional <code>type:&lt;name&gt;</code>
+              tag. A small self-contained feature can skip the parent: one ticket with both
+              <code>cfp:</code> and the Code class.</p>
+            <p>The rules are checked at a child's <strong>first promote</strong> out of Not Started
+              (creating and editing never block): it needs exactly one class, a wrap child needs
+              <code>estimate_hours</code>, a Code child must not have one, and no child carries
+              <code>cfp:</code>. The ticket list badges children that are missing a class or estimate.</p>
 
             <div class="help-callout" style="background:#f4f6f8;border-left:4px solid #607d8b;padding:12px 16px;margin:12px 0;border-radius:4px">
               <p style="margin:0 0 6px"><strong>Simple example — a <code>lookup_caller</code> feature.</strong></p>
@@ -783,40 +787,61 @@
                 <strong>3 CFP</strong>.</p>
               <pre style="margin:0;font-size:12px;white-space:pre-wrap">PROJ-100  "lookup_caller"           tags: cfp:3          ← parent (size only)
   PROJ-101  "handler + DynamoDB read" tags: parent:PROJ-100, functional   (log hours here)
-  PROJ-102  "provision the table"     tags: parent:PROJ-100, config       (0 CFP, hours)</pre>
-              <p style="margin:6px 0 0">Functional pace = PROJ-101's hours ÷ 3 CFP. The table
-                provisioning is wrap, not size.</p>
+  PROJ-102  "provision the table"     tags: parent:PROJ-100, config       estimate_hours: 1</pre>
+              <p style="margin:6px 0 0">Code pace = PROJ-101's hours ÷ 3 CFP. The table
+                provisioning is wrap: an hour estimate, not size.</p>
             </div>
 
             <h3>The COSMIC panel</h3>
-            <p>The COSMIC tab rolls this up. Per feature it shows CFP, <strong>Func h</strong> (code
-              hours), <strong>Wrap h</strong> (config + nonfunc), the <strong>h/CFP</strong> rate, and
-              <strong>Wrap %</strong>. The card at the top is the project aggregate — the numbers you
-              actually calibrate from:</p>
-            <ul>
-              <li><strong>h/CFP</strong> = Σ functional hours ÷ Σ CFP — your <em>measured code rate</em>.</li>
-              <li><strong>Wrap %</strong> = (config + nonfunc) ÷ functional — the variable work around
-                the code, as a share of it.</li>
-            </ul>
-            <p>These emerge from the hours you log as work happens, so they get more trustworthy the
-              more you deliver. Data-quality flags call out hours on unclassed children or logged on a
-              parent, which would skew the rate. Because promotion now requires logged time (see
-              §3), the hours behind these numbers can't quietly go missing.</p>
+            <p>Per feature the tab shows CFP, <strong>Code h</strong>, <strong>Wrap h</strong>
+              (config + nonfunc), the <strong>h/CFP</strong> rate, and <strong>Wrap %</strong> (info
+              only; the estimate doesn't use it). The card at the top is the project aggregate, and
+              <strong>h/CFP</strong> = Σ Code hours ÷ Σ CFP is your <em>measured code rate</em>.
+              Data-quality flags call out hours on unclassed children or logged on a parent, which
+              would skew the rate.</p>
 
-            <h3>The estimate block — bidding a new project</h3>
-            <p>On a new project you have no actuals yet, but once its features are tagged with
-              <code>cfp:</code> you know the total size. The <strong>Initial estimate</strong> block on
-              the COSMIC tab turns that into an hours estimate: enter an <strong>h/CFP</strong> and a
-              <strong>wrap %</strong> borrowed from a comparable <em>delivered</em> project (read them
-              off that project's COSMIC card), and it projects:</p>
-            <pre style="margin:0 0 8px;font-size:12px;white-space:pre-wrap">code hours = total CFP × h/CFP
-wrap hours = code hours × wrap %
-total      = code + wrap</pre>
-            <p>It shows the projected total next to <strong>actual hours logged so far</strong>, so as
-              the project runs you watch the estimate and reality converge. The two inputs are
-              <strong>saved on the project</strong>, so it's a recorded estimate — your initial bid —
-              not a throwaway calculation. That's the loop: measure a delivered project, borrow its
-              rates, and bid the next one on evidence instead of gut.</p>
+            <h3>The estimate — Monte Carlo</h3>
+            <p>The <strong>Estimate</strong> panel turns this project's CFP into an hours range. Pick
+              the <strong>reference features</strong> it learns the code rate from, in any mix:</p>
+            <ul>
+              <li><strong>Specific past projects</strong> — same domain; the normal case.</li>
+              <li><strong>All past projects</strong> — a deliberately wide range for a project unlike
+                anything before.</li>
+              <li><strong>This project's finished features</strong> — once enough are done, these
+                dominate the draw (own share = own&nbsp;N ÷ (own&nbsp;N + 5), 100% from 15).</li>
+            </ul>
+            <p>Features under the <strong>min feature size</strong> (default 3 CFP) are left out so
+              tiny features with extreme rates don't dominate; <strong>counting uncertainty</strong>
+              (± %) widens the range for rough CFP counts. Changing any input recalculates at once —
+              there's no run button.</p>
+            <p>It runs 10,000 simulations (fixed seed, so the numbers are stable): each feature's
+              code hours = its CFP &times; a rate drawn from the references, with the spread widened
+              1.5&times; (calibrated by backtesting). <strong>Platform wrap</strong> is not simulated:
+              it's logged hours on finished wrap tickets plus <code>estimate_hours</code> on the rest.
+              The table shows <strong>Code wrap</strong>, <strong>Platform wrap</strong>, and
+              <strong>Total</strong> at P50 / P85 / P95, with a histogram of the totals, the number of
+              reference features and the own/borrowed mix, actual hours so far, and a code projected
+              finish (actual code hours on done features + the simulated rest). It needs at least 3
+              reference features.</p>
+            <p>The estimate is display only. <strong>The max-hours cap stays manual</strong>: set it
+              under ⚙ Settings → <em>Hour budget</em>.</p>
+
+            <h3>Calibration slice — a new kind of project</h3>
+            <p>With no comparable past project: count CFP for the whole spec, estimate with
+              <em>All past projects</em> (the wide range), and add explicit discovery wrap tickets
+              for the unknown platform. Then pick 3–5 representative features, tag their parents
+              <code>calibration-slice</code>, and build them first. The tab marks them
+              <span class="badge slice-badge">slice</span> and shows "Calibration slice: N of M done".
+              As they finish, tick <em>This project's finished features</em> and re-estimate the rest
+              from the project's own rates. If you must bid one number up front, bid P90–P95 of the
+              wide range, and revisit the cap after the slice.</p>
+
+            <h3>Converted estimates</h3>
+            <p>Older wrap tickets sized with the retired t-shirt <code>effort</code> and no
+              <code>estimate_hours</code> get hours converted from their effort size. Those are
+              day-based and usually far too big, so the COSMIC estimate leaves them out of the
+              platform wrap sum, and the Tickets tab shows a banner counting them;
+              <em>Review</em> filters the list to them so you can set real hour estimates.</p>
           </section>
 
           <!-- 8 -->
@@ -866,7 +891,7 @@ total      = code + wrap</pre>
             <h2>9. Working in Agile</h2>
             <p>hate is deliberately <strong>methodology-agnostic</strong>. Its primitives — a
               parent/child hierarchy, a <code>phase</code> grouping, a <code>backlog</code> tag,
-              per-type status workflows, and <code>effort</code> sizing — assume neither waterfall nor
+              per-type status workflows, and hour estimates — assume neither waterfall nor
               Scrum nor Kanban. The examples elsewhere in this guide read as phase-gated
               (Discovery → Build → QA → Deploy) because that suits agentic, near-waterfall delivery.
               <strong>hate is not an Agile tool</strong> — but if you run Scrum, the same primitives map
@@ -877,12 +902,12 @@ total      = code + wrap</pre>
               <thead><tr><th>Agile concept</th><th>In hate</th><th>How</th></tr></thead>
               <tbody>
                 <tr><td><strong>Epic</strong></td><td>Parent ticket</td><td>A large feature or theme. Carries <code>cfp:</code> and/or <code>type:</code> if you want sizing; never logs hours.</td></tr>
-                <tr><td><strong>Story</strong></td><td>Child ticket</td><td><code>parent:&lt;epic-id&gt;</code>, one class tag, an <code>effort</code> size — and where hours are logged.</td></tr>
-                <tr><td><strong>Sprint</strong></td><td><code>phase</code></td><td>Name phases <code>Sprint 01</code>, <code>Sprint 02</code>, … The phase rollup then reads as sprint progress (effort-weighted % complete).</td></tr>
+                <tr><td><strong>Story</strong></td><td>Child ticket</td><td><code>parent:&lt;epic-id&gt;</code>, one class tag (wrap stories get <code>estimate_hours</code>) — and where hours are logged.</td></tr>
+                <tr><td><strong>Sprint</strong></td><td><code>phase</code></td><td>Name phases <code>Sprint 01</code>, <code>Sprint 02</code>, … The phase rollup then reads as sprint progress (hours-weighted % complete).</td></tr>
                 <tr><td><strong>Product backlog</strong></td><td><code>backlog</code> tag</td><td>Already excluded from completion %, schedule, and capacity — i.e. "not committed to a sprint yet."</td></tr>
                 <tr><td><strong>Sprint planning</strong></td><td>Remove <code>backlog</code> + set <code>phase</code></td><td>Pulling a story into a sprint is one tag removal and one phase set.</td></tr>
                 <tr><td><strong>Dev lifecycle / DoD</strong></td><td>Ticket <code>status</code></td><td>The promotion workflow (§3) — Not Started → In Progress → Dev Complete → QA → Complete — is each story's mini-lifecycle inside the sprint.</td></tr>
-                <tr><td><strong>Velocity</strong></td><td>Completed effort per phase</td><td>Done effort-days per sprint, straight off the phase rollup.</td></tr>
+                <tr><td><strong>Velocity</strong></td><td>Completed est. hours per phase</td><td>Done estimated hours per sprint, straight off the phase rollup.</td></tr>
                 <tr><td><strong>Ceremonies</strong></td><td><code>meeting</code> / <code>administration</code></td><td>Planning, standups, review, retro — phase them into the sprint; they burn the admin/meeting hour pool (§6).</td></tr>
               </tbody>
             </table>
@@ -917,9 +942,8 @@ total      = code + wrap</pre>
                 epic a tag (e.g. <code>epic:checkout</code>) with the story as the parent and the task as
                 the child.</li>
               <li><strong>Story points vs CFP.</strong> <code>cfp:</code> is objective COSMIC functional
-                size, not relative story points — don't cram points into it. Let <code>effort</code>
-                (the t-shirt size) drive velocity, and keep <code>cfp:</code> only if you also want
-                COSMIC calibration (§7).</li>
+                size, not relative story points — don't cram points into it. Velocity comes from
+                estimated hours on the phase rollup; CFP sizes the code and drives the estimate (§7).</li>
               <li><strong>No strictly-ranked backlog.</strong> Agile backlogs are totally ordered
                 (1…N). hate has four <code>priority</code> buckets, not a strict rank. If you need an
                 ordered backlog, adopt a convention — a <code>rank:</code> tag, or predecessors.</li>
@@ -965,7 +989,7 @@ total      = code + wrap</pre>
     <div id="phase-rollup-modal-overlay" class="hidden">
       <div id="phase-rollup-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:900px;max-height:85vh;overflow:auto;margin:4% auto">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px">
-          <h3 style="margin:0">Phase rollup — effort-weighted</h3>
+          <h3 style="margin:0">Phase rollup — hours-weighted</h3>
           <span style="display:flex;gap:8px;align-items:center">
             <button class="btn-secondary" id="btn-phase-rollup-csv" title="Download one row per phase as CSV">⤓ Download CSV</button>
             <button class="icon-btn" id="btn-close-phase-rollup">✕</button>
@@ -1072,26 +1096,38 @@ total      = code + wrap</pre>
               <option value="high">High</option>
               <option value="low">Low</option>
             </select></label>
-            <label>Effort <select id="nt-effort">
-              <option value="">—</option>
-              <option value="xs">XS</option>
-              <option value="s">S</option>
-              <option value="m">M</option>
-              <option value="l">L</option>
-              <option value="xl">XL</option>
-            </select></label>
             <label>Due date <input type="date" id="nt-due-date"></label>
+            <div class="nt-class-group">
+              <span class="nt-group-label">Class</span>
+              <div class="nt-radios">
+                <label><input type="radio" name="nt-class" value="" checked> None</label>
+                <label><input type="radio" name="nt-class" value="functional"> Code</label>
+                <label><input type="radio" name="nt-class" value="config"> Config</label>
+                <label><input type="radio" name="nt-class" value="nonfunc"> Non-functional</label>
+              </div>
+              <p id="nt-class-hint" style="font-size:11px;color:#999;margin:2px 0 0">None: a standalone task, or a parent feature (size it with CFP below).</p>
+            </div>
+            <div id="nt-wrap-fields" class="hidden" style="display:flex;gap:8px">
+              <label style="width:120px">Est. hours <select id="nt-est-hours">
+                <option value="">—</option>
+                <option value="0.25">0.25</option>
+                <option value="0.5">0.5</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="4">4</option>
+                <option value="8">8</option>
+              </select></label>
+              <label style="flex:1">Type <span style="color:#999;font-weight:normal">(optional)</span> <input type="text" id="nt-wrap-type" list="nt-type-list" placeholder="e.g. lex-bot, deploy"></label>
+              <datalist id="nt-type-list"></datalist>
+            </div>
+            <label>Parent <span style="color:#999;font-weight:normal">(optional)</span> <input type="text" id="nt-parent" list="nt-parent-list" placeholder="parent feature ticket id"></label>
+            <datalist id="nt-parent-list"></datalist>
+            <p id="nt-class-warning" class="hidden est-warn" style="font-size:12px;margin:-4px 0 8px"></p>
             <details id="nt-sizing" style="margin-top:6px">
-              <summary style="cursor:pointer;font-size:13px;color:#555">Sizing (COSMIC) — optional</summary>
+              <summary style="cursor:pointer;font-size:13px;color:#555">COSMIC size (features) — optional</summary>
               <div style="padding:8px 0 2px">
-                <label>Class <select id="nt-class">
-                  <option value="">— none —</option>
-                  <option value="functional">functional (code)</option>
-                  <option value="config">config (setup / IaC)</option>
-                  <option value="nonfunc">nonfunc (deploy / validate / hardening)</option>
-                </select></label>
-                <label>CFP (function points) <input type="number" id="nt-cfp" min="1" step="1" placeholder="only if this has functional size"></label>
-                <p style="font-size:11px;color:#999;margin:2px 0 0">A ticket can stand alone: give it a class, and a CFP if it has functional size. Only decompose into a parent + children for a big feature.</p>
+                <label>CFP (function points) <input type="number" id="nt-cfp" min="1" step="1" placeholder="only on a feature (parent or self-contained)"></label>
+                <p style="font-size:11px;color:#999;margin:2px 0 0">CFP belongs on the feature: a parent, or a self-contained ticket with class Code. Its Code children are estimated from it.</p>
               </div>
             </details>
           </div>

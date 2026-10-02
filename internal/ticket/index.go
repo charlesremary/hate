@@ -12,22 +12,24 @@ import (
 
 // IndexSummary is the summary representation of a ticket in the index.
 type IndexSummary struct {
-	ID           string   `json:"id"`
-	Type         string   `json:"type"`
-	Status       string   `json:"status"`
-	Title        string   `json:"title"`
-	Priority     string   `json:"priority"`
-	Effort       *string  `json:"effort"`
-	Phase        *string  `json:"phase"`
-	Assignee     *string  `json:"assignee"`
-	Predecessors []string `json:"predecessors"`
-	Repo         *string  `json:"repo"`
-	Tags         []string `json:"tags"`
-	CreatedAt    string   `json:"created_at"`
-	UpdatedAt    string   `json:"updated_at"`
-	ClosedAt         *string `json:"closed_at"`
-	PlannedStartDate *string `json:"planned_start_date"`
-	DueDate          *string `json:"due_date"`
+	ID               string   `json:"id"`
+	Type             string   `json:"type"`
+	Status           string   `json:"status"`
+	Title            string   `json:"title"`
+	Priority         string   `json:"priority"`
+	Effort           *string  `json:"effort"` // retired, read-only legacy
+	EstimateHours    *float64 `json:"estimate_hours,omitempty"`
+	Class            string   `json:"class"` // functional | config | nonfunc | ""
+	Phase            *string  `json:"phase"`
+	Assignee         *string  `json:"assignee"`
+	Predecessors     []string `json:"predecessors"`
+	Repo             *string  `json:"repo"`
+	Tags             []string `json:"tags"`
+	CreatedAt        string   `json:"created_at"`
+	UpdatedAt        string   `json:"updated_at"`
+	ClosedAt         *string  `json:"closed_at"`
+	PlannedStartDate *string  `json:"planned_start_date"`
+	DueDate          *string  `json:"due_date"`
 }
 
 // Index is the top-level index.json structure.
@@ -55,17 +57,19 @@ func buildIndex(tickets []*Ticket) *Index {
 			predecessors = []string{}
 		}
 		summaries = append(summaries, IndexSummary{
-			ID:           t.ID,
-			Type:         t.Type,
-			Status:       t.Status,
-			Title:        t.Title,
-			Priority:     priority,
-			Effort:       t.Effort,
-			Phase:        t.Phase,
-			Assignee:     t.Assignee,
-			Predecessors: predecessors,
-			Repo:         t.Repo,
-			Tags:         tags,
+			ID:               t.ID,
+			Type:             t.Type,
+			Status:           t.Status,
+			Title:            t.Title,
+			Priority:         priority,
+			Effort:           t.Effort,
+			EstimateHours:    t.EstimateHours,
+			Class:            ClassOf(t),
+			Phase:            t.Phase,
+			Assignee:         t.Assignee,
+			Predecessors:     predecessors,
+			Repo:             t.Repo,
+			Tags:             tags,
 			CreatedAt:        t.CreatedAt,
 			UpdatedAt:        t.UpdatedAt,
 			ClosedAt:         t.ClosedAt,

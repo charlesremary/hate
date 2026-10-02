@@ -10,8 +10,9 @@ import (
 	"hate/internal/ticket"
 )
 
-// HoursPerDay converts a person-day of effort into hours. Mirrors the help
-// docs: "an L = 5 means roughly five working days of focused work."
+// HoursPerDay is the default daily capacity and the legacy effort conversion
+// constant (retired t-shirt effort days x 8 = hours). Scheduling otherwise
+// converts estimated hours to days at the assignee's own daily hours.
 const HoursPerDay = 8.0
 
 // ConflictTicket points at one ticket contributing to a day's overload.
@@ -107,17 +108,18 @@ func businessDaysBetween(start, end time.Time) int {
 // due date, and assignee, computes per-day load on that assignee, and returns
 // every day where the load exceeds the resource's daily capacity.
 //
-// Tickets skipped (no dates, no assignee, no effort, unknown assignee) are
+// Tickets skipped (no dates, no assignee, no estimate, unknown assignee) are
 // reported as warnings so the PM knows the analysis isn't pretending to be
 // complete.
 //
 // PhaseSummaries break the same picture down per phase so the PM can fix one
 // phase at a time without seeing tickets from later phases.
-func CheckScheduleConflicts(tickets []*ticket.Ticket, resources []ticket.Resource, effortToDays map[string]float64, now time.Time) ConflictReport {
+func CheckScheduleConflicts(tickets []*ticket.Ticket, resources []ticket.Resource, ctx EstimateContext, now time.Time) ConflictReport {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	conflicts, warnings, analyzed := analyzeTickets(tickets, resources, effortToDays)
+	ctx = ctx.prepared()
+	conflicts, warnings, analyzed := analyzeTickets(tickets, resources, ctx)
 
 	// Collect distinct phases in order of first appearance, including ""
 	// for "no phase".
@@ -156,7 +158,7 @@ func CheckScheduleConflicts(tickets []*ticket.Ticket, resources []ticket.Resourc
 				filtered = append(filtered, t)
 			}
 		}
-		pc, pw, pa := analyzeTickets(filtered, resources, effortToDays)
+		pc, pw, pa := analyzeTickets(filtered, resources, ctx)
 		daysOver := 0
 		for _, rc := range pc {
 			daysOver += len(rc.Days)
@@ -188,7 +190,7 @@ func CheckScheduleConflicts(tickets []*ticket.Ticket, resources []ticket.Resourc
 // analyzeTickets is the conflict-detection core. Pure: given a (possibly
 // pre-filtered) ticket slice, returns the conflicts, the skip-warnings, and
 // the count of tickets actually analyzed.
-func analyzeTickets(tickets []*ticket.Ticket, resources []ticket.Resource, effortToDays map[string]float64) ([]ResourceConflicts, []ScheduleWarning, int) {
+func analyzeTickets(tickets []*ticket.Ticket, resources []ticket.Resource, ctx EstimateContext) ([]ResourceConflicts, []ScheduleWarning, int) {
 	// Index resources by email for quick lookup.
 	resByEmail := map[string]ticket.Resource{}
 	for _, r := range resources {
@@ -230,16 +232,12 @@ func analyzeTickets(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 			})
 			continue
 		}
-		// Must have an effort.
-		effort := ""
-		if t.Effort != nil {
-			effort = *t.Effort
-		}
-		days := effortDaysFor(effort, effortToDays)
-		if days <= 0 {
+		// Must have an estimate.
+		totalHours, _ := EstimatedHours(t, ctx)
+		if totalHours <= 0 {
 			warnings = append(warnings, ScheduleWarning{
 				TicketID: t.ID, Title: t.Title,
-				Reason: "no effort size set",
+				Reason: "no estimate",
 			})
 			continue
 		}
@@ -254,7 +252,6 @@ func analyzeTickets(tickets []*ticket.Ticket, resources []ticket.Resource, effor
 			})
 			continue
 		}
-		totalHours := days * HoursPerDay
 		dailyHours := totalHours / float64(span)
 
 		// Distribute the daily-hours load over every business day in the span.

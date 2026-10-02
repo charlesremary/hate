@@ -256,12 +256,11 @@ document.addEventListener('mouseout', (e) => {
   scheduleHideTicketHovercard();
 });
 let allTickets = [];
-let effortToDaysMap = {}; // effort size → configured days, for the current project
+let reviewConvertedOnly = false; // migration banner filter: wrap tickets with converted estimates
 let ticketView = localStorage.getItem('hate:ticketview') || 'list'; // 'list' | 'plan'
 let projectResources = [];
 let currentUser = null;
 let showBilling = false; // Billing tab is hidden unless enabled in Settings.
-let showCosmic = false;  // COSMIC tab (experimental) is hidden unless enabled in Settings.
 
 // ── Status / priority helpers ────────────────────────
 const STATUS_LABELS = {
@@ -444,12 +443,6 @@ function applyBillingVisibility() {
   if (!showBilling && currentTab === 'billing') switchTab('tickets');
 }
 
-// Show or hide the experimental COSMIC tab per the app setting. Hidden by default.
-function applyCosmicVisibility() {
-  const btn = document.querySelector('.tab[data-tab="cosmic"]');
-  if (btn) btn.classList.toggle('hidden', !showCosmic);
-  if (!showCosmic && currentTab === 'cosmic') switchTab('tickets');
-}
 
 // ── Project Overview ──────────────────────────────────
 // Per-project reference material: contacts, links, and general instructions.
@@ -671,7 +664,7 @@ function ovUpsert(section, item) {
 async function loadTickets() {
   if (!currentProject) return;
   const tbody = document.getElementById('ticket-tbody');
-  tbody.innerHTML = '<tr><td colspan="8" style="padding:16px;color:#999">Loading…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" style="padding:16px;color:#999">Loading…</td></tr>';
 
   try {
     const status = document.getElementById('filter-status').value;
@@ -685,17 +678,13 @@ async function loadTickets() {
     if (params.length) url += '?' + params.join('&');
 
     allTickets = await API.get(url);
-    // Cache the project's effort→days map so the detail panel can show what each
-    // t-shirt size resolves to (non-fatal if it fails).
-    try {
-      effortToDaysMap = (await API.get(`/api/projects/${currentProject.id}/effort-to-days`)).effort_to_days || {};
-    } catch { /* leave the previous map in place */ }
     populatePhaseFilter(allTickets);
     populateTagFilter(allTickets);
     populateAssigneeFilter(allTickets);
+    renderMigrationBanner();
     renderTickets();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="8" style="padding:16px;color:red">${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="padding:16px;color:red">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -849,17 +838,18 @@ function renderTicketTable(tickets) {
   }
 
   if (tickets.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="padding:16px;color:#999">No tickets. Create one with "+ New Ticket".</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="9" style="padding:16px;color:#999">${reviewConvertedOnly ? 'No wrap tickets with converted estimates.' : 'No tickets. Create one with "+ New Ticket".'}</td></tr>`;
     return;
   }
   tbody.innerHTML = tickets.map(t => `
     <tr data-id="${t.id}">
       <td style="text-align:center;padding:0;white-space:nowrap">${gutterMarks(t)}</td>
       <td><strong>${t.id}</strong></td>
-      <td>${t.title}${isBacklogTicket(t) ? ' <span class="badge backlog-badge">Backlog</span>' : ''}${depBadge(t, byId)}${kidCount.get(t.id) ? ` <span class="badge child-badge" title="${kidCount.get(t.id)} child ticket(s)">↳ ${kidCount.get(t.id)}</span>` : ''}</td>
+      <td>${t.title}${isBacklogTicket(t) ? ' <span class="badge backlog-badge">Backlog</span>' : ''}${depBadge(t, byId)}${kidCount.get(t.id) ? ` <span class="badge child-badge" title="${kidCount.get(t.id)} child ticket(s)">↳ ${kidCount.get(t.id)}</span>` : ''}${estimateGapBadge(t)}</td>
       <td>${t.phase || '—'}</td>
       <td>${statusBadge(t.status)}</td>
       <td>${t.assignee ? t.assignee.split('@')[0] : '—'}</td>
+      <td style="white-space:nowrap">${estHoursCell(t)}</td>
       <td>${t.planned_start_date || '—'}</td>
       <td>${t.due_date || '—'}</td>
     </tr>`).join('');
@@ -955,6 +945,9 @@ function visibleTickets() {
   const hideClosed = document.getElementById('filter-hide-closed').checked;
   const tagFilter = document.getElementById('filter-tag').value;
   const assigneeFilter = document.getElementById('filter-assignee').value;
+  // The migration-review filter shows every converted wrap ticket, done or not,
+  // so the list matches the banner's count.
+  if (reviewConvertedOnly) return allTickets.filter(hasConvertedEstimate);
   let visible = hideClosed ? allTickets.filter(t => t.status !== 'closed' && t.status !== 'complete') : allTickets;
   if (tagFilter) visible = visible.filter(t => (t.tags || []).includes(tagFilter));
   if (assigneeFilter === '__unassigned__') visible = visible.filter(t => !t.assignee);
@@ -976,6 +969,9 @@ function renderTickets() {
 
 // Compute dependency stages + critical path from the loaded tickets (mirrors the
 // server's execution-plan logic). Backlog excluded; parents tracked separately.
+// Durations are the server's computed estimate (estimated_hours): wrap
+// estimate_hours, converted legacy effort, or a code ticket's share of its
+// feature's CFP-based hours.
 function computeExecPlan(all) {
   const byId = {};
   all.forEach(t => { if (!isBacklogTicket(t)) byId[t.id] = t; });
@@ -994,9 +990,9 @@ function computeExecPlan(all) {
   };
   ids.forEach(id => waveOf(id, new Set()));
   const dur = id => {
-    const e = byId[id] && byId[id].effort;
-    const d = e ? effortToDaysMap[e] : 0;
-    return d == null ? 0 : d;
+    const t = byId[id];
+    const h = t && (t.estimated_hours > 0 ? t.estimated_hours : t.estimate_hours);
+    return h > 0 ? h : 0;
   };
   const ef = {};
   const efOf = (id, stk) => {
@@ -1031,7 +1027,6 @@ function renderTicketPlan(visible) {
   const el = document.getElementById('ticket-plan');
   if (!allTickets.length) { el.innerHTML = '<p style="color:#999;padding:16px">No tickets.</p>'; return; }
   const P = computeExecPlan(allTickets);
-  const HPD = 8;
   const stages = {};
   visible.forEach(t => {
     if (P.isParent.has(t.id) || !P.byId[t.id]) return; // skip parents/backlog
@@ -1040,15 +1035,15 @@ function renderTicketPlan(visible) {
   });
   const stageNums = Object.keys(stages).map(Number).sort((a, b) => a - b);
   if (!stageNums.length) { el.innerHTML = '<p style="color:#999;padding:16px">No tickets match the current filters.</p>'; return; }
-  const stageDays = {}; let maxStageDays = 0;
-  stageNums.forEach(w => { stageDays[w] = stages[w].reduce((s, id) => s + P.dur(id), 0); if (stageDays[w] > maxStageDays) maxStageDays = stageDays[w]; });
+  const stageHours = {}; let maxStageHours = 0;
+  stageNums.forEach(w => { stageHours[w] = stages[w].reduce((s, id) => s + P.dur(id), 0); if (stageHours[w] > maxStageHours) maxStageHours = stageHours[w]; });
   const blocks = stageNums.map(w => {
     const list = stages[w].slice().sort((a, b) => {
       const ca = P.critical.has(a), cb = P.critical.has(b);
       if (ca !== cb) return ca ? -1 : 1;
       return a < b ? -1 : 1;
     });
-    const bar = maxStageDays > 0 ? stageDays[w] / maxStageDays * 100 : 0;
+    const bar = maxStageHours > 0 ? stageHours[w] / maxStageHours * 100 : 0;
     const crit = list.filter(id => P.critical.has(id)).length;
     const count = list.length === 1 ? '<strong>1</strong> ticket' : `<strong>${list.length}</strong> tickets, independent (can run at once)`;
     const note = w === 0 ? ' · <span style="color:#16a34a">can start now</span>' : '';
@@ -1058,7 +1053,7 @@ function renderTicketPlan(visible) {
       const star = P.critical.has(id) ? '<span style="color:#dc2626">★</span> ' : '';
       const needs = (P.preds[id] || []).filter(p => !P.isParent.has(p)).map(p => `${p} (stage ${(P.wave[p] ?? 0) + 1})`);
       const nstr = needs.length ? ` <span style="color:#b45309;font-size:11px">needs ${escapeHtml(needs.join(', '))}</span>` : '';
-      const eff = P.dur(id) ? ` <span style="color:#aaa;font-size:11px">${(P.dur(id) * HPD).toFixed(0)}h</span>` : '';
+      const eff = P.dur(id) ? ` <span style="color:#aaa;font-size:11px">${fmtHours(P.dur(id))}h</span>` : '';
       return `<div onclick="openTicketPanel('${id}')" style="cursor:pointer;padding:5px 8px 5px 22px;display:flex;gap:8px;align-items:center;border-radius:4px" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
         ${statusBadge(t.status)}
         <span style="font-weight:600;color:#1565c0">${id}</span>
@@ -1071,7 +1066,7 @@ function renderTicketPlan(visible) {
         <span style="display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap">
           <strong style="color:#334155">Stage ${w + 1}</strong>
           <span style="display:inline-block;width:120px;height:12px;background:#f1f5f9;border-radius:3px"><span style="display:block;height:100%;width:${bar.toFixed(1)}%;min-width:3px;background:#3b82f6;border-radius:3px"></span></span>
-          <span style="font-size:12.5px;color:#334155">${count} · <span style="color:#0d9488;font-weight:600">Σ ${(stageDays[w] * HPD).toFixed(0)}h ≈ ${stageDays[w].toFixed(0)}d</span>${note}${critNote}</span>
+          <span style="font-size:12.5px;color:#334155">${count} · <span style="color:#0d9488;font-weight:600" title="Sum of estimated hours: wrap estimates plus code hours from each feature's CFP">Σ ${fmtHours(stageHours[w])}h est.</span>${note}${critNote}</span>
         </span>
       </summary>
       <div style="padding:2px 6px 8px">${rows}</div>
@@ -1139,26 +1134,157 @@ async function openTicketPanel(ticketId) {
   }
 }
 
-// Resolve an effort t-shirt size to its configured days/hours, e.g. "m (3d · 24h)".
-// Hours use the same 8h/day basis as the schedule and the hours-at-risk rule.
-function effortLabel(e) {
-  if (!e) return '—';
-  const d = effortToDaysMap[e];
-  if (d == null) return e;
-  const days = +(+d).toFixed(2);
-  const hours = +(d * 8).toFixed(2);
-  return `${e} <span style="color:#888;font-weight:400">(${days}d · ${hours}h)</span>`;
+// ── Estimation: class + estimate_hours ───────────────
+// Class tags stay functional / config / nonfunc; the UI labels them Code /
+// Config / Non-functional. Wrap tickets (config / nonfunc) carry estimate_hours;
+// code tickets are sized from the parent feature's cfp:N. T-shirt effort is
+// retired — a legacy value is shown read-only.
+const CLASS_TAGS = ['functional', 'config', 'nonfunc'];
+const CLASS_LABELS = { functional: 'Code', config: 'Config', nonfunc: 'Non-functional' };
+function classOf(t) { return (t.tags || []).find(x => CLASS_TAGS.includes(x)) || ''; }
+function isWrapClass(c) { return c === 'config' || c === 'nonfunc'; }
+function hasEstimate(t) { return t.estimate_hours != null; }
+function cfpOf(t) {
+  const tag = (t && t.tags || []).find(x => x.startsWith('cfp:'));
+  const n = tag ? parseInt(tag.slice(4), 10) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+// A wrap ticket whose hours come from its old effort size (read-time conversion).
+function hasConvertedEstimate(t) { return isWrapClass(classOf(t)) && !hasEstimate(t) && !!t.effort; }
+
+// What a child ticket is missing for the promote-time rules: 'class',
+// 'estimate', or ''. Only open work tickets with a parent are checked.
+function estimateGap(t) {
+  if (!parentIdOf(t) || !WORKFLOW_TYPES.includes(t.type) || isDone(t)) return '';
+  const c = classOf(t);
+  if (!c) return 'class';
+  if (isWrapClass(c) && !hasEstimate(t)) return 'estimate';
+  return '';
+}
+function estimateGapBadge(t) {
+  const gap = estimateGap(t);
+  if (gap === 'class') return ' <span class="badge est-gap-badge" title="Child ticket has no class (Code / Config / Non-functional) — required at first promote">no class</span>';
+  if (gap === 'estimate') return ` <span class="badge est-gap-badge" title="${hasConvertedEstimate(t) ? 'Wrap ticket estimate is converted from its old effort size — set an hour estimate' : 'Wrap ticket has no hour estimate — required at first promote'}">no est.</span>`;
+  return '';
 }
 
-// Label the create-ticket effort options with their configured hours, e.g. "M (24h)".
-function refreshEffortOptions() {
-  const sel = document.getElementById('nt-effort');
-  if (!sel) return;
-  [...sel.options].forEach(o => {
-    if (!o.value) return; // leave the blank "—" option alone
-    const d = effortToDaysMap[o.value];
-    o.textContent = d == null ? o.value.toUpperCase() : `${o.value.toUpperCase()} (${+(d * 8).toFixed(2)}h)`;
-  });
+// "Est h" list cell.
+function estHoursCell(t) {
+  const c = classOf(t);
+  if (hasEstimate(t)) return fmtHours(t.estimate_hours);
+  if (isWrapClass(c) && t.effort) return `<span class="est-muted" title="Converted from legacy effort ${escapeHtml(t.effort)} — review">${t.estimated_hours > 0 ? fmtHours(t.estimated_hours) + ' ' : ''}conv.</span>`;
+  if (c === 'functional') return `<span class="est-muted" title="Estimated from the parent feature's CFP">${t.estimated_hours > 0 ? '~' + fmtHours(t.estimated_hours) : 'code'}</span>`;
+  const cfp = cfpOf(t);
+  if (cfp != null) return `<span class="est-muted" title="Feature size">${cfp} CFP</span>`;
+  return '—';
+}
+
+function classEditor(t) {
+  const c = classOf(t);
+  const opts = [['', '— none —'], ...CLASS_TAGS.map(v => [v, CLASS_LABELS[v]])]
+    .map(([v, l]) => `<option value="${v}" ${c === v ? 'selected' : ''}>${l}</option>`).join('');
+  return `<select id="panel-class-select" class="inline-edit" onchange="setTicketClass('${t.id}', this.value)">${opts}</select>`;
+}
+
+function estimateEditor(t) {
+  const c = classOf(t);
+  const legacy = t.effort ? ` <span class="est-muted">legacy: ${escapeHtml(t.effort)}</span>` : '';
+  if (c === 'functional') {
+    const pid = parentIdOf(t);
+    const parent = pid ? (allTickets || []).find(x => x.id === pid) : null;
+    const cfp = cfpOf(parent) ?? cfpOf(t);
+    const src = pid ? `${linkifyTicketRefs(escapeHtml(pid))}${cfp != null ? `, ${cfp} CFP` : ''}` : (cfp != null ? `${cfp} CFP` : 'no CFP yet');
+    const stray = hasEstimate(t)
+      ? ` <span class="est-warn">has ${fmtHours(t.estimate_hours)}h set — code tickets take no hour estimate</span> <button class="btn-secondary btn-xs" onclick="setEstimateHours('${t.id}','')">Clear</button>` : '';
+    const approx = t.estimated_hours > 0 ? `~${fmtHours(t.estimated_hours)}h ` : '';
+    return `<span class="est-muted">${approx}from feature (${src})</span>${stray}${legacy}`;
+  }
+  if (isWrapClass(c) || hasEstimate(t)) {
+    const val = hasEstimate(t) ? t.estimate_hours : '';
+    const note = hasEstimate(t) ? ''
+      : t.effort ? ` <span class="est-warn">${t.estimated_hours > 0 ? fmtHours(t.estimated_hours) + 'h ' : ''}converted from effort (review)</span>`
+      : ' <span class="est-warn">not estimated</span>';
+    return `<input id="panel-estimate-input" class="inline-edit" type="number" min="0.25" step="0.25" list="est-hours-options" value="${val}" placeholder="hours" onchange="setEstimateHours('${t.id}', this.value)" style="max-width:80px"> h${note}${legacy}`;
+  }
+  return `<span class="est-muted">— (set a class)</span>${legacy}`;
+}
+
+// Change the class tag, preserving every other tag. Switching to Code clears a
+// stray estimate_hours (code is sized by the parent's CFP).
+async function setTicketClass(id, cls) {
+  const t = panelTicket && panelTicket.id === id ? panelTicket : null;
+  const tags = ((t && t.tags) || []).filter(x => !CLASS_TAGS.includes(x));
+  if (cls) tags.push(cls);
+  const base = `/api/projects/${currentProject.id}/tickets/${id}`;
+  const author = currentUser?.email || '';
+  try {
+    let updated = await API.patch(base, { field: 'tags', value: tags, author });
+    if (cls === 'functional' && hasEstimate(updated)) {
+      updated = await API.patch(base, { field: 'estimate_hours', value: null, author });
+    }
+    showToast(`Class: ${cls ? CLASS_LABELS[cls] : 'none'}`);
+    renderTicketPanel(updated);
+    loadTickets();
+    if (isWrapClass(cls) && !hasEstimate(updated)) document.getElementById('panel-estimate-input')?.focus();
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+// PATCH estimate_hours; blank clears it. The server rejects anything that isn't
+// ≥ 0.25 in quarter-hour steps (422), which surfaces as a toast.
+function setEstimateHours(id, raw) {
+  const s = String(raw).trim();
+  editField(id, 'estimate_hours', s === '' ? null : Number(s));
+}
+
+// Promote blocked by the estimation rules: explain in the panel and focus the
+// control that fixes it (mirrors the needs_time_log flow).
+function promptEstimateToPromote(id, detail) {
+  const box = document.getElementById('panel-estimate-alert');
+  if (box) {
+    box.innerHTML = `<div class="est-alert"><strong>Can't promote yet.</strong> ${escapeHtml(detail || 'Set this ticket\'s class and estimate.')}
+      <div style="margin-top:6px"><button class="btn-secondary btn-xs" onclick="focusEstimateFields()">Edit class / estimate</button></div></div>`;
+  }
+  showToast(detail || 'Set the class / estimate to promote', 'error');
+  focusEstimateFields();
+}
+function focusEstimateFields() {
+  const target = document.getElementById('panel-estimate-input') || document.getElementById('panel-class-select');
+  if (!target) return;
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  target.focus();
+}
+
+// ── Migration banner ──────────────────────────────────
+// Wrap tickets with a legacy effort but no estimate_hours get hours converted
+// from effort at read time. Those numbers are days-based and too big, so the
+// banner asks for a review. Dismissal is per project, per browser.
+function migrationDismissKey() { return `hate:migration-dismissed:${currentProject ? currentProject.id : ''}`; }
+function renderMigrationBanner() {
+  const el = document.getElementById('migration-banner');
+  if (!el) return;
+  const n = (allTickets || []).filter(hasConvertedEstimate).length;
+  if (!n) reviewConvertedOnly = false;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem(migrationDismissKey()) === '1'; } catch { /* storage unavailable */ }
+  if (!n || (dismissed && !reviewConvertedOnly)) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  const plural = n === 1 ? 'wrap ticket has an estimate' : 'wrap tickets have estimates';
+  el.innerHTML = reviewConvertedOnly
+    ? `<span>Showing ${n} ${plural} converted from old effort sizes. Set an hour estimate on each.</span>
+       <button type="button" class="btn-secondary btn-xs" onclick="setReviewConverted(false)">Show all tickets</button>`
+    : `<span>${n} ${plural} converted from old effort sizes. <a href="javascript:void(0)" onclick="setReviewConverted(true)">Review</a>.</span>
+       <button type="button" class="migration-dismiss" title="Dismiss" onclick="dismissMigrationBanner()">✕</button>`;
+  el.classList.remove('hidden');
+}
+function setReviewConverted(on) {
+  reviewConvertedOnly = on;
+  renderMigrationBanner();
+  renderTickets();
+}
+function dismissMigrationBanner() {
+  try { localStorage.setItem(migrationDismissKey(), '1'); } catch { /* storage unavailable */ }
+  reviewConvertedOnly = false;
+  renderMigrationBanner();
+  renderTickets();
 }
 
 // Auto-size a test-case textarea to its content so long steps/expected/comments
@@ -1174,7 +1300,7 @@ function gutterMarks(t) {
     `<span title="${title}" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:${bg};color:#fff;font-weight:800;font-size:11px;line-height:1">${glyph}</span>`;
   const marks = [];
   if (t.status === 'blocked') marks.push(badge('#dc2626', '✕', 'Blocked'));
-  if (t.at_risk) marks.push(badge('#2563eb', '!', "Logged hours ≥ 90% of this ticket's allotment"));
+  if (t.at_risk) marks.push(badge('#2563eb', '!', "Logged hours ≥ 90% of this wrap ticket's hour estimate"));
   return marks.join('&nbsp;');
 }
 
@@ -1186,7 +1312,8 @@ function renderTicketPanel(t) {
   const fields = [
     ['Type', `<select class="inline-edit" onchange="editField('${t.id}','type',this.value)">${typeOptions}</select>`],
     ['Status', statusBadge(t.status)],
-    ['Priority', priorityCell(t.priority)], ['Effort', effortLabel(t.effort)],
+    ['Priority', priorityCell(t.priority)],
+    ['Class', classEditor(t)], ['Estimate', estimateEditor(t)],
     ['Assignee', resolveResourceName(t.assignee)], ['Creator', resolveResourceName(t.creator)],
     ['Due date', t.due_date || '—'], ['Planned start', t.planned_start_date || '—'],
     ['Actual start', t.actual_start_date || '—'],
@@ -1280,6 +1407,7 @@ function renderTicketPanel(t) {
       ${t.description ? `<div class="md" style="margin-top:8px">${renderMarkdown(t.description)}</div>` : ''}
     </div>
     <div class="panel-section">
+      <div id="panel-estimate-alert"></div>
       ${fields.map(([l, v]) => `<div class="field-row"><span class="field-label">${l}</span><span class="field-value">${v}</span></div>`).join('')}
     </div>
     ${childrenSection}
@@ -1439,6 +1567,7 @@ async function promoteTicket(id) {
     const data = await r.json();
     if (!r.ok) {
       if (data.needs_time_log) { promptTimeToPromote(id, data.detail); return; }
+      if (data.estimate_invalid) { promptEstimateToPromote(id, data.detail); return; }
       throw new Error(data.detail || data.error || r.statusText);
     }
     showToast(`${id} → ${data.status}`);
@@ -1623,7 +1752,7 @@ function openTimeExtendModal(id, entry, info) {
   document.getElementById('te-context').innerHTML =
     `Logging <strong>${entry.hours}h</strong> brings <strong>${id}</strong> to ` +
     `<strong>${info.would_be_hours}h</strong> — <strong>${(+over.toFixed(2))}h over</strong> its ` +
-    `${info.allotted_hours}h allotment. Confirm you're authorized to extend and record why.`;
+    `${info.allotted_hours}h estimate. Confirm you're authorized to extend and record why.`;
   document.getElementById('te-authorized').checked = false;
   document.getElementById('te-reason').value = '';
   document.getElementById('time-extend-overlay').classList.remove('hidden');
@@ -1761,6 +1890,8 @@ document.getElementById('btn-phase-rollup-csv').addEventListener('click', () => 
 });
 
 function pctText(v) { return (v == null ? 0 : v).toFixed(1) + '%'; }
+// Hours to at most 2 decimals, trailing zeros dropped (1.5, 0.25, 12).
+function fmtHours(v) { return String(+(+(v || 0)).toFixed(2)); }
 
 function renderPhaseRollup(report) {
   const c = document.getElementById('phase-rollup-content');
@@ -1776,14 +1907,14 @@ function renderPhaseRollup(report) {
   const rows = report.phases.map(p => {
     const flags = [];
     if (p.blocked_count) flags.push(`<span class="badge s-blocked">${p.blocked_count} blocked</span>`);
-    if (!p.effort_based) flags.push(`<span class="badge s-not_started" title="No effort sizes in this phase — % is by ticket count">count-based</span>`);
-    if (p.no_effort_count) flags.push(`<span style="color:#999;font-size:11px" title="Tickets with no effort size (invisible to the effort math)">${p.no_effort_count} unsized</span>`);
+    if (!p.hours_based) flags.push(`<span class="badge s-not_started" title="No estimated hours in this phase — % is by ticket count">count-based</span>`);
+    if (p.unsized_count) flags.push(`<span style="color:#999;font-size:11px" title="Work tickets with no estimate (invisible to the hours math)">${p.unsized_count} unsized</span>`);
     if (p.cancelled_count) flags.push(`<span style="color:#999;font-size:11px" title="Force-closed / descoped — excluded from %">${p.cancelled_count} descoped</span>`);
     return `<tr style="border-bottom:1px solid #eee">
       <td style="padding:6px 8px"><strong>${escapeHtml(p.label)}</strong></td>
       <td style="padding:6px 8px;white-space:nowrap">${bar(p.percent_complete)} ${pctText(p.percent_complete)}</td>
       <td style="padding:6px 8px">${p.complete_count}/${p.ticket_count}</td>
-      <td style="padding:6px 8px;white-space:nowrap">${p.done_effort_days}/${p.total_effort_days}d</td>
+      <td style="padding:6px 8px;white-space:nowrap">${fmtHours(p.est_hours_done)}/${fmtHours(p.est_hours_total)}h</td>
       <td style="padding:6px 8px;white-space:nowrap">${p.planned_start || '—'} → ${p.due_date || '—'}</td>
       <td style="padding:6px 8px">${flags.join(' ')}</td>
     </tr>`;
@@ -1794,27 +1925,27 @@ function renderPhaseRollup(report) {
     <table style="width:100%;border-collapse:collapse">
       <thead><tr style="text-align:left;border-bottom:2px solid #ddd;color:#555">
         <th style="padding:6px 8px">Phase</th><th style="padding:6px 8px">Complete</th>
-        <th style="padding:6px 8px">Tickets</th><th style="padding:6px 8px">Effort (done/total)</th>
+        <th style="padding:6px 8px">Tickets</th><th style="padding:6px 8px">Est. hours (done/total)</th>
         <th style="padding:6px 8px">Dates</th><th style="padding:6px 8px"></th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    <p style="color:#999;font-size:11px;margin-top:10px">Effort-weighted: % = done effort-days ÷ total effort-days.
-      Descoped (force-closed) tickets are excluded; phases with no effort sizes fall back to ticket count.</p>`;
+    <p style="color:#999;font-size:11px;margin-top:10px">Hours-weighted: % = done est. hours ÷ total est. hours (wrap estimates, plus code hours from each feature's CFP).
+      Descoped (force-closed) tickets are excluded; phases with no estimates fall back to ticket count.</p>`;
 }
 
 function downloadPhaseRollupCSV(report) {
   const head = ['phase', 'percent_complete', 'basis', 'tickets_total', 'tickets_complete',
-    'in_progress', 'not_started', 'blocked', 'descoped', 'effort_days_total',
-    'effort_days_done', 'unsized_tickets', 'planned_start', 'due_date'];
+    'in_progress', 'not_started', 'blocked', 'descoped', 'est_hours_total',
+    'est_hours_done', 'unsized_tickets', 'planned_start', 'due_date'];
   const esc = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
   const lines = [head.join(',')];
   (report.phases || []).forEach(p => {
     lines.push([
-      esc(p.label), p.percent_complete, p.effort_based ? 'effort' : 'count',
+      esc(p.label), p.percent_complete, p.hours_based ? 'hours' : 'count',
       p.ticket_count, p.complete_count, p.in_progress_count, p.not_started_count,
-      p.blocked_count, p.cancelled_count, p.total_effort_days, p.done_effort_days,
-      p.no_effort_count, esc(p.planned_start || ''), esc(p.due_date || '')
+      p.blocked_count, p.cancelled_count, p.est_hours_total, p.est_hours_done,
+      p.unsized_count, esc(p.planned_start || ''), esc(p.due_date || '')
     ].join(','));
   });
   lines.push([esc('TOTAL'), report.percent_complete, report.basis, report.total_tickets,
@@ -1838,7 +1969,7 @@ function renderBalancePreview(report) {
     return;
   }
   if (!report.tickets_affected) {
-    content.innerHTML = `<div style="color:#666">Nothing to balance — no schedulable tickets found. Make sure tickets have an effort size and assignee.</div>`;
+    content.innerHTML = `<div style="color:#666">Nothing to balance — no schedulable tickets found. Make sure tickets have an estimate and an assignee.</div>`;
     return;
   }
   const oldEnd = report.original_end_date || '—';
@@ -1882,7 +2013,7 @@ function renderBalancePreview(report) {
           <th style="padding:6px 8px;border-bottom:1px solid #ddd">ID</th>
           <th style="padding:6px 8px;border-bottom:1px solid #ddd">Title</th>
           <th style="padding:6px 8px;border-bottom:1px solid #ddd">Assignee</th>
-          <th style="padding:6px 8px;border-bottom:1px solid #ddd">Effort</th>
+          <th style="padding:6px 8px;border-bottom:1px solid #ddd">Est. hours</th>
           <th style="padding:6px 8px;border-bottom:1px solid #ddd">Current</th>
           <th style="padding:6px 8px;border-bottom:1px solid #ddd">Proposed</th>
           <th style="padding:6px 8px;border-bottom:1px solid #ddd">Shift</th>
@@ -2019,7 +2150,7 @@ function renderConflictsModal(scope) {
   }
   let warnings = '';
   if (view.warnings && view.warnings.length) {
-    warnings = `<details style="margin-top:14px"><summary style="cursor:pointer;color:#666;font-size:12px">${view.warnings.length} ticket${view.warnings.length === 1 ? '' : 's'} skipped (no dates / no assignee / no effort)</summary>
+    warnings = `<details style="margin-top:14px"><summary style="cursor:pointer;color:#666;font-size:12px">${view.warnings.length} ticket${view.warnings.length === 1 ? '' : 's'} skipped (no dates / no assignee / no estimate)</summary>
       <ul style="list-style:none;padding:8px 12px 0;margin:0;font-size:12px;color:#666">
         ${view.warnings.map(w => `<li>${linkifyTicketRefs(w.ticket_id)} — ${w.title} <span style="color:#999">(${w.reason})</span></li>`).join('')}
       </ul></details>`;
@@ -2108,7 +2239,14 @@ document.getElementById('btn-new-ticket').addEventListener('click', () => {
   const phases = [...new Set((allTickets || []).map(t => t.phase).filter(Boolean))].sort();
   const dl = document.getElementById('nt-phase-list');
   dl.innerHTML = phases.map(p => `<option value="${escapeHtml(p)}"></option>`).join('');
-  refreshEffortOptions();
+  // Parent picker: open tickets that are, or could be, features. Type picker:
+  // type:<name> tags already in use in this project.
+  const parents = (allTickets || []).filter(t => !isDone(t) && WORKFLOW_TYPES.includes(t.type) && !parentIdOf(t));
+  document.getElementById('nt-parent-list').innerHTML = parents
+    .map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.title)}</option>`).join('');
+  const types = [...new Set((allTickets || []).flatMap(t => (t.tags || []).filter(x => x.startsWith('type:')).map(x => x.slice(5))))].sort();
+  document.getElementById('nt-type-list').innerHTML = types.map(x => `<option value="${escapeHtml(x)}"></option>`).join('');
+  updateNewTicketClassFields();
   document.getElementById('modal-overlay').classList.remove('hidden');
   document.getElementById('nt-title').focus();
 });
@@ -2179,6 +2317,37 @@ document.getElementById('nt-type').addEventListener('change', () => {
   document.getElementById('nt-fields-time').classList.toggle('hidden', !isAuto);
 });
 
+// New Ticket: Class drives the sizing fields. Config / Non-functional take an
+// hour estimate (+ optional type:<name>); Code is sized from the parent's CFP.
+function newTicketClass() {
+  const r = document.querySelector('input[name="nt-class"]:checked');
+  return r ? r.value : '';
+}
+const NT_CLASS_HINTS = {
+  '': 'None: a standalone task or meeting, or a parent feature (size it with CFP below).',
+  functional: "Estimated from the parent feature's CFP.",
+  config: 'Platform wrap: console / IaC setup. Estimate it in hours.',
+  nonfunc: 'Platform wrap: deploy, validation, hardening. Estimate it in hours.',
+};
+function updateNewTicketClassFields() {
+  const cls = newTicketClass();
+  document.getElementById('nt-wrap-fields').classList.toggle('hidden', !isWrapClass(cls));
+  document.getElementById('nt-class-hint').textContent = NT_CLASS_HINTS[cls] || '';
+  // Non-blocking: the server enforces these at the first promote, not on create.
+  const warn = document.getElementById('nt-class-warning');
+  const hasParent = !!document.getElementById('nt-parent').value.trim();
+  let msg = '';
+  if (hasParent && !cls) msg = 'A child ticket needs a class (Code / Config / Non-functional) before it can be promoted.';
+  else if (hasParent && isWrapClass(cls) && !document.getElementById('nt-est-hours').value) msg = 'A Config / Non-functional child needs an hour estimate before it can be promoted.';
+  else if (hasParent && document.getElementById('nt-cfp').value.trim()) msg = "CFP belongs on the parent feature, not a child — a child with cfp: can't be promoted.";
+  warn.textContent = msg ? '⚠ ' + msg : '';
+  warn.classList.toggle('hidden', !msg);
+}
+document.querySelectorAll('input[name="nt-class"]').forEach(r => r.addEventListener('change', updateNewTicketClassFields));
+document.getElementById('nt-est-hours').addEventListener('change', updateNewTicketClassFields);
+document.getElementById('nt-parent').addEventListener('input', updateNewTicketClassFields);
+document.getElementById('nt-cfp').addEventListener('input', updateNewTicketClassFields);
+
 document.getElementById('new-ticket-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const type = document.getElementById('nt-type').value;
@@ -2192,7 +2361,6 @@ document.getElementById('new-ticket-form').addEventListener('submit', async (e) 
   };
   if (!isAuto) {
     body.priority = document.getElementById('nt-priority').value || undefined;
-    body.effort = document.getElementById('nt-effort').value || undefined;
     body.due_date = document.getElementById('nt-due-date').value || undefined;
   } else {
     const hours = parseFloat(document.getElementById('nt-hours').value);
@@ -2203,14 +2371,22 @@ document.getElementById('new-ticket-form').addEventListener('submit', async (e) 
   }
   const phaseVal = document.getElementById('nt-phase').value.trim();
   if (phaseVal) body.phase = phaseVal;
-  // COSMIC sizing (optional, standard types only) → tags. A self-contained ticket
-  // can carry both a class and a CFP size; either is optional.
+  // Class / estimate / parent / COSMIC size (standard types only) → tags plus
+  // estimate_hours. A self-contained feature can carry both a class and a CFP.
   if (!isAuto) {
     const tags = [];
+    const cls = newTicketClass();
+    if (cls) tags.push(cls);
+    if (isWrapClass(cls)) {
+      const est = parseFloat(document.getElementById('nt-est-hours').value);
+      if (Number.isFinite(est) && est > 0) body.estimate_hours = est;
+      const wt = document.getElementById('nt-wrap-type').value.trim().replace(/^type:/, '');
+      if (wt) tags.push(`type:${wt}`);
+    }
+    const parent = document.getElementById('nt-parent').value.trim();
+    if (parent) tags.push(PARENT_TAG_PREFIX + parent);
     const cfp = parseInt(document.getElementById('nt-cfp').value, 10);
     if (Number.isFinite(cfp) && cfp > 0) tags.push(`cfp:${cfp}`);
-    const cls = document.getElementById('nt-class').value;
-    if (cls) tags.push(cls);
     if (tags.length) body.tags = tags;
   }
   try {
@@ -2221,6 +2397,7 @@ document.getElementById('new-ticket-form').addEventListener('submit', async (e) 
     document.getElementById('new-ticket-form').reset();
     document.getElementById('nt-sizing').open = false;
     document.getElementById('nt-type').dispatchEvent(new Event('change'));
+    updateNewTicketClassFields();
     loadTickets();
   } catch (e) { showToast(e.message, 'error'); }
 });
@@ -2402,12 +2579,11 @@ document.getElementById('btn-settings').addEventListener('click', async () => {
     const cfg = await API.get('/api/projects/settings');
     document.getElementById('settings-projects-root').value = cfg.projects_root || '';
     document.getElementById('show-billing').checked = cfg.show_billing || false;
-    document.getElementById('show-cosmic').checked = cfg.show_cosmic || false;
     document.getElementById('scheduler-enabled').checked = cfg.scheduler?.enabled || false;
     document.getElementById('scheduler-interval').value = cfg.scheduler?.interval_hours || 24;
   } catch (e) { showToast(e.message, 'error'); }
   loadProjectInfoSection();
-  await loadEffortSizingSection();
+  await loadProjectSettingsSections();
 });
 
 // Project info — currently just the display name. Per-project, requires an open project.
@@ -2427,12 +2603,8 @@ function loadProjectInfoSection() {
   fields.classList.remove('hidden');
 }
 
-// Effort sizing only edits when a project is active — values are per-project.
-async function loadEffortSizingSection() {
-  const inputs = document.getElementById('effort-sizing-inputs');
-  const empty = document.getElementById('effort-sizing-empty');
-  const note = document.getElementById('effort-sizing-note');
-  const projLabel = document.getElementById('effort-sizing-project');
+// Per-project settings only edit when a project is active.
+async function loadProjectSettingsSections() {
   const mhInputs = document.getElementById('max-hours-inputs');
   const mhEmpty = document.getElementById('max-hours-empty');
   const mhProj = document.getElementById('max-hours-project');
@@ -2440,10 +2612,6 @@ async function loadEffortSizingSection() {
   const stEmpty = document.getElementById('strict-time-empty');
   const stProj = document.getElementById('strict-time-project');
   if (!currentProject) {
-    inputs.classList.add('hidden');
-    note.classList.add('hidden');
-    empty.classList.remove('hidden');
-    projLabel.textContent = '';
     mhInputs.classList.add('hidden');
     mhEmpty.classList.remove('hidden');
     mhProj.textContent = '';
@@ -2452,19 +2620,8 @@ async function loadEffortSizingSection() {
     stProj.textContent = '';
     return;
   }
-  projLabel.textContent = `— ${currentProject.name || currentProject.id}`;
   mhProj.textContent = `— ${currentProject.name || currentProject.id}`;
   stProj.textContent = `— ${currentProject.name || currentProject.id}`;
-  try {
-    const data = await API.get(`/api/projects/${currentProject.id}/effort-to-days`);
-    const m = data.effort_to_days || {};
-    for (const k of ['xs','s','m','l','xl']) {
-      document.getElementById(`effort-${k}`).value = m[k] ?? '';
-    }
-    empty.classList.add('hidden');
-    inputs.classList.remove('hidden');
-    note.classList.remove('hidden');
-  } catch (e) { showToast(e.message, 'error'); }
   try {
     const hb = await API.get(`/api/projects/${currentProject.id}/hour-budget`);
     document.getElementById('work-hours').value = hb.work_hours ?? '';
@@ -2493,7 +2650,6 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
   const body = {
     projects_root: document.getElementById('settings-projects-root').value || undefined,
     show_billing: document.getElementById('show-billing').checked,
-    show_cosmic: document.getElementById('show-cosmic').checked,
     scheduler: {
       enabled: document.getElementById('scheduler-enabled').checked,
       interval_hours: parseFloat(document.getElementById('scheduler-interval').value),
@@ -2508,20 +2664,6 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         const updated = await API.patch(`/api/projects/${currentProject.id}/info`, { project_name: newName });
         currentProject.name = updated.project_name;
         document.getElementById('project-title').textContent = currentProject.name;
-      }
-    }
-    if (currentProject && !document.getElementById('effort-sizing-inputs').classList.contains('hidden')) {
-      const effortToDays = {};
-      for (const k of ['xs','s','m','l','xl']) {
-        // Effort sizing supports quarter-day granularity — snap to the nearest 0.25.
-        const raw = parseFloat(document.getElementById(`effort-${k}`).value);
-        if (Number.isFinite(raw) && raw >= 0.25) effortToDays[k] = Math.round(raw * 4) / 4;
-      }
-      if (Object.keys(effortToDays).length === 5) {
-        await API.put(`/api/projects/${currentProject.id}/effort-to-days`, { effort_to_days: effortToDays });
-      } else {
-        showToast('Effort sizing not saved — all five sizes need a value ≥ 0.25', 'error');
-        return;
       }
     }
     if (currentProject && !document.getElementById('max-hours-inputs').classList.contains('hidden')) {
@@ -2554,8 +2696,6 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
     showToast('Settings saved');
     showBilling = body.show_billing;
     applyBillingVisibility();
-    showCosmic = body.show_cosmic;
-    applyCosmicVisibility();
     loadProjects();
   } catch (e) { showToast(e.message, 'error'); }
 });
@@ -2924,7 +3064,7 @@ function renderTestCases(rows) {
     </div>`;
 }
 
-// ── COSMIC calibration (experimental) ─────────────────
+// ── COSMIC calibration + estimate ─────────────────────
 const fmtCosmicH = n => (n || 0).toFixed(1);
 const fmtCosmicRate = n => (n == null ? '—' : n.toFixed(2));
 const fmtCosmicPct = n => (n == null ? '—' : Math.round(n) + '%');
@@ -2948,14 +3088,14 @@ function renderCosmic(rep) {
   if (!rep.features.length) {
     el.innerHTML = `
       <div style="max-width:680px">
-        <h2 style="font-size:18px;margin-bottom:8px">COSMIC calibration <span class="badge backlog-badge">experimental</span></h2>
+        <h2 style="font-size:18px;margin-bottom:8px">COSMIC calibration</h2>
         <p style="color:#666;font-size:13px;line-height:1.6">No sized features yet. To calibrate your delivery pace against COSMIC function points:</p>
         <ol style="color:#666;font-size:13px;line-height:1.8;margin:8px 0 0 18px">
           <li>Tag a parent ticket <code>cfp:&lt;N&gt;</code> with its COSMIC size — the size lives only on the parent.</li>
           <li>Make the work items its children (tag them <code>parent:&lt;parent-id&gt;</code>).</li>
-          <li>Tag each child <code>functional</code>, <code>config</code>, or <code>nonfunc</code>, and log hours on it.</li>
+          <li>Give each child a class: Code (<code>functional</code>), Config (<code>config</code>), or Non-functional (<code>nonfunc</code>). Wrap tickets (Config / Non-functional) also get an hour estimate. Log hours on the children.</li>
         </ol>
-        <p style="color:#999;font-size:12px;margin-top:12px">Observed functional pace = Σ(functional child hours) ÷ feature CFP.</p>
+        <p style="color:#999;font-size:12px;margin-top:12px">Observed code pace = Σ(Code child hours) ÷ feature CFP. Once features are sized, this tab shows a Monte Carlo estimate of the project's hours.</p>
       </div>`;
     return;
   }
@@ -2976,17 +3116,17 @@ function renderCosmic(rep) {
       <div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#666;margin-bottom:14px">Calibration · ${a.feature_count} sized feature${a.feature_count === 1 ? '' : 's'}</div>
       <div style="display:flex;gap:40px;flex-wrap:wrap">
         <div>
-          <div style="font-size:28px;font-weight:700">${fmtCosmicRate(a.h_per_cfp)}<span style="font-size:13px;color:#999;font-weight:400"> h/CFP functional</span></div>
+          <div style="font-size:28px;font-weight:700">${fmtCosmicRate(a.h_per_cfp)}<span style="font-size:13px;color:#999;font-weight:400"> h/CFP code</span></div>
           <div style="font-size:12px;color:#666;margin-top:3px">median ${fmtCosmicRate(a.h_per_cfp_median)} · range ${fmtCosmicRate(a.h_per_cfp_min)}–${fmtCosmicRate(a.h_per_cfp_max)} · n=${a.n}</div>
           <div style="font-size:12px;color:#888;margin-top:2px">assumed band ${as.band_low} · ${as.band_mid} · ${as.band_high}${compare ? ` — ${compare}` : ''}</div>
         </div>
         <div>
           <div style="font-size:28px;font-weight:700">${fmtCosmicPct(a.wrap_pct)}<span style="font-size:13px;color:#999;font-weight:400"> wrap</span></div>
-          <div style="font-size:12px;color:#888;margin-top:3px">assumed ${as.wrap_pct}%</div>
+          <div style="font-size:12px;color:#888;margin-top:3px">info only — not used by the estimate</div>
         </div>
         <div>
           <div style="font-size:28px;font-weight:700">${a.total_cfp}<span style="font-size:13px;color:#999;font-weight:400"> CFP</span></div>
-          <div style="font-size:12px;color:#888;margin-top:3px">${fmtCosmicH(a.functional_hours)} functional h</div>
+          <div style="font-size:12px;color:#888;margin-top:3px">${fmtCosmicH(a.functional_hours)} code h</div>
         </div>
       </div>
       ${flag}${dq}
@@ -2998,8 +3138,8 @@ function renderCosmic(rep) {
     if (f.parent_hours > 0) warn += `<span title="${fmtCosmicH(f.parent_hours)} h on parent" style="color:#e65100">⚑</span>`;
     return `
     <tr>
-      <td><a class="ticket-ref" href="javascript:void(0)" onclick="openTicketPanel('${f.id}')">${f.id}</a></td>
-      <td>${escapeHtml(f.title)}</td>
+      <td><a class="ticket-ref" href="javascript:void(0)" onclick="openTicketPanel('${escapeHtml(f.id)}')">${escapeHtml(f.id)}</a></td>
+      <td>${escapeHtml(f.title)}${f.calibration_slice ? ' <span class="badge slice-badge" title="Calibration slice (tagged calibration-slice)">slice</span>' : ''}</td>
       <td style="text-align:right">${f.cfp}</td>
       <td style="text-align:right">${fmtCosmicH(f.functional_hours)}</td>
       <td style="text-align:right">${fmtCosmicH(f.config_hours + f.nonfunc_hours)}</td>
@@ -3009,58 +3149,160 @@ function renderCosmic(rep) {
     </tr>`;
   }).join('');
 
-  el.innerHTML = card + renderCosmicEstimate(rep) + `
+  const slice = rep.slice_total > 0
+    ? `<div style="font-size:13px;color:#555;margin:0 0 8px">Calibration slice: <strong>${rep.slice_done} of ${rep.slice_total}</strong> done</div>` : '';
+  el.innerHTML = card + renderMonteCarloPanel(rep) + slice + `
     <table class="billing-table">
       <thead><tr>
         <th>Feature</th><th>Title</th><th style="text-align:right">CFP</th>
-        <th style="text-align:right">Func h</th><th style="text-align:right">Wrap h</th>
-        <th style="text-align:right">h/CFP</th><th style="text-align:right">Wrap</th><th></th>
+        <th style="text-align:right">Code h</th><th style="text-align:right">Wrap h</th>
+        <th style="text-align:right">h/CFP</th><th style="text-align:right" title="Wrap h ÷ Code h — info only, not used by the estimate">Wrap %</th><th></th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
 
-// Manual initial-estimate block: borrowed h/CFP + wrap % × total CFP → projected
-// project hours, shown against actual-so-far. Inputs persist per project.
-function renderCosmicEstimate(rep) {
-  const e = rep.estimate || {}, a = rep.aggregate;
-  const hpc = e.h_per_cfp != null ? e.h_per_cfp : '';
-  const wp = e.wrap_pct != null ? e.wrap_pct : '';
-  const actual = a.functional_hours + a.config_hours + a.nonfunc_hours;
-  const hasEst = e.h_per_cfp != null && e.total_hours > 0;
-  const pctOfEst = (hasEst && actual > 0) ? `${(100 * actual / e.total_hours).toFixed(0)}% of estimate` : 'no hours logged yet';
-  const projected = hasEst ? `
-      <div style="display:flex;gap:40px;flex-wrap:wrap;margin-top:14px">
-        <div><div style="font-size:28px;font-weight:700">${fmtCosmicH(e.total_hours)}<span style="font-size:13px;color:#999;font-weight:400"> h estimated</span></div>
-          <div style="font-size:12px;color:#666;margin-top:3px">code ${fmtCosmicH(e.code_hours)} + wrap ${fmtCosmicH(e.wrap_hours)}</div></div>
-        <div><div style="font-size:28px;font-weight:700">${fmtCosmicH(actual)}<span style="font-size:13px;color:#999;font-weight:400"> h actual so far</span></div>
-          <div style="font-size:12px;color:#666;margin-top:3px">${pctOfEst}</div></div>
-      </div>`
-    : `<div style="font-size:12px;color:#999;margin-top:10px">Enter a code rate (and wrap %) from a comparable delivered project to project this one's total hours from its ${e.total_cfp} CFP.</div>`;
+// ── Monte Carlo estimate panel ───────────────────────
+// Inputs (reference set, min feature size, counting uncertainty) persist per
+// project via PUT /cosmic-estimate; the server recomputes on every change and on
+// tab open — there is no run button. Display only: the max-hours cap stays manual.
+let cosmicState = null; // { estimate_inputs, available_projects, monte_carlo }
+
+function renderMonteCarloPanel(rep) {
+  cosmicState = {
+    estimate_inputs: rep.estimate_inputs || {},
+    available_projects: rep.available_projects || [],
+    monte_carlo: rep.monte_carlo || null,
+  };
+  const inp = cosmicState.estimate_inputs;
+  const sel = new Set(inp.ref_projects || []);
+  const projBoxes = cosmicState.available_projects.length
+    ? cosmicState.available_projects.map(p => `
+        <label class="mc-check"><input type="checkbox" class="mc-ref-proj" value="${escapeHtml(p.id)}" ${sel.has(p.id) ? 'checked' : ''} onchange="saveMonteCarloInputs()"> ${escapeHtml(p.name || p.id)}</label>`).join('')
+    : '<div style="font-size:12px;color:#999">No other projects found.</div>';
   return `
-    <div style="background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:20px 24px;max-width:760px;margin-bottom:20px">
-      <div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#666;margin-bottom:12px">Initial estimate · ${e.total_cfp} CFP</div>
-      <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
-        <label style="font-size:13px">h/CFP<br><input id="est-hpercfp" type="number" step="0.001" min="0" value="${hpc}" placeholder="e.g. 0.17" style="width:110px"></label>
-        <label style="font-size:13px">wrap %<br><input id="est-wrappct" type="number" step="1" min="0" value="${wp}" placeholder="e.g. 35" style="width:90px"></label>
-        <button class="btn-primary" onclick="saveCosmicEstimate()">Save estimate</button>
+    <div class="mc-card">
+      <div class="mc-heading">Estimate · Monte Carlo</div>
+      <div class="mc-inputs">
+        <div>
+          <div class="mc-label">Reference features</div>
+          ${projBoxes}
+          <label class="mc-check"><input type="checkbox" id="mc-ref-all" ${inp.ref_all ? 'checked' : ''} onchange="saveMonteCarloInputs()"> All past projects <span style="color:#999">(wide: unknown domain)</span></label>
+          <label class="mc-check"><input type="checkbox" id="mc-ref-own" ${inp.ref_own ? 'checked' : ''} onchange="saveMonteCarloInputs()"> This project's finished features</label>
+        </div>
+        <div>
+          <label class="mc-label" for="mc-min-cfp">Min feature size (CFP)</label>
+          <input id="mc-min-cfp" type="number" min="1" step="1" value="${inp.min_cfp ?? 3}" onchange="saveMonteCarloInputs()" style="width:90px">
+          <label class="mc-label" for="mc-unc" style="margin-top:10px">Counting uncertainty (± %)</label>
+          <input id="mc-unc" type="number" min="0" max="100" step="1" value="${inp.count_unc_pct ?? 0}" onchange="saveMonteCarloInputs()" style="width:90px">
+        </div>
       </div>
-      ${projected}
+      <div id="mc-result">${renderMonteCarloResult(cosmicState.monte_carlo)}</div>
+      <div style="font-size:12px;color:#999;margin-top:10px">Set the max-hours cap manually in Settings.</div>
     </div>`;
 }
 
-async function saveCosmicEstimate() {
-  const hpcRaw = document.getElementById('est-hpercfp').value.trim();
-  const wpRaw = document.getElementById('est-wrappct').value.trim();
-  const body = {
-    h_per_cfp: hpcRaw === '' ? null : parseFloat(hpcRaw),
-    wrap_pct: wpRaw === '' ? null : parseFloat(wpRaw),
+function renderMonteCarloResult(mc) {
+  if (!mc) return '<div class="mc-error">No estimate available.</div>';
+  if (!mc.ok) return `<div class="mc-error">${escapeHtml(mc.error || 'Estimate unavailable.')}</div>`;
+  const h = fmtCosmicH;
+  const pw = mc.platform_wrap || {};
+  const row = (label, a, b, c, strong) =>
+    `<tr${strong ? ' style="font-weight:700"' : ''}><td>${label}</td><td style="text-align:right">${h(a)}</td><td style="text-align:right">${h(b)}</td><td style="text-align:right">${h(c)}</td></tr>`;
+  const n = (mc.n_own || 0) + (mc.n_borrowed || 0);
+  const ownPct = Math.round((mc.p_own || 0) * 100);
+  const borrowed = (mc.borrowed_projects || []).length ? ` Borrowed from: ${escapeHtml(mc.borrowed_projects.join(', '))}.` : '';
+  const missing = (mc.missing_projects || []).length
+    ? `<div style="color:#e65100;font-size:12px;margin-top:4px">⚠ Reference project${mc.missing_projects.length === 1 ? '' : 's'} not found: ${escapeHtml(mc.missing_projects.join(', '))}.</div>` : '';
+  const pf = mc.projected_finish || {};
+  const finish = pf.remaining_feature_count > 0
+    ? `<div>Code: projected finish <strong>${h(pf.p50)} h</strong> (P50) · <strong>${h(pf.p85)} h</strong> (P85) — ${h(pf.done_actual_hours)} h actual code on done features + ${pf.remaining_feature_count} remaining feature${pf.remaining_feature_count === 1 ? '' : 's'} simulated.</div>` : '';
+  // Platform wrap = logged hours on done wrap tickets + estimates for the rest.
+  const pwParts = [];
+  if (pw.actual_count > 0) pwParts.push(`${pw.actual_count} from actual hours`);
+  if (pw.converted_count > 0) pwParts.push(`${pw.converted_count} with only an old effort size (not counted; set hour estimates)`);
+  if (pw.missing_count > 0) pwParts.push(`${pw.missing_count} with no estimate (counted as 0)`);
+  const pwWarn = pw.converted_count > 0 || pw.missing_count > 0;
+  const pwNote = pwParts.length
+    ? `<div style="${pwWarn ? 'color:#e65100;' : ''}font-size:12px;margin-top:4px">${pwWarn ? '⚠ ' : ''}Platform wrap: ${h(pw.hours)} h over ${pw.ticket_count} wrap ticket${pw.ticket_count === 1 ? '' : 's'} — ${pwParts.join(', ')}.</div>` : '';
+  return `
+    <table class="billing-table mc-table">
+      <thead><tr><th></th><th style="text-align:right">P50</th><th style="text-align:right">P85</th><th style="text-align:right">P95</th></tr></thead>
+      <tbody>
+        ${row('Code wrap', mc.code.p50, mc.code.p85, mc.code.p95)}
+        ${row('Platform wrap', pw.hours, pw.hours, pw.hours)}
+        ${row('Total', mc.total.p50, mc.total.p85, mc.total.p95, true)}
+      </tbody>
+    </table>
+    <div style="font-size:12px;color:#999;margin-top:2px">Hours. ${mc.total_cfp} CFP across ${mc.feature_count} feature${mc.feature_count === 1 ? '' : 's'}; ${(mc.runs || 0).toLocaleString()} runs.</div>
+    ${renderMonteCarloHistogram(mc)}
+    <div class="mc-notes">
+      <div>Based on ${n} reference feature${n === 1 ? '' : 's'} (${ownPct}% own, ${100 - ownPct}% borrowed). Range widened ${mc.widen_k}x (backtest calibration). Median rate ${fmtCosmicRate(mc.ref_median_rate)} h/CFP.${borrowed}</div>
+      <div>Actual so far: <strong>${h(mc.actual_hours)} h</strong>.</div>
+      ${finish}${missing}${pwNote}
+    </div>`;
+}
+
+// Inline-SVG histogram of the simulated totals with P50 / P85 markers.
+function renderMonteCarloHistogram(mc) {
+  const bins = mc.histogram || [];
+  if (!bins.length) return '';
+  const W = 480, H = 96, pad = 14;
+  const lo = bins[0].lo, hi = bins[bins.length - 1].hi;
+  const span = hi - lo || 1;
+  const maxC = Math.max(...bins.map(b => b.count)) || 1;
+  const x = v => ((v - lo) / span) * W;
+  const bars = bins.map(b => {
+    const bh = (b.count / maxC) * (H - pad);
+    return `<rect x="${x(b.lo).toFixed(1)}" y="${(H - bh).toFixed(1)}" width="${Math.max(0, x(b.hi) - x(b.lo) - 1).toFixed(1)}" height="${bh.toFixed(1)}" class="mc-bar"><title>${fmtCosmicH(b.lo)}–${fmtCosmicH(b.hi)} h: ${b.count} runs</title></rect>`;
+  }).join('');
+  const marker = (v, label, cls) => {
+    if (v == null || v < lo || v > hi) return '';
+    const xv = x(v).toFixed(1);
+    const anchor = x(v) > W - 60 ? 'end' : 'start';
+    const tx = anchor === 'end' ? (x(v) - 3).toFixed(1) : (x(v) + 3).toFixed(1);
+    return `<line x1="${xv}" x2="${xv}" y1="0" y2="${H}" class="${cls}"/><text x="${tx}" y="10" text-anchor="${anchor}" class="mc-mark-label">${label} ${fmtCosmicH(v)}</text>`;
   };
+  return `
+    <svg class="mc-hist" viewBox="0 0 ${W} ${H + 14}" role="img" aria-label="Distribution of simulated total hours">
+      ${bars}
+      ${marker(mc.total.p50, 'P50', 'mc-mark mc-mark-p50')}
+      ${marker(mc.total.p85, 'P85', 'mc-mark mc-mark-p85')}
+      <line x1="0" x2="${W}" y1="${H}" y2="${H}" class="mc-axis"/>
+      <text x="0" y="${H + 12}" class="mc-axis-label">${fmtCosmicH(lo)} h</text>
+      <text x="${W}" y="${H + 12}" text-anchor="end" class="mc-axis-label">${fmtCosmicH(hi)} h</text>
+    </svg>`;
+}
+
+async function saveMonteCarloInputs() {
+  if (!currentProject) return;
+  const minRaw = document.getElementById('mc-min-cfp').value.trim();
+  const uncRaw = document.getElementById('mc-unc').value.trim();
+  const body = {
+    ref_projects: [...document.querySelectorAll('.mc-ref-proj:checked')].map(c => c.value),
+    ref_all: document.getElementById('mc-ref-all').checked,
+    ref_own: document.getElementById('mc-ref-own').checked,
+    min_cfp: minRaw === '' ? null : Number(minRaw),
+    count_unc_pct: uncRaw === '' ? null : Number(uncRaw),
+  };
+  const out = document.getElementById('mc-result');
+  if (out) out.style.opacity = '.5';
   try {
-    await API.put(`/api/projects/${currentProject.id}/cosmic-estimate`, body);
-    showToast('Estimate saved');
-    loadCosmic();
-  } catch (e) { showToast(e.message, 'error'); }
+    const res = await API.put(`/api/projects/${currentProject.id}/cosmic-estimate`, body);
+    cosmicState.estimate_inputs = res.estimate_inputs || cosmicState.estimate_inputs;
+    cosmicState.monte_carlo = res.monte_carlo || null;
+    const el = document.getElementById('mc-result');
+    if (el) el.innerHTML = renderMonteCarloResult(cosmicState.monte_carlo);
+    // Reflect the effective values (defaults fill in a cleared field).
+    const ei = cosmicState.estimate_inputs;
+    if (ei.min_cfp != null) document.getElementById('mc-min-cfp').value = ei.min_cfp;
+    if (ei.count_unc_pct != null) document.getElementById('mc-unc').value = ei.count_unc_pct;
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    const el = document.getElementById('mc-result');
+    if (el) el.style.opacity = '';
+  }
 }
 
 // ── Init ──────────────────────────────────────────────
@@ -3068,10 +3310,8 @@ async function initTabVisibility() {
   try {
     const cfg = await API.get('/api/projects/settings');
     showBilling = cfg.show_billing || false;
-    showCosmic = cfg.show_cosmic || false;
-  } catch (e) { showBilling = false; showCosmic = false; }
+  } catch (e) { showBilling = false; }
   applyBillingVisibility();
-  applyCosmicVisibility();
 }
 
 loadProjects();

@@ -74,7 +74,8 @@ A project is an ordinary Git repository. HATE owns a few paths inside it:
   ticket files by `RegenerateIndex`.
 - **`.tkt/config.json`** holds the project config (`ProjectConfig`): client,
   project name/id, ticket-ID `prefix`, team `resources`, linked `repos`,
-  `effort_to_days` mapping, optional project-local git identity, and `closed_at`.
+  hour budget pools, estimate inputs, the legacy `effort_to_days` mapping,
+  optional project-local git identity, and `closed_at`.
 
 Ticket IDs are `<PREFIX>-<4 base36 chars>`, e.g. `AMPL-7k3x`. The prefix comes
 from the project config (default `TKT`); the suffix is random and collision-checked
@@ -93,7 +94,8 @@ fields:
 | `status` | Workflow state (see below). |
 | `title`, `description` | Free text; description renders as Markdown in the UI. |
 | `priority` | `critical`, `high`, `medium`, `low` (default `medium`). |
-| `effort` | T-shirt size `xs`/`s`/`m`/`l`/`xl`, or null. Maps to estimated days via config. |
+| `estimate_hours` | Hours estimate for a wrap ticket (`config` / `nonfunc` tag), or null. ≥ 0.25 in quarter-hour steps. Code (`functional`) tickets have none; they're sized by the parent's `cfp:`. |
+| `effort` | **Legacy.** Old t-shirt size `xs`..`xl`, read-only. Setting it is rejected (400); clearing it is allowed. Used only to convert old tickets that have no estimate. |
 | `tags` | List of free-text labels. |
 | `phase` | Optional grouping/phase label. |
 | `assignee` | Person responsible, or null (unassigned). |
@@ -163,8 +165,8 @@ All mutations go through `internal/ticket` and are recorded in the ticket's
 - **Promote / Demote** — advance or step back along the type's workflow.
 - **Change status** — direct status set for transitions the workflow has no path
   into (e.g. `blocked`).
-- **Assign**, **Add comment**, **Edit field** (title, description, priority, effort,
-  tags, phase, assignee, dates, type-specific fields).
+- **Assign**, **Add comment**, **Edit field** (title, description, priority,
+  estimate_hours, tags, phase, assignee, dates, type-specific fields).
 - **Predecessors** — add/remove dependency links (validated to exist).
 - **Time** — add/delete time entries (hours rounded to 0.25).
 - **Attachments** — files stored under `attachments/<ticket-id>/` and committed
@@ -190,10 +192,13 @@ workdays forward (`internal/pm/balance.go`), exposed at
 - Tickets that are **terminal** (`complete`, `closed`) are never rescheduled. Their
   existing `due_date` (or `closed_at`) is used only so downstream work doesn't start
   before them.
-- A schedulable ticket must have **both an assignee and an effort size**. Anything
-  missing either is **skipped** with a reason and left untouched.
-- Effort size is converted to days via the project's `effort_to_days` map, then to
-  hours at a fixed **8 hours per person-day** (`HoursPerDay`).
+- A schedulable ticket must have **both an assignee and an estimate**. Anything
+  missing either is **skipped** with a reason ("no estimate") and left untouched.
+- The estimate is in hours: `estimate_hours` for wrap tickets, and the parent
+  feature's CFP × the reference median h/CFP, split across its functional
+  children, for code tickets. Old tickets with only a legacy effort size fall back
+  to `effort_to_days` × 8. See the [agent guide](docs/ticketing-and-cfp-guide.md#11-estimating).
+  These hours burn down against the assignee's daily capacity (below).
 - Predecessor links are checked for **cycles** (Kahn topological sort); if a cycle
   is found, balancing aborts and reports the involved ticket IDs instead of
   scheduling.
@@ -201,7 +206,7 @@ workdays forward (`internal/pm/balance.go`), exposed at
   each day, every ticket whose predecessors are satisfied is "ready"; a person's
   ready tickets **equally split that person's daily capacity**
   (`daily_hours_available`, default 8). Within a person's queue, work is ordered by
-  **priority, then larger effort, then ticket ID**.
+  **priority, then larger estimate, then ticket ID**.
 - A ticket's `planned_start_date` is stamped the first day work touches it, and its
   `due_date` the day its hours hit zero. The run is capped at ~5 years of weekdays
   as a runaway guard.
@@ -219,12 +224,26 @@ workdays forward (`internal/pm/balance.go`), exposed at
 
 - Equal-split capacity is a simplification — it doesn't model partial-day focus,
   context switching, or single-task-at-a-time working.
-- Tickets with no assignee or no effort size silently drop out of the schedule (they
-  appear under "skipped", not in the plan).
+- Tickets with no assignee or no estimate drop out of the schedule (they appear
+  under "skipped", not in the plan).
 - Capacity assumes a flat daily figure; holidays, PTO, and per-day variation aren't
   modeled.
 - Orphaned predecessor references (pointing outside the schedulable set and not
   terminal) are treated as already satisfied.
+
+## Estimating
+
+Code is sized in COSMIC function points (`cfp:N` on the feature's parent ticket)
+and estimated as a range: CFP × h/CFP rates from reference features you pick
+(past projects, all projects, or this project's own finished features), run as a
+Monte Carlo on the COSMIC tab (P50 / P85 / P95). Platform work (`config` /
+`nonfunc` tickets) is estimated in hours on each ticket and added on top. The
+estimate is display-only; the project's max-hours cap is set by hand.
+
+How to tag tickets, count CFP, and use the estimate (including the calibration
+slice for a new kind of project) is in the
+[agent guide](docs/ticketing-and-cfp-guide.md). The design and its decisions are
+in [docs/plan-estimation-rework.md](docs/plan-estimation-rework.md).
 
 ## Collaboration via Git
 

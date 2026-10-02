@@ -109,8 +109,21 @@ type ProjectConfig struct {
 	// for the COSMIC tab: a borrowed code rate (hours per CFP) and wrap %, used to
 	// project total project hours from the total CFP before actuals exist. nil =
 	// unset (no estimate entered yet).
+	// Legacy: no longer used (superseded by the Monte Carlo inputs below), kept
+	// so older configs stay readable.
 	EstimateHPerCFP *float64 `json:"estimate_h_per_cfp,omitempty"`
 	EstimateWrapPct *float64 `json:"estimate_wrap_pct,omitempty"`
+	// Monte Carlo estimate inputs (COSMIC tab). The reference set is any mix of
+	// specific other projects, all other known projects, and this project's own
+	// finished features.
+	EstimateRefProjects []string `json:"estimate_ref_projects,omitempty"` // project ids
+	EstimateRefAll      bool     `json:"estimate_ref_all,omitempty"`      // all other known projects
+	EstimateRefOwn      bool     `json:"estimate_ref_own,omitempty"`      // this project's finished features
+	// EstimateMinCFP is the smallest feature (CFP) used as a reference sample.
+	// nil = default 3.
+	EstimateMinCFP *int `json:"estimate_min_cfp,omitempty"`
+	// EstimateCountUncPct is the CFP counting uncertainty (+/- %). nil = 0.
+	EstimateCountUncPct *float64 `json:"estimate_count_unc_pct,omitempty"`
 	// WorkHours / AdminHours are the project's two hour pools: work (task,
 	// dev_task, design_task) and admin/meeting (administration, meeting). Their
 	// sum is the total hours available; the dashboard burns each down separately.
@@ -123,8 +136,8 @@ type ProjectConfig struct {
 	// MaxHours is the deprecated single cap, kept so existing configs migrate:
 	// it seeds WorkHours until the budget is saved through the new settings.
 	MaxHours *float64 `json:"max_hours,omitempty"`
-	// StrictTimeEnforcement, when true, blocks a time log that would push a sized
-	// ticket past its effort-based allotment unless the logger confirms they're
+	// StrictTimeEnforcement, when true, blocks a time log that would push a wrap
+	// (config/nonfunc) ticket past its hours allotment unless the logger confirms they're
 	// authorized to extend and records a reason. false = log freely.
 	StrictTimeEnforcement bool `json:"strict_time_enforcement,omitempty"`
 	// EnforceQA, when true, blocks promoting a dev_task from dev_complete to

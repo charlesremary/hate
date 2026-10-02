@@ -20,7 +20,8 @@ type CreateTicketParams struct {
 	Title            string
 	Creator          string
 	Priority         string
-	Effort           string
+	Effort           string   // retired: a non-empty value is rejected (ErrEffortRetired)
+	EstimateHours    *float64 // wrap (config/nonfunc) hours estimate; nil = unsized
 	Assignee         string
 	Tags             []string
 	Phase            string
@@ -165,8 +166,15 @@ func CreateTicket(repoRoot string, params CreateTicketParams) (*Ticket, error) {
 	if params.Priority != "" {
 		t.Priority = params.Priority
 	}
-	if params.Effort != "" {
-		t.Effort = StringPtr(params.Effort)
+	if strings.TrimSpace(params.Effort) != "" {
+		return nil, ErrEffortRetired
+	}
+	if err := ValidateEstimateHours(params.EstimateHours); err != nil {
+		return nil, err
+	}
+	if params.EstimateHours != nil {
+		v := *params.EstimateHours
+		t.EstimateHours = &v
 	}
 	if params.Assignee != "" {
 		t.Assignee = StringPtr(params.Assignee)
@@ -411,6 +419,12 @@ func Promote(repoRoot, ticketID, author string) (*Ticket, error) {
 		return nil, fmt.Errorf("Cannot promote from '%s' -- terminal status", current)
 	}
 
+	// Gate: the first promote out of not_started checks the estimation rules
+	// (class, estimate_hours, no cfp: on children). force-close bypasses.
+	if err := ValidatePromoteEstimate(t); err != nil {
+		return nil, err
+	}
+
 	// Gate: leaving a work status requires time (with a description) logged since
 	// entering it — so the calibration data can't go missing. force-close bypasses.
 	if workStatuses[current] && !hasTimeLoggedSince(t, statusEnteredAt(t)) {
@@ -561,6 +575,11 @@ func getFieldValue(t *Ticket, field string) interface{} {
 			return *t.Effort
 		}
 		return nil
+	case "estimate_hours":
+		if t.EstimateHours != nil {
+			return *t.EstimateHours
+		}
+		return nil
 	case "tags":
 		return t.Tags
 	case "phase":
@@ -646,15 +665,38 @@ func setFieldValue(t *Ticket, field string, value interface{}) error {
 		}
 		return fmt.Errorf("priority must be a string")
 	case "effort":
+		// Retired: only clearing a legacy value is allowed.
 		if value == nil {
 			t.Effort = nil
 			return nil
 		}
 		if s, ok := value.(string); ok {
-			t.Effort = StringPtr(s)
-			return nil
+			if strings.TrimSpace(s) == "" {
+				t.Effort = nil
+				return nil
+			}
+			return ErrEffortRetired
 		}
 		return fmt.Errorf("effort must be a string")
+	case "estimate_hours":
+		if value == nil {
+			t.EstimateHours = nil
+			return nil
+		}
+		var h float64
+		switch v := value.(type) {
+		case float64:
+			h = v
+		case int:
+			h = float64(v)
+		default:
+			return fmt.Errorf("estimate_hours must be a number or null")
+		}
+		if err := ValidateEstimateHours(&h); err != nil {
+			return err
+		}
+		t.EstimateHours = &h
+		return nil
 	case "tags":
 		if value == nil {
 			t.Tags = []string{}

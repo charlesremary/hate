@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -86,7 +87,8 @@ type CreateTicketRequest struct {
 	Title            string   `json:"title"`
 	Description      *string  `json:"description"`
 	Priority         *string  `json:"priority"`
-	Effort           *string  `json:"effort"`
+	Effort           *string  `json:"effort"` // retired: non-empty → 400
+	EstimateHours    *float64 `json:"estimate_hours"`
 	Assignee         *string  `json:"assignee"`
 	Tags             []string `json:"tags"`
 	Phase            *string  `json:"phase"`
@@ -118,7 +120,7 @@ type TimeEntryRequest struct {
 	Hours       float64 `json:"hours"`
 	Description string  `json:"description"`
 	Author      *string `json:"author"`
-	// ExtendAuthorized / ExtendReason authorize a log past the ticket's effort
+	// ExtendAuthorized / ExtendReason authorize a log past a wrap ticket's hours
 	// allotment under strict time enforcement (see handleAddTimeEntry).
 	ExtendAuthorized bool   `json:"extend_authorized"`
 	ExtendReason     string `json:"extend_reason"`
@@ -269,11 +271,12 @@ func handleListTickets(w http.ResponseWriter, r *http.Request) {
 		filtered = []ticket.IndexSummary{}
 	}
 
-	// Flag tickets whose logged hours are ≥90% of their effort allotment, using
+	// Flag wrap tickets whose logged hours are ≥90% of their allotment, using
 	// the same rule as the PM dashboard's hours-at-risk watchlist, so the ticket
-	// gutter and the watchlist always agree.
-	effortToDays := ticket.DefaultEffortToDays
-	if cfg, cErr := ticket.ReadConfig(root); cErr == nil && cfg != nil && cfg.EffortToDays != nil {
+	// gutter and the watchlist always agree. Wrap allotments don't depend on the
+	// reference rate, so the context skips computing it.
+	var effortToDays map[string]float64
+	if cfg, cErr := ticket.ReadConfig(root); cErr == nil && cfg != nil {
 		effortToDays = cfg.EffortToDays
 	}
 	var full []*ticket.Ticket
@@ -283,17 +286,25 @@ func handleListTickets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	atRisk := make(map[string]bool)
-	for _, row := range pm.ComputeHoursAtRisk(full, effortToDays) {
+	for _, row := range pm.ComputeHoursAtRisk(full, pm.NewEstimateContext(full, 0, effortToDays)) {
 		atRisk[row.TicketID] = true
 	}
 
+	// Each ticket's computed estimate (wrap estimate, converted legacy effort,
+	// or a code ticket's share of its feature), from the whole project so a
+	// filtered list still finds parents and siblings.
+	est := ticketEstimates(root)
+
 	type listItem struct {
 		ticket.IndexSummary
-		AtRisk bool `json:"at_risk"`
+		AtRisk         bool    `json:"at_risk"`
+		EstimatedHours float64 `json:"estimated_hours"`
+		EstimateSource string  `json:"estimate_source"`
 	}
 	items := make([]listItem, len(filtered))
 	for i, s := range filtered {
-		items[i] = listItem{IndexSummary: s, AtRisk: atRisk[s.ID]}
+		e := est(s.ID)
+		items[i] = listItem{IndexSummary: s, AtRisk: atRisk[s.ID], EstimatedHours: e.hours, EstimateSource: e.source}
 	}
 	respondJSON(w, http.StatusOK, items)
 }
@@ -321,8 +332,16 @@ func handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	if req.Priority != nil {
 		params.Priority = *req.Priority
 	}
-	if req.Effort != nil {
-		params.Effort = *req.Effort
+	if req.Effort != nil && strings.TrimSpace(*req.Effort) != "" {
+		respondError(w, http.StatusBadRequest, ticket.ErrEffortRetired.Error())
+		return
+	}
+	if req.EstimateHours != nil {
+		if err := ticket.ValidateEstimateHours(req.EstimateHours); err != nil {
+			respondError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		params.EstimateHours = req.EstimateHours
 	}
 	if req.Assignee != nil {
 		params.Assignee = *req.Assignee
@@ -357,7 +376,9 @@ func handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 
 	tk, err := ticket.CreateTicket(root, params)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ticket.ErrEffortRetired) {
+			respondError(w, http.StatusBadRequest, err.Error())
+		} else if strings.Contains(err.Error(), "not found") {
 			respondError(w, http.StatusNotFound, err.Error())
 		} else {
 			respondError(w, http.StatusUnprocessableEntity, err.Error())
@@ -390,13 +411,14 @@ func handleGetBilling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Effort-based allotment per ticket drives the normal/override split: hours
-	// up to a ticket's effort size are "normal"; everything beyond is "override".
-	// Fall back to the default effort→days map if the config is unreadable.
-	effortToDays := ticket.DefaultEffortToDays
-	if cfg, cErr := ticket.ReadConfig(root); cErr == nil && cfg != nil && cfg.EffortToDays != nil {
+	// A wrap ticket's hours allotment drives the normal/override split: hours up
+	// to its estimate are "normal"; everything beyond is "override". Functional
+	// and unclassed tickets have no per-ticket allotment (all hours normal).
+	var effortToDays map[string]float64
+	if cfg, cErr := ticket.ReadConfig(root); cErr == nil && cfg != nil {
 		effortToDays = cfg.EffortToDays
 	}
+	estCtx := pm.NewEstimateContext(nil, 0, effortToDays)
 
 	type billingEntry struct {
 		TicketID      string  `json:"ticket_id"`
@@ -421,10 +443,7 @@ func handleGetBilling(w http.ResponseWriter, r *http.Request) {
 
 		// Allotment for this ticket (0 when unsized → all hours are normal, since
 		// there is no budget to exceed).
-		allot := 0.0
-		if tk.Effort != nil {
-			allot = pm.EffortHours(*tk.Effort, effortToDays)
-		}
+		allot, _ := pm.WrapAllotment(tk, estCtx)
 
 		// The split is cumulative over ALL of a ticket's entries in chronological
 		// order, computed *before* the date filter — so a filtered view can't reset
@@ -517,7 +536,34 @@ func handleGetTicket(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "Ticket not found: "+ticketID)
 		return
 	}
-	respondJSON(w, http.StatusOK, tk)
+	e := ticketEstimates(root)(ticketID)
+	respondJSON(w, http.StatusOK, struct {
+		*ticket.Ticket
+		EstimatedHours float64 `json:"estimated_hours"`
+		EstimateSource string  `json:"estimate_source"`
+	}{tk, e.hours, e.source})
+}
+
+type ticketEstimate struct {
+	hours  float64
+	source string
+}
+
+// ticketEstimates returns a lookup of each ticket's computed estimate
+// (pm.EstimatedHours) across the whole project. Unknown ids give a zero value.
+func ticketEstimates(root string) func(id string) ticketEstimate {
+	all, err := ticket.ReadAllTickets(root)
+	cfg, cErr := ticket.ReadConfig(root)
+	if err != nil || cErr != nil {
+		return func(string) ticketEstimate { return ticketEstimate{} }
+	}
+	ctx := pm.ProjectEstimateContext(root, all, cfg)
+	byID := make(map[string]ticketEstimate, len(all))
+	for _, t := range all {
+		h, src := pm.EstimatedHours(t, ctx)
+		byID[t.ID] = ticketEstimate{hours: math.Round(h*100) / 100, source: src}
+	}
+	return func(id string) ticketEstimate { return byID[id] }
 }
 
 // handleEditTicket handles PATCH /api/projects/{projectId}/tickets/{ticketId}
@@ -537,6 +583,10 @@ func handleEditTicket(w http.ResponseWriter, r *http.Request) {
 	author := strVal(req.Author)
 	tk, err := ticket.EditField(root, ticketID, req.Field, req.Value, author)
 	if err != nil {
+		if errors.Is(err, ticket.ErrEffortRetired) {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
@@ -566,6 +616,15 @@ func handlePromoteTicket(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
 				"detail":         err.Error(),
 				"needs_time_log": true,
+			})
+			return
+		}
+		var estErr *ticket.EstimateValidationError
+		if errors.As(err, &estErr) {
+			// Estimation rule failed at first promote (class / estimate_hours / cfp:).
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+				"detail":           err.Error(),
+				"estimate_invalid": true,
 			})
 			return
 		}
@@ -830,16 +889,14 @@ func handleAddTimeEntry(w http.ResponseWriter, r *http.Request) {
 	author := strVal(req.Author)
 	extendReason := ""
 
-	// Strict time enforcement: block a log that would push a sized ticket past
-	// its effort allotment unless the logger confirms authorization + a reason.
+	// Strict time enforcement: block a log that would push a wrap ticket past
+	// its hours allotment unless the logger confirms authorization + a reason.
+	// Functional and unclassed tickets are never gated (code is estimated per
+	// feature, not per ticket).
 	if cfg, err := ticket.ReadConfig(root); err == nil && cfg.StrictTimeEnforcement {
 		if tk, err := ticket.ReadTicket(root, ticketID); err == nil {
-			effort := ""
-			if tk.Effort != nil {
-				effort = *tk.Effort
-			}
-			allot := pm.EffortHours(effort, cfg.EffortToDays)
-			if allot > 0 { // unsized tickets have no allotment to enforce
+			allot, _ := pm.WrapAllotment(tk, pm.NewEstimateContext(nil, 0, cfg.EffortToDays))
+			if allot > 0 { // non-wrap or unestimated tickets have no allotment to enforce
 				var spent float64
 				for _, te := range tk.TimeEntries {
 					spent += te.Hours
