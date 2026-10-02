@@ -49,8 +49,6 @@
             <button class="btn-secondary" id="btn-sync" title="Pull & push changes">⇅ Sync</button>
             <button class="btn-secondary" id="btn-team" title="Manage team">👤 Team</button>
             <button class="btn-secondary" id="btn-run-snapshot">⟳ Snapshot</button>
-            <button class="btn-secondary" id="btn-check-schedule" title="Find tickets that over-allocate someone's daily capacity">✓ Check schedule</button>
-            <button class="btn-secondary" id="btn-balance" title="Auto-balance the project to fit everyone's real daily capacity">⚖ Balance</button>
             <button class="btn-secondary" id="btn-phase-rollup" title="Roll tickets up by phase — hours-weighted % complete, with CSV export">Σ Phases</button>
           </div>
         </header>
@@ -182,6 +180,20 @@
               <p style="font-size:12px;color:#999;margin:8px 0 0">
                 Work covers task / dev / design tickets; Admin / meeting covers meeting &amp; administration tickets.
                 The dashboard burns each pool down separately. Leave a field blank to clear that pool.
+              </p>
+            </div>
+          </fieldset>
+          <fieldset id="target-date-fieldset">
+            <legend>Target date <span id="target-date-project" style="font-weight:normal;color:#999"></span></legend>
+            <p id="target-date-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to set its target date.</p>
+            <div id="target-date-inputs" class="hidden">
+              <div style="display:flex;gap:8px;align-items:flex-end">
+                <label style="flex:1">Project target date <input type="date" id="target-date"></label>
+                <button type="button" class="btn-secondary" id="btn-clear-target-date">Clear</button>
+              </div>
+              <p style="font-size:12px;color:#999;margin:6px 0 0">
+                Optional. The PM dashboard's <strong>Load</strong> table compares each person's free-from date
+                against it and flags anyone <em>over by N days</em>. Saved to the project config and committed.
               </p>
             </div>
           </fieldset>
@@ -597,49 +609,43 @@
                 before baselining — not after.</p>
             </div>
 
-            <h3>Capacity &amp; the schedule check</h3>
+            <h3 id="help-capacity">Capacity and load</h3>
             <p>Each team member has a <strong>Daily hours</strong> value (default 8) editable in
-              <strong>👤 Team</strong>. This is the per-day capacity used by the
-              <strong>✓ Check schedule</strong> button in the project header. The check is a
-              one-shot analysis — it does not auto-reschedule.</p>
-            <p>For each non-terminal ticket with a planned start, due date, assignee, and an
-              estimate, the check takes its estimated hours (wrap <code>estimate_hours</code>, or the
-              Code share of its feature's CFP), divides those hours evenly across the business days from start to due, and sums the
-              daily load per assignee. Any day where assigned hours exceed that person's daily
-              capacity is reported with the contributing tickets — click any chip in the report to
-              jump to that ticket and push its dates out.</p>
-            <p>Tickets that are missing a date, assignee, or estimate are listed as <em>skipped</em>
-              at the bottom of the report so the check doesn't pretend to be exhaustive.</p>
-
-            <h3>Auto-balance — get a realistic baseline schedule</h3>
-            <p>The <strong>⚖ Balance</strong> button in the project header rewrites planned-start
-              and due dates on every open ticket so the schedule actually fits the team's daily
-              capacity. It's a math button, not magic — it answers <em>"how long would this take
-              if everyone worked one realistic day at a time?"</em></p>
+              <strong>👤 Team</strong>. That is their capacity: how many hours of this project's work
+              they get through per business day. <strong>Only people consume capacity</strong> &mdash;
+              agent-generated work is effectively instant; the human review / test / debug loop is the
+              constraint. Nothing here writes dates to tickets.</p>
+            <p><strong>The projected Gantt is capacity-aware.</strong> Before a baseline exists, the
+              PM Dashboard's Gantt projects the open tickets forward from today, hour by hour:</p>
             <ul>
-              <li><strong>Walks the predecessor graph.</strong> A ticket can't start until its
-                predecessors finish. If a cycle exists, Balance refuses and reports the offending
-                tickets.</li>
-              <li><strong>Within a "ready" batch</strong> (no unfinished predecessors), tickets are
-                ordered <em>priority desc → estimated hours desc → ID</em>. Critical-and-large gets
-                scheduled first.</li>
-              <li><strong>Equal-split capacity.</strong> A person with three ready tickets gets each
-                one a third of their daily hours. As tickets finish, freed capacity flows to the
-                remaining ready set.</li>
-              <li><strong>Skips closed/complete tickets</strong> — historical work isn't moved.
-                Tickets missing an estimate or assignee are also skipped and listed in the
-                report.</li>
-              <li><strong>Preview first.</strong> Click ⚖ Balance to see the proposed changes,
-                including the original vs proposed project end date. Click <em>Apply</em> to write
-                the new dates and commit them as a single
-                <code>balance project (N tickets rescheduled)</code> commit. If you hate it, one
-                <code>git revert</code> away.</li>
+              <li>Each person works their ready tickets <em>one at a time</em>, in order: priority
+                (critical &gt; high &gt; medium &gt; low), then dependency work order, then ID. Three
+                4-hour tickets for one person at 8 h/day take 1.5 days, not one day in parallel.</li>
+              <li>Several small tickets can share a day &mdash; there is no whole-day minimum, so a
+                chain of ten half-hour tickets finishes in about 5 hours.</li>
+              <li>Different people work in parallel. A predecessor owned by someone else is still
+                finish-to-start, and an explicit planned start date is a floor.</li>
+              <li><strong>Unassigned work</strong> goes to the project's only resource when there is
+                exactly one; otherwise it shows as its own <em>unassigned</em> lane at 8 h/day. A
+                project with no resources gets one lane per assignee. An assignee matches a resource
+                by email, git user, or name.</li>
+              <li>Unsized tickets (no estimate) get a 0.25 h placeholder so they still appear; the
+                Gantt header counts them. Done and backlog tickets aren't scheduled.</li>
             </ul>
-            <p><strong>Baseline interaction:</strong> if the project is baselined, Balance still
-              works — but every future snapshot will see massive slip relative to the original
-              baseline, because the new dates intentionally don't match it. That's accurate, not a
-              bug: Balance is showing you what the schedule <em>should have been</em>. Treat the
-              first run on a baselined project as a wake-up call rather than a daily tool.</p>
+            <p><strong>The Load table</strong> on the PM Dashboard answers <em>"is anyone
+              overcommitted?"</em> directly. One row per person (plus <em>unassigned</em> when
+              applicable): remaining estimated hours of tickets still in build (not yet dev_complete,
+              cancelled, or backlog), each at its estimate minus the hours already logged
+              (tickets with only an old effort size count as unestimated), their h/day, <em>days of work</em> (hours &divide; h/day), and the date
+              they're <em>free from</em> &mdash; when their last ticket finishes in the capacity-aware
+              schedule. Free-from can be later than days of work alone, because it also waits on
+              predecessors.</p>
+            <p><strong>Target date.</strong> Set an optional project target date under ⚙ Settings
+              &rarr; <em>Target date</em> (it's saved to <code>.tkt/config.json</code> and committed;
+              Clear removes it). With a target set, the Load table adds the working days left until
+              the target and flags each person who runs past it as <em>over by N days</em>, plus a
+              project-level line. Fix an overrun by moving work to someone with room, raising
+              daily hours, cutting scope, or moving the target.</p>
 
             <h3>Closing a project</h3>
             <p>When a project is finished — or paused indefinitely — open
@@ -974,17 +980,6 @@
       <div id="panel-content"></div>
     </div>
 
-    <!-- Balance preview modal -->
-    <div id="balance-modal-overlay" class="hidden">
-      <div id="balance-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:860px;max-height:85vh;overflow:auto;margin:4% auto">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <h3 style="margin:0">Auto-balance — preview</h3>
-          <button class="icon-btn" id="btn-close-balance">✕</button>
-        </div>
-        <div id="balance-content" style="font-size:13px"></div>
-      </div>
-    </div>
-
     <!-- Phase rollup modal -->
     <div id="phase-rollup-modal-overlay" class="hidden">
       <div id="phase-rollup-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:900px;max-height:85vh;overflow:auto;margin:4% auto">
@@ -999,17 +994,6 @@
       </div>
     </div>
 
-
-    <!-- Schedule conflict report modal -->
-    <div id="conflicts-modal-overlay" class="hidden">
-      <div id="conflicts-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:720px;max-height:80vh;overflow:auto;margin:5% auto">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <h3 style="margin:0">Schedule check</h3>
-          <button class="icon-btn" id="btn-close-conflicts">✕</button>
-        </div>
-        <div id="conflicts-content" style="font-size:13px"></div>
-      </div>
-    </div>
 
     <!-- Force-close ticket modal -->
     <div id="force-close-modal-overlay" class="hidden">
@@ -1222,7 +1206,7 @@
               <label>Email <input type="text" id="res-email" required placeholder="name@company.com"></label>
               <label>Git username <input type="text" id="res-git-user" placeholder="git-handle"></label>
               <label>Role <input type="text" id="res-role" placeholder="developer" value="developer"></label>
-              <label>Daily hours <input type="number" id="res-daily-hours" min="0.5" max="24" step="0.5" placeholder="8" title="Daily capacity used by Check schedule. Defaults to 8 if left blank."></label>
+              <label>Daily hours <input type="number" id="res-daily-hours" min="0.5" max="24" step="0.5" placeholder="8" title="Daily capacity used by the capacity-aware Gantt and the Load table. Defaults to 8 if left blank."></label>
             </div>
             <div class="form-actions">
               <button type="submit" class="btn-primary">Add member</button>

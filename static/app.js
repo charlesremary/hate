@@ -725,8 +725,7 @@ const DONE_STATUSES = new Set(['complete', 'closed']);
 function isDone(t) { return !!t && DONE_STATUSES.has(t.status); }
 
 // Returns { state: 'none'|'ready'|'blocked', blocking: N } for one ticket.
-// Orphaned predecessor refs (not in the set) are treated as satisfied, mirroring
-// the backend balance engine.
+// Orphaned predecessor refs (not in the set) are treated as satisfied.
 function predecessorState(t, byId) {
   const preds = t.predecessors || [];
   if (preds.length === 0) return { state: 'none', blocking: 0 };
@@ -1821,46 +1820,6 @@ document.getElementById('btn-run-snapshot').addEventListener('click', async () =
   finally { btn.disabled = false; btn.textContent = '⟳ Snapshot'; }
 });
 
-// ── Check schedule (capacity conflicts) ──────────────
-document.getElementById('btn-check-schedule').addEventListener('click', async () => {
-  if (!currentProject) return;
-  const btn = document.getElementById('btn-check-schedule');
-  btn.disabled = true; btn.textContent = '✓ Checking…';
-  try {
-    const report = await API.post(`/api/projects/${currentProject.id}/check-conflicts`);
-    showConflictsModal(report);
-  } catch (e) { showToast(e.message, 'error'); }
-  finally { btn.disabled = false; btn.textContent = '✓ Check schedule'; }
-});
-
-document.getElementById('btn-close-conflicts').addEventListener('click', () => {
-  document.getElementById('conflicts-modal-overlay').classList.add('hidden');
-});
-
-// ── Balance project ──────────────────────────────────
-let lastBalanceReport = null;
-
-document.getElementById('btn-balance').addEventListener('click', async () => {
-  if (!currentProject) return;
-  const btn = document.getElementById('btn-balance');
-  btn.disabled = true; btn.textContent = '⚖ Computing…';
-  try {
-    const report = await API.post(`/api/projects/${currentProject.id}/balance`, { apply: false, author: currentUser?.email || '' });
-    lastBalanceReport = report;
-    renderBalancePreview(report);
-    document.getElementById('balance-modal-overlay').classList.remove('hidden');
-  } catch (e) { showToast(e.message, 'error'); }
-  finally { btn.disabled = false; btn.textContent = '⚖ Balance'; }
-});
-
-document.getElementById('btn-close-balance').addEventListener('click', () => {
-  document.getElementById('balance-modal-overlay').classList.add('hidden');
-});
-document.getElementById('balance-modal-overlay').addEventListener('click', (e) => {
-  if (e.target === document.getElementById('balance-modal-overlay'))
-    document.getElementById('balance-modal-overlay').classList.add('hidden');
-});
-
 // ── Phase rollup ─────────────────────────────────────
 let lastPhaseRollup = null;
 
@@ -1957,210 +1916,6 @@ function downloadPhaseRollupCSV(report) {
   a.click();
   URL.revokeObjectURL(a.href);
   showToast('Phase rollup CSV downloaded');
-}
-
-function renderBalancePreview(report) {
-  const content = document.getElementById('balance-content');
-  if (report.cycle_detected) {
-    content.innerHTML = `<div style="background:#ffebee;border-left:4px solid #c62828;padding:10px 14px;border-radius:4px;color:#b71c1c">
-      <strong>⚠ Predecessor cycle detected.</strong> Cannot balance until you break the cycle.
-      Tickets involved: ${(report.cycle_ticket_ids || []).map(linkifyTicketRefs).join(', ')}
-    </div>`;
-    return;
-  }
-  if (!report.tickets_affected) {
-    content.innerHTML = `<div style="color:#666">Nothing to balance — no schedulable tickets found. Make sure tickets have an estimate and an assignee.</div>`;
-    return;
-  }
-  const oldEnd = report.original_end_date || '—';
-  const newEnd = report.proposed_end_date || '—';
-  const shiftDays = (() => {
-    if (!report.original_end_date || !report.proposed_end_date) return null;
-    const a = new Date(report.original_end_date), b = new Date(report.proposed_end_date);
-    return Math.round((b - a) / 86400000);
-  })();
-  const shiftBadge = shiftDays === null ? '' :
-    `<span style="color:${shiftDays > 0 ? '#c62828' : '#1b5e20'};font-weight:600">${shiftDays > 0 ? '+' : ''}${shiftDays} days</span>`;
-  const banner = `
-    <div style="background:#fff3e0;border-left:4px solid #e65100;padding:10px 14px;border-radius:4px;margin-bottom:12px">
-      <div><strong>Original project end:</strong> ${oldEnd}</div>
-      <div><strong>Proposed end at real capacity:</strong> ${newEnd} ${shiftBadge}</div>
-      <div style="font-size:12px;color:#666;margin-top:4px">
-        ${report.tickets_affected} ticket${report.tickets_affected === 1 ? '' : 's'} will have new planned-start / due dates.
-        Algorithm: ${report.algorithm}.
-      </div>
-    </div>`;
-
-  const rows = report.changes.map(c => {
-    const shift = c.old_due ? Math.round((new Date(c.new_due) - new Date(c.old_due)) / 86400000) : null;
-    const shiftCell = shift === null ? '<span style="color:#999">new</span>'
-      : `<span style="color:${shift > 0 ? '#c62828' : '#1b5e20'};font-weight:500">${shift > 0 ? '+' : ''}${shift}d</span>`;
-    return `<tr>
-      <td>${linkifyTicketRefs(c.ticket_id)}</td>
-      <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.title.replace(/"/g, '&quot;')}">${c.title}</td>
-      <td>${c.assignee.split('@')[0]}</td>
-      <td>${c.hours_needed}h</td>
-      <td>${c.old_start || '—'} → ${c.old_due || '—'}</td>
-      <td>${c.new_start} → ${c.new_due}</td>
-      <td>${shiftCell}</td>
-    </tr>`;
-  }).join('');
-
-  const table = `
-    <table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead>
-        <tr style="background:#fafafa;text-align:left">
-          <th style="padding:6px 8px;border-bottom:1px solid #ddd">ID</th>
-          <th style="padding:6px 8px;border-bottom:1px solid #ddd">Title</th>
-          <th style="padding:6px 8px;border-bottom:1px solid #ddd">Assignee</th>
-          <th style="padding:6px 8px;border-bottom:1px solid #ddd">Est. hours</th>
-          <th style="padding:6px 8px;border-bottom:1px solid #ddd">Current</th>
-          <th style="padding:6px 8px;border-bottom:1px solid #ddd">Proposed</th>
-          <th style="padding:6px 8px;border-bottom:1px solid #ddd">Shift</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-
-  const skipped = (report.skipped || []).length
-    ? `<details style="margin-top:12px"><summary style="cursor:pointer;color:#666;font-size:12px">${report.skipped.length} ticket${report.skipped.length === 1 ? '' : 's'} skipped</summary>
-        <ul style="list-style:none;padding:8px 12px 0;margin:0;font-size:12px;color:#666">
-          ${report.skipped.map(s => `<li>${linkifyTicketRefs(s.ticket_id)} — ${s.title} <span style="color:#999">(${s.reason})</span></li>`).join('')}
-        </ul></details>`
-    : '';
-
-  const actions = `
-    <div style="margin-top:16px;padding-top:12px;border-top:1px solid #eee;display:flex;gap:8px;align-items:center">
-      <button class="btn-primary" id="btn-apply-balance">Apply ${report.tickets_affected} change${report.tickets_affected === 1 ? '' : 's'}</button>
-      <button class="btn-secondary" id="btn-cancel-balance">Cancel</button>
-      <span style="margin-left:auto;color:#888;font-size:11px">
-        Heads-up: if this project has a baseline, the next snapshot will report all these as slip.
-      </span>
-    </div>`;
-
-  content.innerHTML = banner + table + skipped + actions;
-
-  document.getElementById('btn-apply-balance').addEventListener('click', applyBalance);
-  document.getElementById('btn-cancel-balance').addEventListener('click', () => {
-    document.getElementById('balance-modal-overlay').classList.add('hidden');
-  });
-}
-
-async function applyBalance() {
-  if (!lastBalanceReport) return;
-  const apply = document.getElementById('btn-apply-balance');
-  apply.disabled = true; apply.textContent = 'Applying…';
-  try {
-    await API.post(`/api/projects/${currentProject.id}/balance`, { apply: true, author: currentUser?.email || '' });
-    showToast(`Balanced ${lastBalanceReport.tickets_affected} tickets`);
-    document.getElementById('balance-modal-overlay').classList.add('hidden');
-    if (currentTab === 'tickets') loadTickets();
-  } catch (e) { showToast(e.message, 'error'); }
-  finally { apply.disabled = false; apply.textContent = 'Apply'; }
-}
-document.getElementById('conflicts-modal-overlay').addEventListener('click', (e) => {
-  if (e.target === document.getElementById('conflicts-modal-overlay'))
-    document.getElementById('conflicts-modal-overlay').classList.add('hidden');
-});
-
-// Cache of the most recent conflict report so the phase dropdown can swap
-// views without re-fetching.
-let lastConflictReport = null;
-
-function showConflictsModal(report) {
-  lastConflictReport = report;
-  renderConflictsModal('__all__');
-  document.getElementById('conflicts-modal-overlay').classList.remove('hidden');
-}
-
-// scope: '__all__' = top-level summary; otherwise a phase value (incl. '' for no-phase).
-function renderConflictsModal(scope) {
-  const report = lastConflictReport;
-  if (!report) return;
-  const content = document.getElementById('conflicts-content');
-
-  // Resolve the active view's data.
-  let view;
-  if (scope === '__all__') {
-    view = {
-      conflicts: report.conflicts || [],
-      warnings: report.warnings || [],
-      tickets_analyzed: report.tickets_analyzed,
-      label: 'All phases',
-    };
-  } else {
-    const ph = (report.phase_summaries || []).find(p => p.phase === scope);
-    view = ph
-      ? { conflicts: ph.conflicts || [], warnings: ph.warnings || [], tickets_analyzed: ph.tickets_analyzed, label: ph.label }
-      : { conflicts: [], warnings: [], tickets_analyzed: 0, label: scope };
-  }
-
-  // Phase dropdown — always present, even when only the "(no phase)" bucket exists.
-  const totalDaysOver = (report.conflicts || []).reduce((s, rc) => s + rc.days.length, 0);
-  const phaseOptions = [
-    `<option value="__all__" ${scope === '__all__' ? 'selected' : ''}>All phases (${totalDaysOver} day${totalDaysOver === 1 ? '' : 's'} over)</option>`,
-    ...(report.phase_summaries || []).map(p =>
-      `<option value="${(p.phase || '').replace(/"/g, '&quot;')}" ${scope === p.phase ? 'selected' : ''}>${p.label} (${p.days_over} day${p.days_over === 1 ? '' : 's'} over)</option>`
-    ),
-  ].join('');
-
-  const phaseRow = `
-    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
-      <label style="font-size:12px;color:#666">Phase</label>
-      <select id="conflict-phase-select" style="padding:4px 8px;font-size:13px">${phaseOptions}</select>
-    </div>`;
-
-  const summary = `<div style="color:#666;margin-bottom:12px;font-size:12px">
-    ${view.label} — analyzed ${view.tickets_analyzed} ticket${view.tickets_analyzed === 1 ? '' : 's'} across ${report.resources_checked} resource${report.resources_checked === 1 ? '' : 's'}.
-  </div>`;
-
-  let body = '';
-  if (view.conflicts.length === 0) {
-    body = `<div style="background:#e8f5e9;border-left:4px solid #43a047;padding:10px 14px;border-radius:4px;color:#1b5e20;font-weight:500">
-      ✓ No capacity conflicts in this view. Everyone's daily load fits within their availability.
-    </div>`;
-  } else {
-    body = view.conflicts.map(rc => `
-      <div style="margin-bottom:16px;border:1px solid #eee;border-radius:6px;overflow:hidden">
-        <div style="background:#fff3e0;padding:8px 12px;border-bottom:1px solid #ffe0b2">
-          <strong>${rc.name}</strong>
-          <span style="color:#666;font-size:12px">· ${rc.email} · ${rc.capacity_hours}h/day capacity</span>
-        </div>
-        <div style="padding:8px 12px">
-          ${rc.days.map(d => `
-            <div style="margin:6px 0;padding:6px 8px;background:#fafafa;border-radius:4px">
-              <div style="font-size:12px;color:#e65100;margin-bottom:4px">
-                <strong>${d.date}</strong> — ${d.assigned_hours.toFixed(1)}h assigned / ${d.capacity_hours}h capacity
-                <span style="color:#888"> (over by ${d.over_by_hours.toFixed(1)}h)</span>
-              </div>
-              <ul style="list-style:none;padding:0;margin:0">
-                ${d.tickets.map(t => `
-                  <li style="padding:2px 0;font-size:12px">
-                    ${linkifyTicketRefs(t.ticket_id)}
-                    <span style="color:#666">— ${t.title}</span>
-                    <span style="color:#888;font-size:11px"> · ${t.hours.toFixed(1)}h/day · ${t.start_date}→${t.due_date}</span>
-                  </li>
-                `).join('')}
-              </ul>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `).join('');
-  }
-  let warnings = '';
-  if (view.warnings && view.warnings.length) {
-    warnings = `<details style="margin-top:14px"><summary style="cursor:pointer;color:#666;font-size:12px">${view.warnings.length} ticket${view.warnings.length === 1 ? '' : 's'} skipped (no dates / no assignee / no estimate)</summary>
-      <ul style="list-style:none;padding:8px 12px 0;margin:0;font-size:12px;color:#666">
-        ${view.warnings.map(w => `<li>${linkifyTicketRefs(w.ticket_id)} — ${w.title} <span style="color:#999">(${w.reason})</span></li>`).join('')}
-      </ul></details>`;
-  }
-  content.innerHTML = phaseRow + summary + body + warnings;
-
-  // Re-attach the dropdown handler each render.
-  document.getElementById('conflict-phase-select').addEventListener('change', (e) => {
-    renderConflictsModal(e.target.value);
-  });
 }
 
 // ── Git identity ─────────────────────────────────────
@@ -2603,6 +2358,12 @@ function loadProjectInfoSection() {
   fields.classList.remove('hidden');
 }
 
+// The target date as loaded, so saving Settings only commits a real change.
+let loadedTargetDate = '';
+document.getElementById('btn-clear-target-date').addEventListener('click', () => {
+  document.getElementById('target-date').value = '';
+});
+
 // Per-project settings only edit when a project is active.
 async function loadProjectSettingsSections() {
   const mhInputs = document.getElementById('max-hours-inputs');
@@ -2611,10 +2372,16 @@ async function loadProjectSettingsSections() {
   const stInputs = document.getElementById('strict-time-inputs');
   const stEmpty = document.getElementById('strict-time-empty');
   const stProj = document.getElementById('strict-time-project');
+  const tdInputs = document.getElementById('target-date-inputs');
+  const tdEmpty = document.getElementById('target-date-empty');
+  const tdProj = document.getElementById('target-date-project');
   if (!currentProject) {
     mhInputs.classList.add('hidden');
     mhEmpty.classList.remove('hidden');
     mhProj.textContent = '';
+    tdInputs.classList.add('hidden');
+    tdEmpty.classList.remove('hidden');
+    tdProj.textContent = '';
     stInputs.classList.add('hidden');
     stEmpty.classList.remove('hidden');
     stProj.textContent = '';
@@ -2622,6 +2389,7 @@ async function loadProjectSettingsSections() {
   }
   mhProj.textContent = `— ${currentProject.name || currentProject.id}`;
   stProj.textContent = `— ${currentProject.name || currentProject.id}`;
+  tdProj.textContent = `— ${currentProject.name || currentProject.id}`;
   try {
     const hb = await API.get(`/api/projects/${currentProject.id}/hour-budget`);
     document.getElementById('work-hours').value = hb.work_hours ?? '';
@@ -2629,6 +2397,13 @@ async function loadProjectSettingsSections() {
     document.getElementById('qa-hours').value = hb.qa_hours ?? '';
     mhEmpty.classList.add('hidden');
     mhInputs.classList.remove('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
+  try {
+    const td = await API.get(`/api/projects/${currentProject.id}/target-date`);
+    loadedTargetDate = td.target_date || '';
+    document.getElementById('target-date').value = loadedTargetDate;
+    tdEmpty.classList.add('hidden');
+    tdInputs.classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
   try {
     const st = await API.get(`/api/projects/${currentProject.id}/strict-time`);
@@ -2682,6 +2457,14 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         qaHours = parsePool('qa-hours', 'QA hours');
       } catch (err) { showToast(err.message, 'error'); return; }
       await API.put(`/api/projects/${currentProject.id}/hour-budget`, { work_hours: workHours, admin_hours: adminHours, qa_hours: qaHours });
+    }
+    if (currentProject && !document.getElementById('target-date-inputs').classList.contains('hidden')) {
+      // Blank clears the target date; only PUT (and commit) when it changed.
+      const td = document.getElementById('target-date').value.trim();
+      if (td !== loadedTargetDate) {
+        const res = await API.put(`/api/projects/${currentProject.id}/target-date`, { target_date: td || null });
+        loadedTargetDate = res.target_date || '';
+      }
     }
     if (currentProject && !document.getElementById('strict-time-inputs').classList.contains('hidden')) {
       await API.put(`/api/projects/${currentProject.id}/strict-time`, {

@@ -13,8 +13,8 @@ import (
 )
 
 // One estimate function. Every place that needs "how many hours is this ticket
-// expected to take" (schedule, balance, conflicts, rollup, baseline, variance,
-// strict time) goes through EstimatedHours, so there is a single source:
+// expected to take" (schedule, load, rollup, baseline, variance, strict time)
+// goes through EstimatedHours, so there is a single source:
 //
 //	wrap ticket (config/nonfunc) -> estimate_hours                ("estimate")
 //	                                legacy effort x 8 (read-time) ("converted")
@@ -127,6 +127,26 @@ func ticketCFP(t *ticket.Ticket) int {
 	return n
 }
 
+// HoursPerDay is the default daily capacity and the legacy effort conversion
+// constant (retired t-shirt effort days x 8 = hours). Scheduling otherwise
+// converts estimated hours to days at the assignee's own daily hours.
+const HoursPerDay = 8.0
+
+// effortDaysFor returns the configured planned-days for a t-shirt size, falling
+// back to the project's effort_to_days map and then to defaults.
+func effortDaysFor(effort string, effortToDays map[string]float64) float64 {
+	if effort == "" {
+		return 0
+	}
+	if d, ok := effortToDays[effort]; ok {
+		return d
+	}
+	if d, ok := ticket.DefaultEffortToDays[effort]; ok {
+		return d
+	}
+	return 0
+}
+
 // legacyEffortHours converts a retired t-shirt effort to hours (days x 8).
 func legacyEffortHours(t *ticket.Ticket, effortToDays map[string]float64) float64 {
 	if t.Effort == nil {
@@ -189,13 +209,12 @@ func WrapAllotment(t *ticket.Ticket, ctx EstimateContext) (float64, bool) {
 }
 
 // DailyHoursFor returns the assignee's daily capacity (Resource.EffectiveDailyHours),
-// or the default 8 when the assignee is unset or not a known resource.
+// or the default 8 when the assignee is unset or not a known resource. The
+// assignee matches a resource by email, git user, or name.
 func DailyHoursFor(assignee *string, resources []ticket.Resource) float64 {
-	if assignee != nil && *assignee != "" {
-		for _, r := range resources {
-			if r.Email == *assignee {
-				return r.EffectiveDailyHours()
-			}
+	if assignee != nil {
+		if r, ok := findResource(*assignee, resources); ok {
+			return r.EffectiveDailyHours()
 		}
 	}
 	return ticket.DefaultDailyHours

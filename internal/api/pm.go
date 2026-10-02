@@ -55,8 +55,8 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Post("/report", generateReport)
 	r.Get("/slip", listSlipEvents)
 	r.Patch("/slip/{slipEventId}", resolveSlip)
-	r.Post("/check-conflicts", checkScheduleConflicts)
-	r.Post("/balance", balanceProject)
+	r.Get("/target-date", getTargetDate)
+	r.Put("/target-date", updateTargetDate)
 	r.Get("/phase-rollup", getPhaseRollup)
 	r.Get("/test-summary", getTestSummary)
 	r.Get("/cosmic", getCosmic)
@@ -102,12 +102,9 @@ func getPhaseRollup(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, report)
 }
 
-// balanceProject handles POST /api/projects/{projectId}/balance.
-// Body: {"apply": bool, "author": "email"}. When apply=false (default), runs
-// the algorithm and returns the proposed changes — nothing is written. When
-// apply=true, writes the new dates to each affected ticket and commits the
-// whole batch in one git commit.
-func balanceProject(w http.ResponseWriter, r *http.Request) {
+// getTargetDate handles GET /api/projects/{projectId}/target-date.
+// Returns {"target_date": "YYYY-MM-DD"|null}.
+func getTargetDate(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
 	if !ok {
@@ -118,88 +115,62 @@ func balanceProject(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if cfg.IsClosed() {
-		respondError(w, http.StatusLocked, "Project is closed — reopen it to balance.")
+	respondJSON(w, http.StatusOK, map[string]interface{}{"target_date": targetDateJSON(cfg.TargetDate)})
+}
+
+// updateTargetDate handles PUT /api/projects/{projectId}/target-date.
+// Body: {"target_date": "YYYY-MM-DD"|null}. null (or "") clears it; any other
+// value must be a valid date (400). Persists and commits the config when it
+// changes.
+func updateTargetDate(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
 		return
 	}
 	var req struct {
-		Apply  bool   `json:"apply"`
-		Author string `json:"author"`
+		TargetDate *string `json:"target_date"`
 	}
-	// Body is optional — a bare POST runs in preview mode.
-	if r.ContentLength > 0 {
-		_ = decodeJSON(w, r, &req)
-	}
-	tickets, err := ticket.ReadAllTickets(root)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+	if !decodeJSON(w, r, &req) {
 		return
 	}
-	// Project start: earliest existing planned_start across non-terminal
-	// tickets, or today if none.
-	var earliest time.Time
-	for _, t := range tickets {
-		if t.Status == "closed" || t.Status == "complete" {
-			continue
+	target := ""
+	if req.TargetDate != nil {
+		target = strings.TrimSpace(*req.TargetDate)
+	}
+	if target != "" {
+		if _, err := time.Parse("2006-01-02", target); err != nil {
+			respondError(w, http.StatusBadRequest, "target_date must be a date (YYYY-MM-DD) or null to clear")
+			return
 		}
-		if t.PlannedStartDate == nil || *t.PlannedStartDate == "" {
-			continue
-		}
-		d, err := time.Parse("2006-01-02", *t.PlannedStartDate)
-		if err == nil && (earliest.IsZero() || d.Before(earliest)) {
-			earliest = d
-		}
-	}
-	if earliest.IsZero() {
-		earliest = time.Now().UTC()
-	}
-	report := pm.BalanceProject(tickets, cfg.Resources, pm.ProjectEstimateContext(root, tickets, cfg), earliest)
-
-	if !req.Apply {
-		respondJSON(w, http.StatusOK, report)
-		return
-	}
-	if report.CycleDetected {
-		respondError(w, http.StatusUnprocessableEntity,
-			"Cannot apply: predecessor cycle detected. Resolve the cycle and re-run.")
-		return
-	}
-	paths, err := pm.ApplyBalance(root, report, req.Author)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	ticket.EnsureProjectIdentity(root, cfg)
-	files := append(paths, ticket.IndexPath(root))
-	ticket.GitCommit(root, files, fmt.Sprintf("balance project (%d tickets rescheduled)", report.TicketsAffected))
-	respondJSON(w, http.StatusOK, report)
-}
-
-// checkScheduleConflicts handles POST /api/projects/{projectId}/check-conflicts.
-// Reads the current ticket list + resources from disk and runs the capacity
-// check. Does not persist anything — pure analysis.
-func checkScheduleConflicts(w http.ResponseWriter, r *http.Request) {
-	projectID := chi.URLParam(r, "projectId")
-	root, ok := getProjectRoot(w, projectID)
-	if !ok {
-		return
 	}
 	cfg, err := ticket.ReadConfig(root)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	tickets, err := ticket.ReadAllTickets(root)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
+	if cfg.TargetDate != target {
+		cfg.TargetDate = target
+		if err := ticket.WriteConfig(root, cfg); err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		ticket.EnsureProjectIdentity(root, cfg)
+		msg := "target date " + target
+		if target == "" {
+			msg = "clear target date"
+		}
+		ticket.GitCommit(root, []string{ticket.ConfigPath(root)}, msg)
 	}
-	report := pm.CheckScheduleConflicts(tickets, cfg.Resources, pm.ProjectEstimateContext(root, tickets, cfg), time.Time{})
-	respondJSON(w, http.StatusOK, report)
+	respondJSON(w, http.StatusOK, map[string]interface{}{"target_date": targetDateJSON(cfg.TargetDate)})
+}
+
+// targetDateJSON maps an unset target date to JSON null.
+func targetDateJSON(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // ---------------------------------------------------------------------------
@@ -312,11 +283,13 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		projectName := projectID
 		var resources []ticket.Resource
 		var workHours, adminHours, qaHours *float64
+		targetDate := ""
 		if err == nil {
 			if cfg.ProjectName != "" {
 				projectName = cfg.ProjectName
 			}
 			resources = cfg.Resources
+			targetDate = cfg.TargetDate
 			workHours = cfg.EffectiveWorkHours()
 			adminHours = cfg.AdminHours
 			qaHours = cfg.QAHours
@@ -331,6 +304,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		reportsHTML := pm.RenderProjectedGanttHTML(projectID, projectName, tickets, resources, estCtx, start, exportURL) +
 			pm.RenderExecPlanHTML(tickets, resources, estCtx) +
+			pm.RenderLoadHTML(pm.ComputeLoad(tickets, resources, estCtx, time.Now(), targetDate)) +
 			pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, workHours, adminHours, qaHours)) +
 			pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(tickets, estCtx)) +
 			pm.RenderBlockedHTML(pm.ComputeBlocked(tickets)) +
@@ -362,9 +336,11 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	var resources []ticket.Resource
 	var workHours, adminHours, qaHours *float64
+	targetDate := ""
 	cfg, cfgErr := ticket.ReadConfig(root)
 	if cfgErr == nil {
 		resources = cfg.Resources
+		targetDate = cfg.TargetDate
 		workHours = cfg.EffectiveWorkHours()
 		adminHours = cfg.AdminHours
 		qaHours = cfg.QAHours
@@ -373,6 +349,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	estCtx := pm.ProjectEstimateContext(root, costTickets, cfg)
 	reportsHTML := pm.RenderExecPlanHTML(costTickets, resources, estCtx) +
+		pm.RenderLoadHTML(pm.ComputeLoad(costTickets, resources, estCtx, time.Now(), targetDate)) +
 		pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, workHours, adminHours, qaHours)) +
 		pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(costTickets, estCtx)) +
 		pm.RenderBlockedHTML(pm.ComputeBlocked(costTickets)) +

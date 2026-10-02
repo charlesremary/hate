@@ -441,8 +441,8 @@ PROJ-100  "Semantic search over docs"   tags: cfp:18   (E/X/R/W breakdown in the
 ### How each ticket gets its hours
 
 One function supplies "how many hours is this ticket expected to take" to the
-schedule, the phase rollup, the balancer, conflicts, the baseline, and the Hours
-Budget checks:
+capacity-aware schedule, the Load table, the phase rollup, the baseline, and the
+Hours Budget checks:
 
 | Ticket | Estimated hours |
 |---|---|
@@ -460,7 +460,23 @@ than 3 features, HATE uses a default of **0.25 h/CFP** (the pooled NEI + Tactic
 median as of 2026-10-02).
 
 Schedules convert hours to days with the assignee's `daily_hours_available` (8
-if the assignee is unknown).
+if the assignee is unknown; an assignee matches a resource by email, git user, or
+name).
+
+**Capacity and load.** The projected Gantt (before a baseline) is
+capacity-aware and hour-granular: each person works their ready open tickets one
+at a time — priority, then dependency work order, then ID — at their daily
+hours, so small tickets share a day and nothing rounds up to a whole day.
+Predecessors are finish-to-start across people; a `planned_start_date` is a
+floor. Only people consume capacity. Unassigned work goes to the project's only
+resource when there is exactly one, otherwise to an `unassigned` lane at 8 h/day
+(a project with no resources gets one lane per assignee). Unsized tickets get a
+0.25 h placeholder and are counted. The PM dashboard's **Load** table shows, per
+person, remaining estimated hours (tickets not yet dev_complete, at estimate minus
+hours logged; old effort sizes count as unestimated), h/day, days of work, and the
+free-from date from that schedule; with a project **target date** set it adds the
+working days to the target and flags anyone "over by N days". Nothing writes
+ticket dates.
 
 **Strict time enforcement** applies to wrap tickets only: a time log that would
 take a wrap ticket past its estimate is blocked. Code tickets are estimated at the
@@ -659,15 +675,14 @@ Conventions:
 
 | Method & path | What it does | Body |
 |---|---|---|
-| `GET /{projectId}/dashboard` | **HTML** PM dashboard (hours budget vs cap, estimate variance, project cost, status/slip). | — |
-| `GET /{projectId}/gantt.drawio` | Download the Gantt as an editable draw.io file. Uses the baseline if there is one, otherwise the projected schedule from `?start=YYYY-MM-DD` (default today). | `?start=` optional |
+| `GET /{projectId}/dashboard` | **HTML** PM dashboard (Load table, hours budget vs cap, estimate variance, project cost, status/slip; the capacity-aware projected Gantt before a baseline). | — |
+| `GET /{projectId}/gantt.drawio` | Download the Gantt as an editable draw.io file. Uses the baseline if there is one, otherwise the capacity-aware projected schedule from `?start=YYYY-MM-DD` (default today). | `?start=` optional |
 | `GET /{projectId}/snapshot` · `POST …/snapshot` | Read latest / create a new slip snapshot. | — |
 | `POST /{projectId}/baseline` | Create the immutable schedule baseline from a template. | `{project_name, template_id, start_date, owner_assignments, duration_adjustments, created_by?}` |
 | `POST /{projectId}/baseline-now` | Baseline directly from current tickets (no template). | — |
 | `GET /{projectId}/slip` | List slip events. | — |
 | `PATCH /{projectId}/slip/{slipEventId}` | Resolve a slip event with a reason. | `{reason_category, reason_narrative, acknowledged_by?}` |
-| `POST /{projectId}/check-conflicts` | Capacity/over-allocation analysis (read-only). | — |
-| `POST /{projectId}/balance` | Propose (or apply) a rebalanced schedule. | `{apply?, author?}` |
+| `GET /{projectId}/target-date` · `PUT …/target-date` | Read / set the optional project target date the Load table compares against. PUT validates the date (400), saves `target_date` to `.tkt/config.json` and commits it; `null` clears it. | PUT: `{"target_date": "2026-10-30"}` or `{"target_date": null}` |
 | `GET /{projectId}/phase-rollup` | % complete per phase, weighted by estimated hours. | — |
 | `GET /{projectId}/test-summary` | Per-ticket test-case tallies (pass / fail / untested) plus the cases, for the Test cases tab. | — |
 | `POST /{projectId}/report` | **Not implemented** (returns 501). | — |

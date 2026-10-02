@@ -175,61 +175,42 @@ All mutations go through `internal/ticket` and are recorded in the ticket's
 Every write runs `ValidateTicket` before hitting disk, and `index.json` is
 regenerated from the ticket files so listings stay in sync.
 
-## Resource balancing (work in progress)
+## Capacity and load
 
-> ⚠️ **Work in progress.** Resource balancing is an early, evolving feature. It may
-> be incomplete, change without notice, and **may not behave as intended** in all
-> cases. Always review a proposed schedule before applying it, and treat the
-> generated dates as a suggestion rather than a guarantee. The algorithm itself is
-> read-only; nothing is written until you explicitly apply the report.
+Nothing writes ticket dates automatically. Capacity is answered by two read-only
+views (`internal/pm/projschedule.go`, `internal/pm/load.go`), recomputed on
+every dashboard view:
 
-Balancing tries to produce a feasible schedule across the team by simulating
-workdays forward (`internal/pm/balance.go`), exposed at
-`POST /api/projects/{projectId}/balance`.
+- **Capacity-aware projected Gantt.** Before a baseline, the PM dashboard's Gantt
+  (and `GET /api/projects/{projectId}/gantt.drawio`) projects the open tickets
+  forward from today in hours. Each person is a lane that works their ready
+  tickets one at a time — priority (critical > high > medium > low), then
+  dependency work order, then ID — burning their `daily_hours_available`
+  (default 8). Several small tickets can share a day; there is no whole-day
+  minimum. Lanes run in parallel; predecessors are finish-to-start across lanes,
+  and an explicit `planned_start_date` is a floor. Business days only.
+- **Only people consume capacity.** Unassigned work defaults to the project's
+  single resource when there is exactly one; otherwise it gets its own
+  `unassigned` lane at 8 h/day. A project with no resources gets one lane per
+  assignee. Assignees match resources by email, git user, or name.
+- **Unsized tickets** (no estimate) get a 0.25 h placeholder so they still show,
+  and are counted in the Gantt header. Done, cancelled, and backlog tickets are
+  not scheduled; feature parents consume no capacity and finish with their
+  children.
+- **Load table** (PM dashboard, both pre- and post-baseline): per lane, remaining
+  estimated hours, h/day, days of work (hours ÷ h/day), and the free-from date
+  (the lane's last scheduled end). Remaining = tickets still in build (not yet
+  dev_complete; QA time burns the separate QA pool), each at its estimate minus
+  hours already logged. Tickets with only an old effort size count as
+  unestimated (days × 8 is far above real hours).
+- **Target date.** An optional project `target_date` (`.tkt/config.json`, set in
+  Settings or via `PUT /api/projects/{projectId}/target-date`, committed to git)
+  adds working days to the target and an "over by N days" flag per person, plus a
+  project-level line.
 
-**How it currently works:**
-
-- Tickets that are **terminal** (`complete`, `closed`) are never rescheduled. Their
-  existing `due_date` (or `closed_at`) is used only so downstream work doesn't start
-  before them.
-- A schedulable ticket must have **both an assignee and an estimate**. Anything
-  missing either is **skipped** with a reason ("no estimate") and left untouched.
-- The estimate is in hours: `estimate_hours` for wrap tickets, and the parent
-  feature's CFP × the reference median h/CFP, split across its functional
-  children, for code tickets. Old tickets with only a legacy effort size fall back
-  to `effort_to_days` × 8. See the [agent guide](docs/ticketing-and-cfp-guide.md#11-estimating).
-  These hours burn down against the assignee's daily capacity (below).
-- Predecessor links are checked for **cycles** (Kahn topological sort); if a cycle
-  is found, balancing aborts and reports the involved ticket IDs instead of
-  scheduling.
-- The simulator steps day-by-day over **weekdays only** (weekends are skipped). On
-  each day, every ticket whose predecessors are satisfied is "ready"; a person's
-  ready tickets **equally split that person's daily capacity**
-  (`daily_hours_available`, default 8). Within a person's queue, work is ordered by
-  **priority, then larger estimate, then ticket ID**.
-- A ticket's `planned_start_date` is stamped the first day work touches it, and its
-  `due_date` the day its hours hit zero. The run is capped at ~5 years of weekdays
-  as a runaway guard.
-
-**Output and applying:**
-
-- `BalanceProject` returns a **read-only report** of proposed `start`/`due` changes
-  (sorted by largest forward shift), plus skipped tickets, original vs. proposed end
-  date, and any detected cycle. Nothing is written.
-- `ApplyBalance` (only when the caller opts in) writes the new dates back into each
-  ticket file, records a `balanced` activity entry, and returns the touched paths so
-  the API can stage them in a single Git commit.
-
-**Known limitations / caveats (why it's WIP):**
-
-- Equal-split capacity is a simplification — it doesn't model partial-day focus,
-  context switching, or single-task-at-a-time working.
-- Tickets with no assignee or no estimate drop out of the schedule (they appear
-  under "skipped", not in the plan).
-- Capacity assumes a flat daily figure; holidays, PTO, and per-day variation aren't
-  modeled.
-- Orphaned predecessor references (pointing outside the schedulable set and not
-  terminal) are treated as already satisfied.
+Known simplifications: a flat daily capacity (no holidays, PTO, or per-day
+variation), remaining = estimate − logged (a ticket past its estimate but still
+open counts as unestimated), and a greedy one-ticket-at-a-time order rather than an optimiser.
 
 ## Estimating
 

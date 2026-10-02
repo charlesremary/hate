@@ -18,7 +18,8 @@ type Resource struct {
 	Email   string `json:"email"`
 	GitUser string `json:"git_user"`
 	Role    string `json:"role"`
-	// DailyHoursAvailable is the per-day capacity used by Check Schedule.
+	// DailyHoursAvailable is the per-day capacity used by the capacity-aware
+	// schedule and the Load table.
 	// nil → assume DefaultDailyHours (8) so existing resources keep working
 	// without migration.
 	DailyHoursAvailable *float64 `json:"daily_hours_available,omitempty"`
@@ -143,6 +144,10 @@ type ProjectConfig struct {
 	// EnforceQA, when true, blocks promoting a dev_task from dev_complete to
 	// qa_testing until it has at least one filled test case (step + expected).
 	EnforceQA bool `json:"enforce_qa,omitempty"`
+	// TargetDate is the optional project target date (YYYY-MM-DD) the PM
+	// dashboard's Load table compares each person's free-from date against.
+	// Empty = no target.
+	TargetDate string `json:"target_date,omitempty"`
 	// Project Overview tab content — hand-maintained reference material.
 	Contacts     []Contact     `json:"contacts,omitempty"`
 	Links        []Link        `json:"links,omitempty"`
