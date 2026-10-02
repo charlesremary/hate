@@ -169,8 +169,19 @@ are estimated at the feature level, so a per-ticket allotment is noise.
 Replace the manual initial-estimate block (one h/CFP + one wrap%) with:
 
   Inputs
-    - reference project(s): which delivered projects to sample from
-      (same domain only; no pooling IVR with audit tools)
+    - reference set, built from any combination of three options:
+        [ ] specific past projects (same domain; the normal case)
+        [ ] all past projects ("unknown domain" mode: a deliberately
+            wide starting range for a project unlike anything before;
+            the screen labels it as such)
+        [ ] this project's own completed features
+      Pooling across domains is only allowed through the explicit "all
+      past projects" option, never as a silent default.
+    - blending rule: once this project has at least N finished features
+      (default 5), its own features dominate the draw and borrowed ones
+      fade out (for example, the share of draws from own features =
+      own_N / (own_N + 5), capped at 100% once own_N >= 15). The panel
+      shows the current mix ("70% own features, 30% borrowed").
     - minimum feature size to include as a sample (default 3 CFP),
       so tiny features with extreme rates don't dominate
     - optional: CFP counting uncertainty (+/- %), from Phase 0.2
@@ -199,7 +210,38 @@ Persist the inputs per project in .tkt/config.json, replacing
 estimate_h_per_cfp / estimate_wrap_pct.
 
 
-### Phase 3b: GUI changes
+### Phase 3b: calibration slice (new kinds of project)
+
+For a project unlike anything delivered before, there is no comparable
+reference project. The workflow:
+
+  1. Claude counts CFP for the whole spec (consistent size).
+  2. Estimate with "all past projects" as the reference. This is the
+     wide starting range. Pooled NEI + Tactic as of 2026-10-02
+     (32 features, 3+ CFP):
+       P10 0.07 / P25 0.11 / P50 0.25 / P75 0.29 / P90 0.33 /
+       max 0.97 h/CFP
+  3. Wrap: no transferable defaults (wrap is platform-specific).
+     Estimate by judgment with the hours picker, and add explicit
+     DISCOVERY wrap tickets for the unknown platform (dev environment,
+     how it deploys, first console setup).
+  4. Pick 3-5 representative features, including some wrap on the new
+     platform, and build them first. Tag their parents
+     `calibration-slice`.
+  5. As slice features finish, turn on "this project's own features".
+     The blending rule shifts the estimate onto the project's own rates.
+  6. Re-estimate the rest after the slice. Because CFP is a consistent
+     size, rates measured on the slice apply to remaining features of
+     different sizes.
+
+Bidding guidance (goes in the agent guide and Help, not in code):
+  - Preferred: two-part bid. Fixed scope for discovery plus the slice,
+    then a firm number for the rest from the project's own rates.
+  - If it must be one number: bid at P90-P95 of the wide range, not P85.
+  - The max-hours cap stays manual; revisit it after the slice.
+
+
+### Phase 3c: GUI changes
 
 New Ticket form
   - Remove the Effort dropdown.
@@ -231,6 +273,11 @@ COSMIC tab
   - Per-feature table stays; Wrap% column becomes info-only or goes.
   - Manual initial-estimate box replaced by the Monte Carlo panel
     (inputs + P50/P85/P95 table + N + actual so far). Display only.
+  - Reference picker with the three options from Phase 3 (specific
+    projects / all past projects / this project's features) and the
+    own-vs-borrowed mix shown under the result.
+  - Features in the calibration slice (Phase 3b) are marked in the
+    per-feature table, with a "slice complete: N of M" line.
 
 PM dashboard
   - Hours Budget: unchanged (cap stays manual).
@@ -294,8 +341,12 @@ Q5  Platform wrap uncertainty. v1 treats wrap estimates as fixed. Later,
     once estimate_hours has history, sample "actual / estimate" ratios
     from past wrap tickets to get a range there too. OK to defer?
 
-Q6  Reference set. Pick reference projects by hand each time (lean), or
-    add a project "domain" field so it can default?
+Q6  Reference set. Partly decided: the picker offers specific projects,
+    all past projects, and this project's own features, with a blending
+    rule (Phase 3). Still open: add a project "domain" field so the
+    specific-projects choice can default, or keep picking by hand
+    (lean)? Also confirm the blending numbers (N=5, full own-weight at
+    15).
 
 Q7  Pre-ticket estimates. This plan assumes Claude builds the ticket
     stack from the spec (parents with cfp, wrap children with hours)
