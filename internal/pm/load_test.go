@@ -56,7 +56,7 @@ func TestComputeLoad(t *testing.T) {
 		}
 	}
 	// HATE-1rne tc4: with no target the target columns are absent.
-	if contains(html, "Working days to target") || contains(html, "over by") {
+	if contains(html, "Working days to requested end") || contains(html, "over by") {
 		t.Error("target columns shown without a target date")
 	}
 }
@@ -74,7 +74,7 @@ func TestComputeLoadTarget(t *testing.T) {
 		t.Errorf("over by a=%d b=%d project=%d, want 2/0/2", rep.Rows[0].OverBy, rep.Rows[1].OverBy, rep.OverBy)
 	}
 	html := RenderLoadHTML(rep)
-	for _, w := range []string{"Working days to target", `class="load-over"`, "over by 2 days", "on time", "Target:</strong> Fri Jul 24, 2026"} {
+	for _, w := range []string{"Working days to requested end", `class="load-over"`, "over by 2 days", "on time", "Requested end:</strong> Fri Jul 24, 2026"} {
 		if !contains(html, w) {
 			t.Errorf("load HTML missing %q", w)
 		}

@@ -937,7 +937,9 @@ const dashboardJS = `
 // ---------------------------------------------------------------------------
 
 // GenerateDashboard returns a complete self-contained HTML string for the PM dashboard.
-func GenerateDashboard(snapshot *Snapshot, costHTML string) string {
+// topHTML (the Schedule vs request card) sits right under the header, above
+// the tabs; costHTML holds the report sections.
+func GenerateDashboard(snapshot *Snapshot, topHTML, costHTML string) string {
 	health := snapshot.ComputedHealth
 	hcolor := healthColors[health]
 	hlabel := healthLabels[health]
@@ -971,6 +973,7 @@ func GenerateDashboard(snapshot *Snapshot, costHTML string) string {
     Health: <strong style="color:%s">%s</strong>
   </div>
 </div>
+%s
 
 <div class="tabs">
   <div class="tab active" data-tab="status" onclick="showTab('status')">Project Status</div>
@@ -1040,6 +1043,7 @@ var PROJECT_ID = '%s';
 		projID, dashboardCSS,
 		projID, projName,
 		snapDate, hcolor, hlabel,
+		topHTML,
 		statusHTML,
 		ganttHTML,
 		depHTML,

@@ -203,10 +203,24 @@ every dashboard view:
   dev_complete; QA time burns the separate QA pool), each at its estimate minus
   hours already logged. Tickets with only an old effort size count as
   unestimated (days × 8 is far above real hours).
-- **Target date.** An optional project `target_date` (`.tkt/config.json`, set in
-  Settings or via `PUT /api/projects/{projectId}/target-date`, committed to git)
-  adds working days to the target and an "over by N days" flag per person, plus a
-  project-level line.
+- **Requested dates.** Optional `requested_start` / `requested_end`
+  (`.tkt/config.json`, set in Settings or via
+  `PUT /api/projects/{projectId}/requested-dates`, committed to git). The Load
+  table adds working days to the requested end and an "over by N days" flag per
+  person, plus a project-level line. The old `target_date` (v1.0.6) is still read
+  as the requested end; the `/target-date` routes remain as aliases for it.
+- **Schedule vs request** card (top of the PM dashboard, with a requested end
+  set): actual start (first move to in_progress or first logged time), projected
+  finish likely (the capacity schedule from the later of today and the requested
+  start) and P85 (the same schedule with code tickets at the reference rate ×
+  Monte Carlo code P85 / P50), variances in business days (plus = late), needs vs
+  has (remaining hours ÷ working days left vs the team's total daily hours, and
+  the hours to cut or spare), and a status: ON TRACK (P85 on time), AT RISK
+  (likely on time, P85 late), LATE (likely late). Also `GET …/forecast` (JSON).
+- **Forecast history.** At most one entry per day, recorded when the forecast
+  changes, in `.tkt/pm/forecast_history.json` (committed), drawn as a small trend
+  of the likely and P85 finish against the requested end once there are 2+
+  entries.
 
 Known simplifications: a flat daily capacity (no holidays, PTO, or per-day
 variation), remaining = estimate − logged (a ticket past its estimate but still

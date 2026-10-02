@@ -65,12 +65,14 @@ func GitCommit(repoRoot string, files []string, message string) (bool, string) {
 		return false, string(out)
 	}
 
-	cmd = exec.Command("git", "commit", "-m", message)
+	// Commit only these paths, so anything else already staged in the repo
+	// isn't swept into this commit.
+	cmd = exec.Command("git", append([]string{"commit", "-m", message, "--"}, files...)...)
 	cmd.Dir = repoRoot
 	out, err := cmd.CombinedOutput()
 	outStr := strings.TrimSpace(string(out))
 	if err != nil {
-		if strings.Contains(outStr, "nothing to commit") {
+		if strings.Contains(outStr, "nothing to commit") || strings.Contains(outStr, "no changes added to commit") {
 			return true, "nothing to commit"
 		}
 		return false, outStr

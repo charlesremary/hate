@@ -183,17 +183,20 @@
               </p>
             </div>
           </fieldset>
-          <fieldset id="target-date-fieldset">
-            <legend>Target date <span id="target-date-project" style="font-weight:normal;color:#999"></span></legend>
-            <p id="target-date-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to set its target date.</p>
-            <div id="target-date-inputs" class="hidden">
+          <fieldset id="requested-dates-fieldset">
+            <legend>Requested dates <span id="requested-dates-project" style="font-weight:normal;color:#999"></span></legend>
+            <p id="requested-dates-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to set its requested dates.</p>
+            <div id="requested-dates-inputs" class="hidden">
               <div style="display:flex;gap:8px;align-items:flex-end">
-                <label style="flex:1">Project target date <input type="date" id="target-date"></label>
-                <button type="button" class="btn-secondary" id="btn-clear-target-date">Clear</button>
+                <label style="flex:1">Requested start <input type="date" id="requested-start"></label>
+                <button type="button" class="btn-secondary" id="btn-clear-requested-start">Clear</button>
+                <label style="flex:1">Requested end <input type="date" id="requested-end"></label>
+                <button type="button" class="btn-secondary" id="btn-clear-requested-end">Clear</button>
               </div>
               <p style="font-size:12px;color:#999;margin:6px 0 0">
-                Optional. The PM dashboard's <strong>Load</strong> table compares each person's free-from date
-                against it and flags anyone <em>over by N days</em>. Saved to the project config and committed.
+                Optional: the dates the client asked for. The PM dashboard's <strong>Schedule vs request</strong>
+                card compares the projected finish against the requested end, and the <strong>Load</strong> table
+                flags anyone <em>over by N days</em>. Saved to the project config and committed.
               </p>
             </div>
           </fieldset>
@@ -640,12 +643,50 @@
               they're <em>free from</em> &mdash; when their last ticket finishes in the capacity-aware
               schedule. Free-from can be later than days of work alone, because it also waits on
               predecessors.</p>
-            <p><strong>Target date.</strong> Set an optional project target date under ⚙ Settings
-              &rarr; <em>Target date</em> (it's saved to <code>.tkt/config.json</code> and committed;
-              Clear removes it). With a target set, the Load table adds the working days left until
-              the target and flags each person who runs past it as <em>over by N days</em>, plus a
-              project-level line. Fix an overrun by moving work to someone with room, raising
-              daily hours, cutting scope, or moving the target.</p>
+            <p><strong>Requested end.</strong> The Load table compares each person against the
+              project's requested end (⚙ Settings &rarr; <em>Requested dates</em>): it adds the working
+              days left until then and flags each person who runs past it as <em>over by N days</em>,
+              plus a project-level line. Fix an overrun by moving work to someone with room, raising
+              daily hours, cutting scope, or agreeing a new date.</p>
+
+            <h3>Schedule vs request</h3>
+            <p>A client asks for a project by a date; you scope the tickets and need to know &mdash;
+              before day 1 and every day after &mdash; whether it fits, and by how much. Set the
+              <strong>Requested start</strong> and <strong>Requested end</strong> under ⚙ Settings
+              &rarr; <em>Requested dates</em> (both optional; saved to <code>.tkt/config.json</code> and
+              committed; Clear removes one). With a requested end set, the <strong>Schedule vs
+              request</strong> card sits at the top of the PM Dashboard (both before and after a
+              baseline); without one it's a one-line hint pointing at Settings.</p>
+            <ul>
+              <li><strong>Actual start</strong> &mdash; the earliest of any ticket's first move to
+                <em>in progress</em> or first logged time, with its variance against the requested
+                start. Blank until work starts.</li>
+              <li><strong>Projected finish (likely)</strong> &mdash; the capacity-aware schedule (see
+                <em>How the schedule is calculated</em>) run from the later of today and the requested
+                start.</li>
+              <li><strong>Projected finish (P85)</strong> &mdash; the same schedule with code (CFP-sized)
+                tickets at the Monte Carlo P85 rate: the reference rate &times; code P85 &divide; code
+                P50 from the COSMIC tab. With no Monte Carlo result it equals the likely finish.</li>
+              <li><strong>Variance</strong> in business days against the requested dates: plus means
+                late, minus means early.</li>
+              <li><strong>Needs vs has</strong> &mdash; remaining estimated hours &divide; working days
+                left to the requested end (h/day needed) against the team's total daily hours (people
+                with open work), and the hours to cut (or add capacity for) to fit &mdash; or the hours
+                spare. This is a whole-team sum: predecessors and uneven loads can still make the
+                schedule late when the hours fit.</li>
+              <li><strong>Status</strong> &mdash; <span style="color:#166534;font-weight:600">ON TRACK</span>
+                when the P85 finish is on or before the requested end;
+                <span style="color:#92400e;font-weight:600">AT RISK</span> when the likely finish is on
+                time but P85 is late; <span style="color:#b91c1c;font-weight:600">LATE</span> when the
+                likely finish is after the requested end.</li>
+            </ul>
+            <p><strong>Finish-date trend.</strong> Each time the dashboard computes a forecast that
+              differs from the last one, it's saved to <code>.tkt/pm/forecast_history.json</code> and
+              committed &mdash; at most one entry per day (a later change the same day replaces that
+              day's entry). Once there are two entries the card shows a small chart: the likely and P85
+              finish dates over time against a dashed requested-end line. A line climbing toward or
+              past the requested end is the early warning. Business days throughout; flat daily
+              capacity (no holidays).</p>
 
             <h3>Closing a project</h3>
             <p>When a project is finished — or paused indefinitely — open

@@ -15,7 +15,8 @@ import (
 )
 
 // HATE-1rne tc2/tc4: the target date is validated, persisted in
-// .tkt/config.json, committed, and cleared by null.
+// .tkt/config.json, committed, and cleared by null. Since v1.0.8 the
+// target-date routes are an alias for the requested end (HATE-5ux7).
 func TestTargetDateAPI(t *testing.T) {
 	h, root := setupCosmicProjects(t)
 
@@ -55,12 +56,12 @@ func TestTargetDateAPI(t *testing.T) {
 		t.Fatalf("PUT: %d %v", code, body)
 	}
 	cfg, err := ticket.ReadConfig(root)
-	if err != nil || cfg.TargetDate != "2026-10-30" {
-		t.Fatalf("persisted target = %q (%v)", cfg.TargetDate, err)
+	if err != nil || cfg.RequestedEnd != "2026-10-30" || cfg.TargetDate != "" {
+		t.Fatalf("persisted requested end = %q, target = %q (%v)", cfg.RequestedEnd, cfg.TargetDate, err)
 	}
 	raw, _ := os.ReadFile(ticket.ConfigPath(root))
-	if !strings.Contains(string(raw), `"target_date": "2026-10-30"`) {
-		t.Errorf("config.json lacks target_date: %s", raw)
+	if !strings.Contains(string(raw), `"requested_end": "2026-10-30"`) {
+		t.Errorf("config.json lacks requested_end: %s", raw)
 	}
 	if log := git("log", "-1", "--format=%s"); !strings.Contains(log, "target date 2026-10-30") {
 		t.Errorf("last commit = %q, want the target date commit", log)
@@ -70,7 +71,7 @@ func TestTargetDateAPI(t *testing.T) {
 	}
 
 	// The dashboard's Load table picks it up.
-	if html := getHTML(t, h, "/api/projects/est/dashboard"); !strings.Contains(html, "Working days to target") {
+	if html := getHTML(t, h, "/api/projects/est/dashboard"); !strings.Contains(html, "Working days to requested end") {
 		t.Error("dashboard Load table missing target columns with a target set")
 	}
 
@@ -80,13 +81,13 @@ func TestTargetDateAPI(t *testing.T) {
 		t.Fatalf("clear: %d %v", code, body)
 	}
 	raw, _ = os.ReadFile(ticket.ConfigPath(root))
-	if strings.Contains(string(raw), "target_date") {
+	if strings.Contains(string(raw), "target_date") || strings.Contains(string(raw), "requested_end") {
 		t.Errorf("cleared config still has target_date: %s", raw)
 	}
 	if log := git("log", "-1", "--format=%s"); !strings.Contains(log, "clear target date") {
 		t.Errorf("last commit = %q, want the clear commit", log)
 	}
-	if html := getHTML(t, h, "/api/projects/est/dashboard"); strings.Contains(html, "Working days to target") || !strings.Contains(html, "Load &mdash;") {
+	if html := getHTML(t, h, "/api/projects/est/dashboard"); strings.Contains(html, "Working days to requested end") || !strings.Contains(html, "Load &mdash;") {
 		t.Error("dashboard should show Load without target columns once cleared")
 	}
 }

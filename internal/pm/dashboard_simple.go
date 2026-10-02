@@ -12,7 +12,9 @@ import (
 )
 
 // GenerateSimpleDashboard returns a self-contained HTML dashboard for pre-baseline view.
-func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName, costHTML string) string {
+// topHTML (the Schedule vs request card) sits right under the header; costHTML
+// holds the report sections.
+func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName, topHTML, costHTML string) string {
 	// Backlog-tagged tickets are out of committed scope — exclude them from every
 	// rollup (count, completion, status mix, table). Surface how many were hidden.
 	backlogCount := 0
@@ -169,6 +171,7 @@ tr:hover td { background: #f5f5f5; }
     </div>
     <div style="color:#b0bec5;font-size:13px">Pre-baseline view</div>
 </div>
+%s
 
 <div class="cards">
     <div class="card">
@@ -226,6 +229,7 @@ async function baselineNow() {
 </html>`,
 		projectID,
 		projectID, projectName,
+		topHTML,
 		total,
 		backlogNote,
 		completionPct,

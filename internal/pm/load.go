@@ -15,9 +15,9 @@ import (
 // The Load table answers "is anyone overcommitted?" directly: per person (and
 // "unassigned" when applicable), the remaining estimated hours of open work,
 // their daily hours, how many working days that is, and when they're free
-// according to the capacity-aware schedule from today. With a project target
-// date it also shows the working days available and how far past the target
-// each person runs. No dates on tickets are needed.
+// according to the capacity-aware schedule from today. With a requested end
+// date (project settings) it also shows the working days available and how far
+// past it each person runs. No dates on tickets are needed.
 
 // LoadRow is one lane of the Load table.
 type LoadRow struct {
@@ -36,7 +36,7 @@ type LoadRow struct {
 // LoadReport is the Load table for a project.
 type LoadReport struct {
 	Start               string    `json:"start"`  // schedule start (today, aligned to a weekday)
-	Target              string    `json:"target"` // project target date, "" when unset
+	Target              string    `json:"target"` // requested end, "" when unset
 	WorkingDaysToTarget int       `json:"working_days_to_target"`
 	Rows                []LoadRow `json:"rows"`
 	TotalHours          float64   `json:"total_hours"`
@@ -56,7 +56,7 @@ func overByDays(target, end time.Time) int {
 }
 
 // ComputeLoad builds the Load table from the capacity-aware schedule starting
-// `today`. target is the project's target date (YYYY-MM-DD) or "".
+// `today`. target is the project's requested end (YYYY-MM-DD) or "".
 func ComputeLoad(tickets []*ticket.Ticket, resources []ticket.Resource, ctx EstimateContext, today time.Time, target string) LoadReport {
 	plan := ScheduleCapacity(tickets, resources, ctx, today)
 	rep := LoadReport{Start: fmtDate(plan.Start), Unsized: plan.Unsized, Rows: []LoadRow{}}
@@ -134,7 +134,7 @@ func RenderLoadHTML(rep LoadReport) string {
 	sb.WriteString(`<table style="width:100%;border-collapse:collapse;box-shadow:none"><thead><tr>`)
 	sb.WriteString(th("Person") + th("Remaining est. hours") + th("h/day") + th("Days of work") + th("Free from"))
 	if hasTarget {
-		sb.WriteString(th("Working days to target") + th("Over"))
+		sb.WriteString(th("Working days to requested end") + th("Over"))
 	}
 	sb.WriteString(`</tr></thead><tbody>`)
 	for _, r := range rep.Rows {
@@ -178,10 +178,10 @@ func RenderLoadHTML(rep LoadReport) string {
 		if rep.OverBy > 0 {
 			status = fmt.Sprintf(`<span style="background:#fee2e2;color:#b91c1c;font-weight:600;padding:1px 6px;border-radius:4px">over by %d day%s</span>`, rep.OverBy, pluralS(rep.OverBy))
 		}
-		proj = fmt.Sprintf(`<p style="font-size:13px;color:#333;margin:0 0 10px"><strong>Target:</strong> %s &mdash; %d working day%s from today. All remaining work done %s: %s.</p>`,
+		proj = fmt.Sprintf(`<p style="font-size:13px;color:#333;margin:0 0 10px"><strong>Requested end:</strong> %s &mdash; %d working day%s from today. All remaining work done %s: %s.</p>`,
 			esc(fmtNiceDate(rep.Target)), rep.WorkingDaysToTarget, pluralS(rep.WorkingDaysToTarget), esc(fmtNiceDate(rep.FreeFrom)), status)
 	} else {
-		proj = fmt.Sprintf(`<p style="font-size:13px;color:#333;margin:0 0 10px">All remaining work done <strong>%s</strong> (%.1fh estimated). <span style="color:#999">Set a project target date in Settings to see who is over.</span></p>`,
+		proj = fmt.Sprintf(`<p style="font-size:13px;color:#333;margin:0 0 10px">All remaining work done <strong>%s</strong> (%.1fh estimated). <span style="color:#999">Set a requested end in Settings to see who is over.</span></p>`,
 			esc(fmtNiceDate(rep.FreeFrom)), rep.TotalHours)
 	}
 	unsizedNote := ""

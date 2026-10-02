@@ -476,9 +476,20 @@ resource when there is exactly one, otherwise to an `unassigned` lane at 8 h/day
 0.25 h placeholder and are counted. The PM dashboard's **Load** table shows, per
 person, remaining estimated hours (tickets not yet dev_complete, at estimate minus
 hours logged; old effort sizes count as unestimated), h/day, days of work, and the
-free-from date from that schedule; with a project **target date** set it adds the
-working days to the target and flags anyone "over by N days". Nothing writes
-ticket dates.
+free-from date from that schedule; with a **requested end** set it adds the
+working days to it and flags anyone "over by N days". Nothing writes ticket
+dates.
+
+**Schedule vs request.** With a requested end (and optionally a requested start)
+in the project settings, the PM dashboard opens with a card comparing the request
+with the forecast: actual start (first move to in_progress or first logged time),
+projected finish likely (the capacity schedule from the later of today and the
+requested start) and P85 (code tickets at the reference rate × Monte Carlo code
+P85 / P50), variances in business days (plus = late), needs vs has (remaining
+hours ÷ working days left vs the team's total daily hours; hours to cut or
+spare), and a status: ON TRACK (P85 by the requested end), AT RISK (likely on
+time, P85 late), LATE (likely late). Each changed forecast is kept (one entry
+per day) in `.tkt/pm/forecast_history.json`, committed, and drawn as a trend.
 
 **Strict time enforcement** applies to wrap tickets only: a time log that would
 take a wrap ticket past its estimate is blocked. Code tickets are estimated at the
@@ -709,14 +720,16 @@ Conventions:
 
 | Method & path | What it does | Body |
 |---|---|---|
-| `GET /{projectId}/dashboard` | **HTML** PM dashboard (Load table, hours budget vs cap, estimate variance, project cost, status/slip; the capacity-aware projected Gantt before a baseline). | — |
+| `GET /{projectId}/dashboard` | **HTML** PM dashboard (Schedule vs request card, Load table, hours budget vs cap, estimate variance, project cost, status/slip; the capacity-aware projected Gantt before a baseline). | — |
 | `GET /{projectId}/gantt.drawio` | Download the Gantt as an editable draw.io file. Uses the baseline if there is one, otherwise the capacity-aware projected schedule from `?start=YYYY-MM-DD` (default today). | `?start=` optional |
 | `GET /{projectId}/snapshot` · `POST …/snapshot` | Read latest / create a new slip snapshot. | — |
 | `POST /{projectId}/baseline` | Create the immutable schedule baseline from a template. | `{project_name, template_id, start_date, owner_assignments, duration_adjustments, created_by?}` |
 | `POST /{projectId}/baseline-now` | Baseline directly from current tickets (no template). | — |
 | `GET /{projectId}/slip` | List slip events. | — |
 | `PATCH /{projectId}/slip/{slipEventId}` | Resolve a slip event with a reason. | `{reason_category, reason_narrative, acknowledged_by?}` |
-| `GET /{projectId}/target-date` · `PUT …/target-date` | Read / set the optional project target date the Load table compares against. PUT validates the date (400), saves `target_date` to `.tkt/config.json` and commits it; `null` clears it. | PUT: `{"target_date": "2026-10-30"}` or `{"target_date": null}` |
+| `GET /{projectId}/requested-dates` · `PUT …/requested-dates` | Read / set the optional requested start and end (the dates the client asked for). PUT validates the dates and start ≤ end (400), saves `requested_start` / `requested_end` to `.tkt/config.json` (dropping a legacy `target_date`) and commits when changed; `null` clears a date. GET reads an old `target_date` as the requested end. | PUT: `{"requested_start": "2026-11-02", "requested_end": "2027-01-29"}` |
+| `GET /{projectId}/target-date` · `PUT …/target-date` | Alias for the requested end (kept for v1.0.6 clients): `{"target_date": …}` reads / sets `requested_end`, keeping the start. | PUT: `{"target_date": "2026-10-30"}` or `{"target_date": null}` |
+| `GET /{projectId}/forecast` | The Schedule vs request card as JSON: `requested_start`, `requested_end`, `actual_start`, `start_variance_days`, `schedule_start`, `likely_finish`, `p85_finish`, `p85_factor`, `finish_variance_days`, `p85_finish_variance_days`, `remaining_hours`, `unsized`, `working_days_left`, `needs_per_day`, `has_per_day`, `hours_to_cut`, `spare_hours`, `status` (`ON TRACK` / `AT RISK` / `LATE`, empty without a requested end), and `history`. Records the forecast history like the dashboard (one entry per day, committed when it changes). | — |
 | `GET /{projectId}/phase-rollup` | % complete per phase, weighted by estimated hours. | — |
 | `GET /{projectId}/test-summary` | Per-ticket test-case tallies (pass / fail / untested) plus the cases, for the Test cases tab. | — |
 | `POST /{projectId}/report` | **Not implemented** (returns 501). | — |

@@ -2358,10 +2358,14 @@ function loadProjectInfoSection() {
   fields.classList.remove('hidden');
 }
 
-// The target date as loaded, so saving Settings only commits a real change.
-let loadedTargetDate = '';
-document.getElementById('btn-clear-target-date').addEventListener('click', () => {
-  document.getElementById('target-date').value = '';
+// The requested dates as loaded, so saving Settings only commits a real change.
+let loadedRequestedStart = '';
+let loadedRequestedEnd = '';
+document.getElementById('btn-clear-requested-start').addEventListener('click', () => {
+  document.getElementById('requested-start').value = '';
+});
+document.getElementById('btn-clear-requested-end').addEventListener('click', () => {
+  document.getElementById('requested-end').value = '';
 });
 
 // Per-project settings only edit when a project is active.
@@ -2372,9 +2376,9 @@ async function loadProjectSettingsSections() {
   const stInputs = document.getElementById('strict-time-inputs');
   const stEmpty = document.getElementById('strict-time-empty');
   const stProj = document.getElementById('strict-time-project');
-  const tdInputs = document.getElementById('target-date-inputs');
-  const tdEmpty = document.getElementById('target-date-empty');
-  const tdProj = document.getElementById('target-date-project');
+  const tdInputs = document.getElementById('requested-dates-inputs');
+  const tdEmpty = document.getElementById('requested-dates-empty');
+  const tdProj = document.getElementById('requested-dates-project');
   if (!currentProject) {
     mhInputs.classList.add('hidden');
     mhEmpty.classList.remove('hidden');
@@ -2399,9 +2403,11 @@ async function loadProjectSettingsSections() {
     mhInputs.classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
   try {
-    const td = await API.get(`/api/projects/${currentProject.id}/target-date`);
-    loadedTargetDate = td.target_date || '';
-    document.getElementById('target-date').value = loadedTargetDate;
+    const rd = await API.get(`/api/projects/${currentProject.id}/requested-dates`);
+    loadedRequestedStart = rd.requested_start || '';
+    loadedRequestedEnd = rd.requested_end || '';
+    document.getElementById('requested-start').value = loadedRequestedStart;
+    document.getElementById('requested-end').value = loadedRequestedEnd;
     tdEmpty.classList.add('hidden');
     tdInputs.classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
@@ -2458,12 +2464,17 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
       } catch (err) { showToast(err.message, 'error'); return; }
       await API.put(`/api/projects/${currentProject.id}/hour-budget`, { work_hours: workHours, admin_hours: adminHours, qa_hours: qaHours });
     }
-    if (currentProject && !document.getElementById('target-date-inputs').classList.contains('hidden')) {
-      // Blank clears the target date; only PUT (and commit) when it changed.
-      const td = document.getElementById('target-date').value.trim();
-      if (td !== loadedTargetDate) {
-        const res = await API.put(`/api/projects/${currentProject.id}/target-date`, { target_date: td || null });
-        loadedTargetDate = res.target_date || '';
+    if (currentProject && !document.getElementById('requested-dates-inputs').classList.contains('hidden')) {
+      // Blank clears a date; only PUT (and commit) when something changed.
+      const rs = document.getElementById('requested-start').value.trim();
+      const re = document.getElementById('requested-end').value.trim();
+      if (rs && re && rs > re) { showToast('Requested start must be on or before the requested end', 'error'); return; }
+      if (rs !== loadedRequestedStart || re !== loadedRequestedEnd) {
+        const res = await API.put(`/api/projects/${currentProject.id}/requested-dates`, {
+          requested_start: rs || null, requested_end: re || null,
+        });
+        loadedRequestedStart = res.requested_start || '';
+        loadedRequestedEnd = res.requested_end || '';
       }
     }
     if (currentProject && !document.getElementById('strict-time-inputs').classList.contains('hidden')) {

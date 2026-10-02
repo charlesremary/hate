@@ -152,9 +152,14 @@ type ProjectConfig struct {
 	// EnforceQA, when true, blocks promoting a dev_task from dev_complete to
 	// qa_testing until it has at least one filled test case (step + expected).
 	EnforceQA bool `json:"enforce_qa,omitempty"`
-	// TargetDate is the optional project target date (YYYY-MM-DD) the PM
-	// dashboard's Load table compares each person's free-from date against.
-	// Empty = no target.
+	// RequestedStart / RequestedEnd are the dates the client asked for
+	// (YYYY-MM-DD, optional). The PM dashboard's Schedule vs request card and
+	// the Load table compare the capacity-aware schedule against them.
+	RequestedStart string `json:"requested_start,omitempty"`
+	RequestedEnd   string `json:"requested_end,omitempty"`
+	// TargetDate is the v1.0.6 project target date, superseded by RequestedEnd.
+	// Still read (as the requested end when that is unset); saving the
+	// requested dates drops it.
 	TargetDate string `json:"target_date,omitempty"`
 	// Project Overview tab content — hand-maintained reference material.
 	Contacts     []Contact     `json:"contacts,omitempty"`
@@ -174,6 +179,18 @@ func (c *ProjectConfig) EffectiveWorkHours() *float64 {
 		return c.WorkHours
 	}
 	return c.MaxHours
+}
+
+// EffectiveRequestedEnd is the requested end, falling back to the legacy
+// target date.
+func (c *ProjectConfig) EffectiveRequestedEnd() string {
+	if c == nil {
+		return ""
+	}
+	if c.RequestedEnd != "" {
+		return c.RequestedEnd
+	}
+	return c.TargetDate
 }
 
 // ManualBaseline is a typed h/CFP rate range for the Monte Carlo estimate:

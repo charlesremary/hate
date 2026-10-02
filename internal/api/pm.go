@@ -55,8 +55,11 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Post("/report", generateReport)
 	r.Get("/slip", listSlipEvents)
 	r.Patch("/slip/{slipEventId}", resolveSlip)
-	r.Get("/target-date", getTargetDate)
+	r.Get("/requested-dates", getRequestedDates)
+	r.Put("/requested-dates", updateRequestedDates)
+	r.Get("/target-date", getTargetDate) // alias for the requested end
 	r.Put("/target-date", updateTargetDate)
+	r.Get("/forecast", getForecast)
 	r.Get("/phase-rollup", getPhaseRollup)
 	r.Get("/test-summary", getTestSummary)
 	r.Get("/cosmic", getCosmic)
@@ -100,77 +103,6 @@ func getPhaseRollup(w http.ResponseWriter, r *http.Request) {
 	}
 	report := pm.PhaseRollup(tickets, pm.ProjectEstimateContext(root, tickets, cfg))
 	respondJSON(w, http.StatusOK, report)
-}
-
-// getTargetDate handles GET /api/projects/{projectId}/target-date.
-// Returns {"target_date": "YYYY-MM-DD"|null}.
-func getTargetDate(w http.ResponseWriter, r *http.Request) {
-	projectID := chi.URLParam(r, "projectId")
-	root, ok := getProjectRoot(w, projectID)
-	if !ok {
-		return
-	}
-	cfg, err := ticket.ReadConfig(root)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]interface{}{"target_date": targetDateJSON(cfg.TargetDate)})
-}
-
-// updateTargetDate handles PUT /api/projects/{projectId}/target-date.
-// Body: {"target_date": "YYYY-MM-DD"|null}. null (or "") clears it; any other
-// value must be a valid date (400). Persists and commits the config when it
-// changes.
-func updateTargetDate(w http.ResponseWriter, r *http.Request) {
-	projectID := chi.URLParam(r, "projectId")
-	root, ok := getProjectRoot(w, projectID)
-	if !ok {
-		return
-	}
-	var req struct {
-		TargetDate *string `json:"target_date"`
-	}
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	target := ""
-	if req.TargetDate != nil {
-		target = strings.TrimSpace(*req.TargetDate)
-	}
-	if target != "" {
-		if _, err := time.Parse("2006-01-02", target); err != nil {
-			respondError(w, http.StatusBadRequest, "target_date must be a date (YYYY-MM-DD) or null to clear")
-			return
-		}
-	}
-	cfg, err := ticket.ReadConfig(root)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if cfg.TargetDate != target {
-		cfg.TargetDate = target
-		if err := ticket.WriteConfig(root, cfg); err != nil {
-			respondError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		ticket.EnsureProjectIdentity(root, cfg)
-		msg := "target date " + target
-		if target == "" {
-			msg = "clear target date"
-		}
-		ticket.GitCommit(root, []string{ticket.ConfigPath(root)}, msg)
-	}
-	respondJSON(w, http.StatusOK, map[string]interface{}{"target_date": targetDateJSON(cfg.TargetDate)})
-}
-
-// targetDateJSON maps an unset target date to JSON null.
-func targetDateJSON(s string) interface{} {
-	if s == "" {
-		return nil
-	}
-	return s
 }
 
 // ---------------------------------------------------------------------------
@@ -289,7 +221,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 				projectName = cfg.ProjectName
 			}
 			resources = cfg.Resources
-			targetDate = cfg.TargetDate
+			targetDate = cfg.EffectiveRequestedEnd()
 			workHours = cfg.EffectiveWorkHours()
 			adminHours = cfg.AdminHours
 			qaHours = cfg.QAHours
@@ -312,7 +244,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 			pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(tickets, estCtx)) +
 			pm.RenderOverridesHTML(pm.ComputeOverrides(tickets)) +
 			pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
-		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, reportsHTML)
+		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, forecastCardHTML(projectID, root, tickets, cfg), reportsHTML)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(html))
@@ -340,7 +272,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 	cfg, cfgErr := ticket.ReadConfig(root)
 	if cfgErr == nil {
 		resources = cfg.Resources
-		targetDate = cfg.TargetDate
+		targetDate = cfg.EffectiveRequestedEnd()
 		workHours = cfg.EffectiveWorkHours()
 		adminHours = cfg.AdminHours
 		qaHours = cfg.QAHours
@@ -357,7 +289,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, estCtx)) +
 		pm.RenderOverridesHTML(pm.ComputeOverrides(costTickets)) +
 		pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))
-	html := pm.GenerateDashboard(snapshot, reportsHTML)
+	html := pm.GenerateDashboard(snapshot, forecastCardHTML(projectID, root, costTickets, cfg), reportsHTML)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(html))
