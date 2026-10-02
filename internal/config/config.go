@@ -21,7 +21,7 @@ import (
 //
 // (See the note in the Makefile, which also reminds you.)
 // ============================================================================
-const AppVersion = "1.0.6"
+const AppVersion = "1.0.7"
 
 // AppConfigPath is the path to the application-level config file.
 var AppConfigPath = filepath.Join(homeDir(), ".pm-agent", "config.json")

@@ -2946,14 +2946,17 @@ function renderCosmic(rep) {
 }
 
 // ── Monte Carlo estimate panel ───────────────────────
-// Inputs (reference set, min feature size, counting uncertainty) persist per
-// project via PUT /cosmic-estimate; the server recomputes on every change and on
-// tab open — there is no run button. Display only: the max-hours cap stays manual.
-let cosmicState = null; // { estimate_inputs, available_projects, monte_carlo }
+// Inputs (reference set, manual baseline, min feature size, counting
+// uncertainty) persist per project via PUT /cosmic-estimate; the server
+// recomputes on every change and on tab open — there is no run button. A
+// project with no saved inputs gets the defaults (manual baseline, Agentic,
+// + own features). Display only: the max-hours cap stays manual.
+let cosmicState = null; // { estimate_inputs, manual_presets, available_projects, monte_carlo }
 
 function renderMonteCarloPanel(rep) {
   cosmicState = {
     estimate_inputs: rep.estimate_inputs || {},
+    manual_presets: rep.manual_presets || [],
     available_projects: rep.available_projects || [],
     monte_carlo: rep.monte_carlo || null,
   };
@@ -2972,6 +2975,8 @@ function renderMonteCarloPanel(rep) {
           ${projBoxes}
           <label class="mc-check"><input type="checkbox" id="mc-ref-all" ${inp.ref_all ? 'checked' : ''} onchange="saveMonteCarloInputs()"> All past projects <span style="color:#999">(wide: unknown domain)</span></label>
           <label class="mc-check"><input type="checkbox" id="mc-ref-own" ${inp.ref_own ? 'checked' : ''} onchange="saveMonteCarloInputs()"> This project's finished features</label>
+          <label class="mc-check"><input type="checkbox" id="mc-ref-manual" ${inp.ref_manual ? 'checked' : ''} onchange="saveMonteCarloInputs()"> Manual baseline <span style="color:#999">(h/CFP; counts as 5 features)</span></label>
+          ${renderManualBaselineInputs(inp)}
         </div>
         <div>
           <label class="mc-label" for="mc-min-cfp">Min feature size (CFP)</label>
@@ -2980,9 +2985,78 @@ function renderMonteCarloPanel(rep) {
           <input id="mc-unc" type="number" min="0" max="100" step="1" value="${inp.count_unc_pct ?? 0}" onchange="saveMonteCarloInputs()" style="width:90px">
         </div>
       </div>
+      <div id="mc-defaults-hint" class="mc-hint"${inp.defaults_applied ? '' : ' style="display:none"'}>Using the default manual baseline. Adjust it or tick reference projects.</div>
       <div id="mc-result">${renderMonteCarloResult(cosmicState.monte_carlo)}</div>
       <div style="font-size:12px;color:#999;margin-top:10px">Set the max-hours cap manually in Settings.</div>
     </div>`;
+}
+
+// Manual baseline controls: preset select (presets + Custom) and the Low /
+// Likely / High rates (h/CFP, read as P10 / P50 / P90).
+function renderManualBaselineInputs(inp) {
+  const m = inp.manual || {};
+  const cur = inp.manual_preset || 'custom';
+  const opts = cosmicState.manual_presets.map(p =>
+    `<option value="${escapeHtml(p.id)}" ${p.id === cur ? 'selected' : ''}>${escapeHtml(p.label)}</option>`).join('')
+    + `<option value="custom" ${cur === 'custom' ? 'selected' : ''}>Custom</option>`;
+  const num = (id, label, v) => `
+      <label class="mc-manual-field">${label}<input id="${id}" type="number" min="0.01" step="0.01" value="${v ?? ''}" oninput="markManualCustom()" onchange="saveMonteCarloInputs()"></label>`;
+  return `
+    <div class="mc-manual">
+      <select id="mc-manual-preset" onchange="applyManualPreset()" aria-label="Manual baseline preset">${opts}</select>
+      <div class="mc-manual-range">
+        ${num('mc-man-low', 'Low (P10)', m.low)}
+        ${num('mc-man-likely', 'Likely (P50)', m.likely)}
+        ${num('mc-man-high', 'High (P90)', m.high)}
+      </div>
+      <div id="mc-manual-err" class="mc-error" style="display:none"></div>
+    </div>`;
+}
+
+// Picking a preset fills the inputs and saves.
+function applyManualPreset() {
+  const id = document.getElementById('mc-manual-preset').value;
+  const p = (cosmicState?.manual_presets || []).find(x => x.id === id);
+  if (!p) return; // Custom: keep the typed values
+  document.getElementById('mc-man-low').value = p.low;
+  document.getElementById('mc-man-likely').value = p.likely;
+  document.getElementById('mc-man-high').value = p.high;
+  saveMonteCarloInputs();
+}
+
+// Editing a rate by hand switches the preset select to Custom.
+function markManualCustom() {
+  const sel = document.getElementById('mc-manual-preset');
+  if (sel) sel.value = 'custom';
+}
+
+// Reads the manual baseline inputs; returns { manual } or { error }.
+function readManualBaseline() {
+  const v = id => {
+    const raw = document.getElementById(id).value.trim();
+    return raw === '' ? NaN : Number(raw);
+  };
+  const manual = { low: v('mc-man-low'), likely: v('mc-man-likely'), high: v('mc-man-high') };
+  if (![manual.low, manual.likely, manual.high].every(Number.isFinite) || manual.low <= 0) {
+    return { error: 'Manual baseline: enter Low, Likely and High above 0.' };
+  }
+  if (!(manual.low <= manual.likely && manual.likely <= manual.high)) {
+    return { error: 'Manual baseline: Low ≤ Likely ≤ High required.' };
+  }
+  return { manual };
+}
+
+// The share of draws from each pool, e.g. "40% manual baseline, 60% own
+// features" (non-zero parts only).
+function monteCarloDrawMix(mc) {
+  const own = Math.round((mc.p_own || 0) * 100);
+  const manual = Math.round((mc.p_manual || 0) * 100);
+  const borrowed = Math.max(0, 100 - own - manual);
+  const parts = [];
+  if (manual > 0) parts.push(`${manual}% manual baseline`);
+  if (own > 0) parts.push(`${own}% own features`);
+  if (borrowed > 0) parts.push(`${borrowed}% borrowed features`);
+  return parts.join(', ');
 }
 
 function renderMonteCarloResult(mc) {
@@ -2993,7 +3067,10 @@ function renderMonteCarloResult(mc) {
   const row = (label, a, b, c, strong) =>
     `<tr${strong ? ' style="font-weight:700"' : ''}><td>${label}</td><td style="text-align:right">${h(a)}</td><td style="text-align:right">${h(b)}</td><td style="text-align:right">${h(c)}</td></tr>`;
   const n = (mc.n_own || 0) + (mc.n_borrowed || 0);
-  const ownPct = Math.round((mc.p_own || 0) * 100);
+  const manualAll = (mc.p_manual || 0) >= 1;
+  const basis = `Based on ${n} reference feature${n === 1 ? '' : 's'}${mc.manual_in_use ? ' + the manual baseline (counts as 5)' : ''}. Draws: ${monteCarloDrawMix(mc)}.`
+    + (manualAll ? ' Manual range used as typed (not widened).'
+      : ` Feature range widened ${mc.widen_k}x (backtest calibration)${mc.manual_in_use ? '; manual range not widened' : ''}.`);
   const borrowed = (mc.borrowed_projects || []).length ? ` Borrowed from: ${escapeHtml(mc.borrowed_projects.join(', '))}.` : '';
   const missing = (mc.missing_projects || []).length
     ? `<div style="color:#e65100;font-size:12px;margin-top:4px">⚠ Reference project${mc.missing_projects.length === 1 ? '' : 's'} not found: ${escapeHtml(mc.missing_projects.join(', '))}.</div>` : '';
@@ -3020,7 +3097,7 @@ function renderMonteCarloResult(mc) {
     <div style="font-size:12px;color:#999;margin-top:2px">Hours. ${mc.total_cfp} CFP across ${mc.feature_count} feature${mc.feature_count === 1 ? '' : 's'}; ${(mc.runs || 0).toLocaleString()} runs.</div>
     ${renderMonteCarloHistogram(mc)}
     <div class="mc-notes">
-      <div>Based on ${n} reference feature${n === 1 ? '' : 's'} (${ownPct}% own, ${100 - ownPct}% borrowed). Range widened ${mc.widen_k}x (backtest calibration). Median rate ${fmtCosmicRate(mc.ref_median_rate)} h/CFP.${borrowed}</div>
+      <div>${basis} Median rate ${fmtCosmicRate(mc.ref_median_rate)} h/CFP.${borrowed}</div>
       <div>Actual so far: <strong>${h(mc.actual_hours)} h</strong>.</div>
       ${finish}${missing}${pwNote}
     </div>`;
@@ -3061,10 +3138,20 @@ async function saveMonteCarloInputs() {
   if (!currentProject) return;
   const minRaw = document.getElementById('mc-min-cfp').value.trim();
   const uncRaw = document.getElementById('mc-unc').value.trim();
+  // Invalid manual range: show it inline and save nothing.
+  const mb = readManualBaseline();
+  const errEl = document.getElementById('mc-manual-err');
+  if (mb.error) {
+    if (errEl) { errEl.textContent = mb.error; errEl.style.display = ''; }
+    return;
+  }
+  if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
   const body = {
     ref_projects: [...document.querySelectorAll('.mc-ref-proj:checked')].map(c => c.value),
     ref_all: document.getElementById('mc-ref-all').checked,
     ref_own: document.getElementById('mc-ref-own').checked,
+    ref_manual: document.getElementById('mc-ref-manual').checked,
+    manual: mb.manual,
     min_cfp: minRaw === '' ? null : Number(minRaw),
     count_unc_pct: uncRaw === '' ? null : Number(uncRaw),
   };
@@ -3080,6 +3167,14 @@ async function saveMonteCarloInputs() {
     const ei = cosmicState.estimate_inputs;
     if (ei.min_cfp != null) document.getElementById('mc-min-cfp').value = ei.min_cfp;
     if (ei.count_unc_pct != null) document.getElementById('mc-unc').value = ei.count_unc_pct;
+    if (ei.manual) {
+      document.getElementById('mc-man-low').value = ei.manual.low;
+      document.getElementById('mc-man-likely').value = ei.manual.likely;
+      document.getElementById('mc-man-high').value = ei.manual.high;
+    }
+    if (ei.manual_preset) document.getElementById('mc-manual-preset').value = ei.manual_preset;
+    const hint = document.getElementById('mc-defaults-hint');
+    if (hint) hint.style.display = ei.defaults_applied ? '' : 'none';
   } catch (e) {
     showToast(e.message, 'error');
   } finally {

@@ -12,8 +12,8 @@ import (
 )
 
 // Monte Carlo estimate (COSMIC tab). Code hours are drawn per feature from the
-// reference h/CFP rates; platform wrap is the fixed sum of wrap-ticket
-// estimates. See RunMonteCarlo for the sampling.
+// reference h/CFP rates (and/or a manual baseline range); platform wrap is the
+// fixed sum of wrap-ticket estimates. See RunMonteCarlo for the sampling.
 
 // Monte Carlo constants. The seed is fixed so the numbers don't change between
 // page loads.
@@ -24,6 +24,9 @@ const (
 	// Phase 0.1 backtest, where the unwidened range was too narrow).
 	MonteCarloWidenK = 1.5
 	monteCarloBins   = 20
+	// z90 is the standard normal's 90th percentile: a manual baseline's Low and
+	// High (P10 / P90) sit z90 log-space sds either side of Likely.
+	z90 = 1.2816
 	// ownBlendHalf is the own-feature count at which own and borrowed draws are
 	// equally likely; ownBlendFull is the count at which own features take over.
 	ownBlendHalf = 5
@@ -49,10 +52,13 @@ type MCFeature struct {
 // MCInput is everything the engine needs. It is pure data, so the engine is
 // deterministic for a given input.
 type MCInput struct {
-	Features         []MCFeature
-	Own              []float64 // h/CFP of this project's reference features
-	Borrowed         []float64 // h/CFP of borrowed reference features
-	Configured       bool      // any reference option is selected
+	Features []MCFeature
+	Own      []float64 // h/CFP of this project's reference features
+	Borrowed []float64 // h/CFP of borrowed reference features
+	// Manual is the manual baseline range (h/CFP, P10 / P50 / P90) when it is
+	// selected, else nil. It counts as 5 features of evidence.
+	Manual           *ticket.ManualBaseline
+	Configured       bool // any reference option is selected
 	BorrowedProjects []string
 	MissingProjects  []string
 	Wrap             MCPlatformWrap
@@ -106,6 +112,8 @@ type MonteCarloResult struct {
 	NOwn             int               `json:"n_own"`
 	NBorrowed        int               `json:"n_borrowed"`
 	POwn             float64           `json:"p_own"`
+	PManual          float64           `json:"p_manual"`      // share of draws from the manual baseline
+	ManualInUse      bool              `json:"manual_in_use"` // the manual baseline is selected and affects the draw
 	RefMedianRate    float64           `json:"ref_median_rate"`
 	BorrowedProjects []string          `json:"borrowed_projects"`
 	MissingProjects  []string          `json:"missing_projects"`
@@ -152,6 +160,17 @@ func fitLogNormal(rates []float64, k float64) logNormalFit {
 	return logNormalFit{mu: mu + (sd*sd-sdW*sdW)/2, sd: sdW}
 }
 
+// fitManualBaseline fits a log-normal to a P10 / P50 / P90 range: mu =
+// ln(likely), sd = the mean of the two log-space side spreads / z90. No
+// widening: the typed range is already the stated spread.
+func fitManualBaseline(m ticket.ManualBaseline) logNormalFit {
+	if m.Low <= 0 || m.Likely <= 0 || m.High <= 0 {
+		return logNormalFit{}
+	}
+	ll, lm, lh := math.Log(m.Low), math.Log(m.Likely), math.Log(m.High)
+	return logNormalFit{mu: lm, sd: ((lm - ll) + (lh - lm)) / 2 / z90}
+}
+
 // OwnBlendProbability is the share of draws taken from the project's own
 // features: own_N / (own_N + 5), and 1 once own_N >= 15.
 func OwnBlendProbability(nOwn int) float64 {
@@ -166,10 +185,12 @@ func OwnBlendProbability(nOwn int) float64 {
 
 // RunMonteCarlo runs the estimate:
 //   - fit a log-normal per reference pool (own, borrowed), widened K = 1.5
-//     with the mean preserved;
+//     with the mean preserved; the manual baseline (when selected) is fitted
+//     from its P10 / P50 / P90 with no widening;
 //   - per run, each target feature's code hours = CFP x exp(N(mu', sd')), the
-//     pool picked per draw with probability p_own (own_N/(own_N+5), 1 at 15+;
-//     the only non-empty pool when just one has features);
+//     pool picked per draw: own with probability p_own (own_N/(own_N+5), 1 at
+//     15+; the only non-empty pool when just one has features), otherwise
+//     borrowed vs manual weighted N_borrowed : 5;
 //   - the run's CFP-driven hours are scaled once by U(1-u, 1+u) for the
 //     counting uncertainty;
 //   - total = code + the fixed platform wrap.
@@ -203,6 +224,15 @@ func RunMonteCarlo(in MCInput) MonteCarloResult {
 		sort.Float64s(all)
 		res.RefMedianRate = math.Round(cosmicMedian(all)*10000) / 10000
 	}
+	evidence := len(all)
+	if in.Manual != nil {
+		evidence += manualBaselineWeight
+		// Under 3 real features the manual Likely is the rate scheduling uses
+		// (ReferenceSet.MedianRate), so report that.
+		if len(all) < minReferenceFeatures {
+			res.RefMedianRate = math.Round(in.Manual.Likely*10000) / 10000
+		}
+	}
 
 	switch {
 	case !in.Configured:
@@ -211,18 +241,16 @@ func RunMonteCarlo(in MCInput) MonteCarloResult {
 	case len(in.Features) == 0:
 		res.Error = MCErrNoFeatures
 		return res
-	case len(all) < minReferenceFeatures:
+	case evidence < minReferenceFeatures:
 		res.Error = MCErrTooFewRefs
 		return res
 	}
 
-	pOwn := OwnBlendProbability(len(in.Own))
-	if len(in.Borrowed) == 0 {
-		pOwn = 1
-	} else if len(in.Own) == 0 {
-		pOwn = 0
-	}
+	pOwn, pManualOther := blendProbabilities(len(in.Own), len(in.Borrowed), in.Manual != nil)
 	res.POwn = math.Round(pOwn*10000) / 10000
+	pManual := (1 - pOwn) * pManualOther
+	res.PManual = math.Round(pManual*10000) / 10000
+	res.ManualInUse = pManual > 0
 	var doneActual float64
 	remaining := 0
 	for _, f := range in.Features {
@@ -232,7 +260,7 @@ func RunMonteCarlo(in MCInput) MonteCarloResult {
 			remaining++
 		}
 	}
-	code, totals, rest := simulateMonteCarlo(in, pOwn, runs)
+	code, totals, rest := simulateMonteCarlo(in, pOwn, pManualOther, runs)
 	finish := make([]float64, runs)
 	for i, r := range rest {
 		finish[i] = doneActual + r
@@ -252,11 +280,32 @@ func RunMonteCarlo(in MCInput) MonteCarloResult {
 	return res
 }
 
+// blendProbabilities returns p_own (the share of draws from own features) and
+// pManualOther (of the remaining draws, the share from the manual baseline
+// rather than borrowed features: 5 / (N_borrowed + 5)).
+func blendProbabilities(nOwn, nBorrowed int, manual bool) (pOwn, pManualOther float64) {
+	if manual {
+		pManualOther = float64(manualBaselineWeight) / float64(nBorrowed+manualBaselineWeight)
+	}
+	pOwn = OwnBlendProbability(nOwn)
+	if nBorrowed == 0 && !manual {
+		pOwn = 1
+	} else if nOwn == 0 {
+		pOwn = 0
+	}
+	return pOwn, pManualOther
+}
+
 // simulateMonteCarlo runs the draws and returns, per run, the code hours, the
 // total (code + platform wrap), and the code hours of the not-done features.
-func simulateMonteCarlo(in MCInput, pOwn float64, runs int) (code, totals, rest []float64) {
+// pManualOther is the share of non-own draws taken from the manual baseline.
+func simulateMonteCarlo(in MCInput, pOwn, pManualOther float64, runs int) (code, totals, rest []float64) {
 	own := fitLogNormal(in.Own, MonteCarloWidenK)
 	borrowed := fitLogNormal(in.Borrowed, MonteCarloWidenK)
+	var manual logNormalFit
+	if in.Manual != nil {
+		manual = fitManualBaseline(*in.Manual)
+	}
 	u := in.UncPct / 100
 	rng := rand.New(rand.NewSource(in.Seed))
 	code = make([]float64, runs)
@@ -268,6 +317,8 @@ func simulateMonteCarlo(in MCInput, pOwn float64, runs int) (code, totals, rest 
 			fit := borrowed
 			if pOwn >= 1 || (pOwn > 0 && rng.Float64() < pOwn) {
 				fit = own
+			} else if pManualOther >= 1 || (pManualOther > 0 && rng.Float64() < pManualOther) {
+				fit = manual
 			}
 			h := float64(f.CFP) * math.Exp(fit.mu+fit.sd*rng.NormFloat64())
 			sum += h
@@ -369,6 +420,7 @@ func BuildMonteCarloInput(tickets []*ticket.Ticket, rs ReferenceSet, cfg *ticket
 	in := MCInput{
 		Own:              rs.Own,
 		Borrowed:         rs.Borrowed,
+		Manual:           rs.Manual,
 		Configured:       rs.Configured,
 		BorrowedProjects: rs.BorrowedProjects,
 		MissingProjects:  rs.MissingProjects,

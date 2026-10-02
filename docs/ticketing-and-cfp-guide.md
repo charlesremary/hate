@@ -455,9 +455,11 @@ Hours Budget checks:
 | Anything else | 0 (unsized) |
 
 The **reference median rate** is the median h/CFP of the project's chosen
-reference features (below). If no reference set is configured, or it has fewer
-than 3 features, HATE uses a default of **0.25 h/CFP** (the pooled NEI + Tactic
-median as of 2026-10-02).
+reference features (below). If there are fewer than 3 real reference features
+and the **manual baseline** is in effect (including by default on a project with
+no saved estimate inputs), it is the baseline's **Likely**. Otherwise, if no
+reference set is configured or it has fewer than 3 features, HATE uses a default
+of **0.25 h/CFP** (the pooled NEI + Tactic median as of 2026-10-02).
 
 Schedules convert hours to days with the assignee's `daily_hours_available` (8
 if the assignee is unknown; an assignee matches a resource by email, git user, or
@@ -499,6 +501,7 @@ and the total.
 - **All past projects**: every other known project. Use it for a project unlike
   anything before. It gives a deliberately wide starting range.
 - **This project's own features**: its finished features.
+- **Manual baseline**: a typed rate range for a cold start (below).
 
 Pooling across domains only happens when you choose "all past projects".
 
@@ -506,19 +509,49 @@ A feature counts as a **reference feature** when it has functional hours, has at
 least the minimum CFP (default 3, so tiny features with extreme rates don't
 dominate), and all its functional children are done (`dev_complete` or later:
 `qa_testing`, `submitted_for_review`, `approved`, `complete`, `closed`). If there
-are fewer than 3 reference features in total, the panel says "need at least 3
-reference features" instead of a range.
+are fewer than 3 reference features in total (and no manual baseline), the panel
+says "need at least 3 reference features" instead of a range.
 
-**Blending.** Own and borrowed features are kept as two pools. Each draw picks
-the own pool with probability own_N ÷ (own_N + 5), and always once the project
-has 15 or more finished features of its own. The panel shows the current mix
-(e.g. "70% own features, 30% borrowed"). If only one pool has features, it uses
-that one.
+**Manual baseline.** For a fresh install or a first-of-its-kind project with
+nothing to borrow from, type a rate range in h/CFP: **Low / Likely / High**, read
+as P10 / P50 / P90 (Likely is the median; 1 feature in 10 should come in under
+Low and 1 in 10 over High). Presets:
+
+| Preset | Low | Likely | High | Notes |
+|---|---|---|---|---|
+| Agentic (Claude-assisted) — **default** | 0.08 | 0.25 | 1.00 | NEI + Tactic, 32 features; High near the worst observed 0.97 because the backtest showed ranges run wide |
+| Traditional (hand-coded) | 8 | 12 | 18 | the industry band |
+| Custom | — | — | — | any other range (editing a value switches to it) |
+
+The engine fits a log-normal to the three points: mu = ln(Likely), sd = the mean
+of the two log-space spreads (ln Likely − ln Low, ln High − ln Likely) ÷ 1.2816.
+It is **not widened** (the typed range is already the stated spread). The
+baseline counts as **5 features of evidence**: it satisfies the 3-feature minimum
+on its own, shares the non-own draws with borrowed features as 5 : borrowed_N,
+and hands over to the project's own finished features by the blending rule —
+0 own → all baseline (or baseline + borrowed), 5 own → 50% own, 15+ own → the
+baseline no longer affects the draw. Must be 0 < Low ≤ Likely ≤ High.
+
+**Defaults for new projects.** A project with no saved estimate inputs (no
+reference projects, all/own off, and the manual fields never saved) uses the
+**manual baseline (Agentic) + this project's own features**, so a range shows
+immediately; the panel says it's using the default baseline. Once any input is
+saved the saved values are used exactly, so unticking everything gives "no
+reference selected".
+
+**Blending.** Own features, borrowed features and the manual baseline are kept
+as separate pools. Each draw picks the own pool with probability
+own_N ÷ (own_N + 5), and always once the project has 15 or more finished
+features of its own. Otherwise it picks borrowed vs manual baseline weighted
+borrowed_N : 5. The panel shows the current mix (e.g. "Draws: 40% manual
+baseline, 60% own features"; non-zero parts only). If only one pool has
+features, it uses that one.
 
 **What it computes.**
 
 - Each pool's rates are fitted as a log-normal distribution of h/CFP.
-- The spread is **widened 1.5×**, keeping the mean rate the same. In the
+- The feature pools' spread is **widened 1.5×**, keeping the mean rate the same
+  (the manual baseline is not widened). In the
   backtest the raw ranges were too narrow (a raw "P85" behaved like a P70-P75);
   the panel says the range is widened.
 - Each run: for every feature in this project (not cancelled or backlog), code
@@ -542,6 +575,7 @@ button to set the cap from it. The **max-hours cap stays manual** in Settings.
 
 The inputs are saved per project in `.tkt/config.json` (and committed):
 `estimate_ref_projects`, `estimate_ref_all`, `estimate_ref_own`,
+`estimate_ref_manual`, `estimate_manual` (`{low, likely, high}`),
 `estimate_min_cfp`, `estimate_count_unc_pct`.
 
 ### Calibration slice (a new kind of project)
@@ -550,8 +584,8 @@ For a project unlike anything delivered before, there's no comparable reference
 project. Work it like this:
 
 1. Count CFP for the whole spec with the counting guide (§4).
-2. Estimate with **all past projects** as the reference. That's the wide starting
-   range. Pooled NEI + Tactic as of 2026-10-02 (32 features, 3+ CFP):
+2. Estimate with **all past projects** as the reference (or the **manual
+   baseline** when there are none). That's the wide starting range. Pooled NEI + Tactic as of 2026-10-02 (32 features, 3+ CFP):
    P10 0.07 / P25 0.11 / P50 0.25 / P75 0.29 / P90 0.33 / max 0.97 h/CFP.
 3. Wrap has no transferable defaults (it's platform-specific). Estimate it by
    judgment with the hours picker, and add explicit **discovery** wrap tickets for
@@ -691,5 +725,5 @@ Conventions:
 
 | Method & path | What it does | Body |
 |---|---|---|
-| `GET /{projectId}/cosmic` | The COSMIC report: per-feature h/CFP (wrap % info-only, `calibration_slice` flag), aggregates, slice counts (`slice_total`, `slice_done`), plus `monte_carlo` (the result, or an error state such as "need at least 3 reference features"), `estimate_inputs` (current inputs plus defaults), and `available_projects` (id + name of the other known projects, for the picker). | — |
-| `PUT /{projectId}/cosmic-estimate` | Set the Monte Carlo inputs. Validates `min_cfp` ≥ 1, `count_unc_pct` 0-100, and that every project id exists. Saves to `.tkt/config.json`, commits it, and returns the recomputed `monte_carlo`. | `{ref_projects:[ids], ref_all:bool, ref_own:bool, min_cfp:int\|null, count_unc_pct:number\|null}` |
+| `GET /{projectId}/cosmic` | The COSMIC report: per-feature h/CFP (wrap % info-only, `calibration_slice` flag), aggregates, slice counts (`slice_total`, `slice_done`), plus `monte_carlo` (the result, or an error state such as "need at least 3 reference features"), `estimate_inputs` (effective inputs: `ref_projects`, `ref_all`, `ref_own`, `ref_manual`, `manual` {low, likely, high}, `manual_preset` agentic\|traditional\|custom, `defaults_applied` (true when nothing is saved and the manual-baseline + own defaults are in effect), `min_cfp`, `count_unc_pct`), `manual_presets` ([{id, label, low, likely, high}]), and `available_projects` (id + name of the other known projects, for the picker). `monte_carlo` includes `p_own`, `p_manual` (share of draws from the manual baseline) and `manual_in_use`. | — |
+| `PUT /{projectId}/cosmic-estimate` | Set the Monte Carlo inputs. Validates `min_cfp` ≥ 1, `count_unc_pct` 0-100, every project id exists, and `manual` has 0 < low ≤ likely ≤ high (all 400). The saved values are used exactly (an omitted `ref_manual` is false; an omitted `manual` keeps the saved range or the Agentic default). Saves to `.tkt/config.json`, commits it, and returns `estimate_inputs` and the recomputed `monte_carlo`. | `{ref_projects:[ids], ref_all:bool, ref_own:bool, ref_manual:bool, manual:{low,likely,high}, min_cfp:int\|null, count_unc_pct:number\|null}` |

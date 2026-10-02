@@ -4,6 +4,7 @@
 package pm
 
 import (
+	"math"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -298,10 +299,107 @@ func ReferenceRates(tickets []*ticket.Ticket, minCFP int) []float64 {
 	return rates
 }
 
+// ---------------------------------------------------------------------------
+// Manual baseline (a typed h/CFP range used as a reference)
+// ---------------------------------------------------------------------------
+
+// ManualPreset is a named manual baseline (h/CFP; Low / Likely / High read as
+// P10 / P50 / P90).
+type ManualPreset struct {
+	ID     string  `json:"id"`
+	Label  string  `json:"label"`
+	Low    float64 `json:"low"`
+	Likely float64 `json:"likely"`
+	High   float64 `json:"high"`
+}
+
+// Manual baseline preset ids. ManualPresetCustom is any range that matches no
+// preset.
+const (
+	ManualPresetAgentic     = "agentic"
+	ManualPresetTraditional = "traditional"
+	ManualPresetCustom      = "custom"
+)
+
+// ManualPresets are the offered baselines. Agentic (the default) is the NEI +
+// Tactic pool (32 features), High set near the worst observed 0.97 because the
+// backtest showed ranges run wide; Traditional is the industry hand-coded band.
+var ManualPresets = []ManualPreset{
+	{ID: ManualPresetAgentic, Label: "Agentic (Claude-assisted)", Low: 0.08, Likely: 0.25, High: 1.0},
+	{ID: ManualPresetTraditional, Label: "Traditional (hand-coded)", Low: 8, Likely: 12, High: 18},
+}
+
+// manualBaselineWeight is how many features of evidence the manual baseline
+// counts as when blended with borrowed features (and in the 3-feature minimum).
+const manualBaselineWeight = 5
+
+// DefaultManualBaseline is the Agentic preset's range.
+func DefaultManualBaseline() ticket.ManualBaseline {
+	p := ManualPresets[0]
+	return ticket.ManualBaseline{Low: p.Low, Likely: p.Likely, High: p.High}
+}
+
+// ManualPresetID names the preset a range matches, or ManualPresetCustom.
+func ManualPresetID(m ticket.ManualBaseline) string {
+	eq := func(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
+	for _, p := range ManualPresets {
+		if eq(m.Low, p.Low) && eq(m.Likely, p.Likely) && eq(m.High, p.High) {
+			return p.ID
+		}
+	}
+	return ManualPresetCustom
+}
+
+// ValidManualBaseline reports whether 0 < low <= likely <= high.
+func ValidManualBaseline(m ticket.ManualBaseline) bool {
+	return m.Low > 0 && m.Low <= m.Likely && m.Likely <= m.High
+}
+
+// EstimateRefs are a project's effective reference selections.
+type EstimateRefs struct {
+	Projects []string
+	All      bool
+	Own      bool
+	Manual   bool
+	// ManualBaseline is the saved range, or the default preset when none is
+	// saved (or the saved one is invalid).
+	ManualBaseline ticket.ManualBaseline
+	// DefaultsApplied is true when the project has no saved estimate inputs, so
+	// the defaults (manual baseline + own features) are in effect.
+	DefaultsApplied bool
+}
+
+// HasSavedEstimateInputs reports whether any reference input has been saved:
+// ref projects, ref_all, ref_own, ref_manual (even false), or a manual range.
+func HasSavedEstimateInputs(cfg *ticket.ProjectConfig) bool {
+	return cfg != nil && (len(cfg.EstimateRefProjects) > 0 || cfg.EstimateRefAll || cfg.EstimateRefOwn ||
+		cfg.EstimateRefManual != nil || cfg.EstimateManual != nil)
+}
+
+// EffectiveEstimateRefs returns the reference selections in effect. With no
+// saved inputs that is the manual baseline (Agentic) + own features; once
+// saved, the saved values are used exactly.
+func EffectiveEstimateRefs(cfg *ticket.ProjectConfig) EstimateRefs {
+	r := EstimateRefs{ManualBaseline: DefaultManualBaseline()}
+	if !HasSavedEstimateInputs(cfg) {
+		r.Own, r.Manual, r.DefaultsApplied = true, true, true
+		return r
+	}
+	r.Projects = cfg.EstimateRefProjects
+	r.All = cfg.EstimateRefAll
+	r.Own = cfg.EstimateRefOwn
+	r.Manual = cfg.EstimateRefManual != nil && *cfg.EstimateRefManual
+	if cfg.EstimateManual != nil && ValidManualBaseline(*cfg.EstimateManual) {
+		r.ManualBaseline = *cfg.EstimateManual
+	}
+	return r
+}
+
 // ReferenceSet is the reference features gathered for a project's estimate,
-// split into its own finished features and those borrowed from other projects.
+// split into its own finished features and those borrowed from other projects,
+// plus the manual baseline when selected.
 type ReferenceSet struct {
-	Configured bool      // any reference option is set (own, all, or specific projects)
+	Configured bool      // any reference option is set (own, all, specific projects, or manual)
 	MinCFP     int       // minimum feature size used
 	Own        []float64 // h/CFP of this project's finished features (when ref_own)
 	Borrowed   []float64 // h/CFP of borrowed projects' finished features
@@ -311,6 +409,8 @@ type ReferenceSet struct {
 	BorrowedProjects []string
 	// MissingProjects are configured ids that could not be resolved.
 	MissingProjects []string
+	// Manual is the manual baseline range when it is selected, else nil.
+	Manual *ticket.ManualBaseline
 }
 
 // All returns own + borrowed rates (a new slice).
@@ -320,20 +420,25 @@ func (rs ReferenceSet) All() []float64 {
 	return append(out, rs.Borrowed...)
 }
 
-// MedianRate is the median h/CFP of the whole set, or DefaultHPerCFP when no
-// reference is configured or it has fewer than 3 features.
+// MedianRate is the median h/CFP of the whole set. With fewer than 3 real
+// reference features it is the manual baseline's Likely when that is selected,
+// else DefaultHPerCFP (also when no reference is configured).
 func (rs ReferenceSet) MedianRate() float64 {
 	all := rs.All()
-	if !rs.Configured || len(all) < minReferenceFeatures {
-		return DefaultHPerCFP
+	if rs.Configured && len(all) >= minReferenceFeatures {
+		sort.Float64s(all)
+		return cosmicMedian(all)
 	}
-	sort.Float64s(all)
-	return cosmicMedian(all)
+	if rs.Manual != nil && rs.Manual.Likely > 0 {
+		return rs.Manual.Likely
+	}
+	return DefaultHPerCFP
 }
 
 // GatherReferenceFeatures builds a project's reference set from its config's
-// estimate inputs (estimate_ref_own / estimate_ref_all / estimate_ref_projects,
-// estimate_min_cfp). Borrowed projects come from config.ListProjects, ids
+// effective estimate inputs (EffectiveEstimateRefs: estimate_ref_own /
+// estimate_ref_all / estimate_ref_projects / estimate_ref_manual, with the
+// no-saved-inputs defaults; estimate_min_cfp). Borrowed projects come from config.ListProjects, ids
 // resolved with config.GetProjectPath; the current project is never borrowed.
 // cfg may be nil, in which case it's read from projectRoot.
 func GatherReferenceFeatures(projectID, projectRoot string, cfg *ticket.ProjectConfig) ReferenceSet {
@@ -361,13 +466,18 @@ func gatherReferenceFeatures(projectID, projectRoot string, cfg *ticket.ProjectC
 	if cfg == nil {
 		return rs
 	}
-	rs.Configured = cfg.EstimateRefOwn || cfg.EstimateRefAll || len(cfg.EstimateRefProjects) > 0
+	refs := EffectiveEstimateRefs(cfg)
+	rs.Configured = refs.Own || refs.All || len(refs.Projects) > 0 || refs.Manual
+	if refs.Manual {
+		m := refs.ManualBaseline
+		rs.Manual = &m
+	}
 	self := filepath.Clean(projectRoot)
 	isSelf := func(id, path string) bool {
 		return (projectID != "" && id == projectID) || filepath.Clean(path) == self
 	}
 
-	if cfg.EstimateRefOwn {
+	if refs.Own {
 		if tickets, err := readTickets(projectRoot); err == nil {
 			rs.Own = ReferenceRates(tickets, rs.MinCFP)
 		}
@@ -385,12 +495,12 @@ func gatherReferenceFeatures(projectID, projectRoot string, cfg *ticket.ProjectC
 		seen[p] = true
 		srcs = append(srcs, src{id, p})
 	}
-	if cfg.EstimateRefAll {
+	if refs.All {
 		for _, p := range projects {
 			add(p.ID, p.Path)
 		}
 	}
-	for _, id := range cfg.EstimateRefProjects {
+	for _, id := range refs.Projects {
 		found := false
 		for _, p := range projects {
 			if p.ID == id {
@@ -421,8 +531,9 @@ func gatherReferenceFeatures(projectID, projectRoot string, cfg *ticket.ProjectC
 }
 
 // ProjectRefMedianRate returns the project's reference median h/CFP (the rate
-// functional tickets are scheduled at), or DefaultHPerCFP when no reference is
-// configured or it has fewer than 3 features.
+// functional tickets are scheduled at). With fewer than 3 real reference
+// features it is the manual baseline's Likely when that is in effect (also by
+// default), else DefaultHPerCFP.
 func ProjectRefMedianRate(projectRoot string) float64 {
 	cfg, err := ticket.ReadConfig(projectRoot)
 	if err != nil {

@@ -203,10 +203,32 @@ func TestGatherReferenceFeatures(t *testing.T) {
 	}
 	resolve := func(id string) (string, error) { return "", fmt.Errorf("Project not found: %s", id) }
 
-	// Nothing configured → default rate.
+	// No saved inputs → defaults: manual baseline (Agentic) + own features;
+	// with 2 own features (< 3) the median is the manual Likely.
 	rs := gatherReferenceFeatures("self", "/p/self", &ticket.ProjectConfig{}, projects, resolve, read)
-	if rs.Configured || rs.MedianRate() != DefaultHPerCFP || rs.MinCFP != DefaultEstimateMinCFP {
-		t.Errorf("unconfigured: %+v median %v, want default", rs, rs.MedianRate())
+	if !rs.Configured || rs.Manual == nil || *rs.Manual != DefaultManualBaseline() || rs.NOwn != 2 ||
+		rs.NBorrowed != 0 || rs.MedianRate() != 0.25 || rs.MinCFP != DefaultEstimateMinCFP {
+		t.Errorf("no saved inputs: %+v median %v, want manual agentic + own", rs, rs.MedianRate())
+	}
+
+	// Explicitly unticked everything → not configured, default rate.
+	off := false
+	rs = gatherReferenceFeatures("self", "/p/self", &ticket.ProjectConfig{EstimateRefManual: &off}, projects, resolve, read)
+	if rs.Configured || rs.Manual != nil || rs.NOwn != 0 || rs.MedianRate() != DefaultHPerCFP {
+		t.Errorf("unticked: %+v median %v, want unconfigured/default", rs, rs.MedianRate())
+	}
+
+	// Manual (Traditional) + own: < 3 real features → the manual Likely.
+	on := true
+	trad := ticket.ManualBaseline{Low: 8, Likely: 12, High: 18}
+	rs = gatherReferenceFeatures("self", "/p/self", &ticket.ProjectConfig{EstimateRefManual: &on, EstimateManual: &trad, EstimateRefOwn: true}, projects, resolve, read)
+	if rs.Manual == nil || *rs.Manual != trad || rs.MedianRate() != 12 {
+		t.Errorf("manual traditional: %+v median %v, want 12", rs, rs.MedianRate())
+	}
+	// Manual + all: 4 real features → their median, not the manual Likely.
+	rs = gatherReferenceFeatures("self", "/p/self", &ticket.ProjectConfig{EstimateRefManual: &on, EstimateManual: &trad, EstimateRefAll: true}, projects, resolve, read)
+	if !approx(rs.MedianRate(), 0.45) {
+		t.Errorf("manual + all median = %v, want 0.45", rs.MedianRate())
 	}
 
 	// Own only: 2 features (< 3) → still the default.
@@ -243,5 +265,35 @@ func TestGatherReferenceFeatures(t *testing.T) {
 	rs = gatherReferenceFeatures("self", "/p/self", &ticket.ProjectConfig{EstimateRefAll: true, EstimateMinCFP: &big}, projects, resolve, read)
 	if rs.NBorrowed != 0 || rs.MedianRate() != DefaultHPerCFP {
 		t.Errorf("min cfp 50: borrowed=%d median=%v, want 0/default", rs.NBorrowed, rs.MedianRate())
+	}
+}
+
+// ProjectRefMedianRate uses the manual Likely when fewer than 3 real reference
+// features exist and the baseline is in effect; without it, the default.
+func TestProjectRefMedianRateManual(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GIT_DIR", root+"/no-git")
+	cfg := ticket.DefaultConfig("c", "P", "P", "P")
+	write := func() {
+		if err := ticket.WriteConfig(root, cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write()
+	if got := ProjectRefMedianRate(root); got != 0.25 { // default: manual agentic
+		t.Errorf("no saved inputs: %v, want 0.25", got)
+	}
+	on, off := true, false
+	cfg.EstimateRefManual = &on
+	cfg.EstimateManual = &ticket.ManualBaseline{Low: 8, Likely: 12, High: 18}
+	write()
+	if got := ProjectRefMedianRate(root); got != 12 {
+		t.Errorf("manual traditional: %v, want 12", got)
+	}
+	cfg.EstimateRefManual = &off
+	cfg.EstimateRefOwn = true
+	write()
+	if got := ProjectRefMedianRate(root); got != DefaultHPerCFP {
+		t.Errorf("manual off: %v, want default", got)
 	}
 }

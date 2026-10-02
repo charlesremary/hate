@@ -815,7 +815,28 @@
                 anything before.</li>
               <li><strong>This project's finished features</strong> — once enough are done, these
                 dominate the draw (own share = own&nbsp;N ÷ (own&nbsp;N + 5), 100% from 15).</li>
+              <li><strong>Manual baseline</strong> — a typed rate range in h/CFP for a cold start
+                (fresh install, or a first-of-its-kind project with nothing to borrow from).</li>
             </ul>
+            <p><strong>Manual baseline.</strong> Type <strong>Low / Likely / High</strong> h/CFP, read
+              as P10 / P50 / P90: Likely is the median rate, and 1 in 10 features should come in
+              under Low, 1 in 10 over High. Or pick a preset:</p>
+            <ul>
+              <li><strong>Agentic (Claude-assisted)</strong> — 0.08 / 0.25 / 1.00 h/CFP (the default;
+                from past Claude-assisted projects, with High set near the worst observed rate).</li>
+              <li><strong>Traditional (hand-coded)</strong> — 8 / 12 / 18 h/CFP (the industry band).</li>
+              <li><strong>Custom</strong> — editing any value switches to this.</li>
+            </ul>
+            <p>The range is used as typed (not widened) and counts as <strong>5 features of
+              evidence</strong>: it shares the non-own draws with borrowed features as 5 : borrowed&nbsp;N,
+              and hands over to this project's finished features as they come in — 0 done → all
+              baseline, 5 done → half, 15+ done → the baseline no longer counts. With it ticked the
+              3-feature minimum doesn't apply, and while there are fewer than 3 real reference features
+              its Likely is also the rate code tickets are scheduled at. The result note shows the mix,
+              e.g. "Draws: 40% manual baseline, 60% own features".</p>
+            <p><strong>New projects</strong> with no saved estimate inputs start on the manual baseline
+              (Agentic) + this project's finished features, so a range shows straight away; the panel
+              says so until you change an input. Unticking everything gives "no reference selected".</p>
             <p>Features under the <strong>min feature size</strong> (default 3 CFP) are left out so
               tiny features with extreme rates don't dominate; <strong>counting uncertainty</strong>
               (± %) widens the range for rough CFP counts. Changing any input recalculates at once —
@@ -828,13 +849,14 @@
               <strong>Total</strong> at P50 / P85 / P95, with a histogram of the totals, the number of
               reference features and the own/borrowed mix, actual hours so far, and a code projected
               finish (actual code hours on done features + the simulated rest). It needs at least 3
-              reference features.</p>
+              reference features, or the manual baseline.</p>
             <p>The estimate is display only. <strong>The max-hours cap stays manual</strong>: set it
               under ⚙ Settings → <em>Hour budget</em>.</p>
 
             <h3>Calibration slice — a new kind of project</h3>
             <p>With no comparable past project: count CFP for the whole spec, estimate with
-              <em>All past projects</em> (the wide range), and add explicit discovery wrap tickets
+              <em>All past projects</em> (the wide range) or the <em>Manual baseline</em> when there
+              are none, and add explicit discovery wrap tickets
               for the unknown platform. Then pick 3–5 representative features, tag their parents
               <code>calibration-slice</code>, and build them first. The tab marks them
               <span class="badge slice-badge">slice</span> and shows "Calibration slice: N of M done".

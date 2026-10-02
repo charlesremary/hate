@@ -217,12 +217,16 @@ open counts as unestimated), and a greedy one-ticket-at-a-time order rather than
 Code is sized in COSMIC function points (`cfp:N` on the feature's parent ticket)
 and estimated as a range: CFP × h/CFP rates from reference features you pick
 (past projects, all projects, or this project's own finished features), run as a
-Monte Carlo on the COSMIC tab (P50 / P85 / P95). Platform work (`config` /
+Monte Carlo on the COSMIC tab (P50 / P85 / P95). With nothing to borrow from, a
+**manual baseline** (a typed Low / Likely / High h/CFP range, with Agentic and
+Traditional presets) stands in as 5 features of evidence and hands over to the
+project's own features as they finish; new projects start on it (Agentic) by
+default. Platform work (`config` /
 `nonfunc` tickets) is estimated in hours on each ticket and added on top. The
 estimate is display-only; the project's max-hours cap is set by hand.
 
-How to tag tickets, count CFP, and use the estimate (including the calibration
-slice for a new kind of project) is in the
+How to tag tickets, count CFP, and use the estimate (including the manual
+baseline and the calibration slice for a new kind of project) is in the
 [agent guide](docs/ticketing-and-cfp-guide.md). The design and its decisions are
 in [docs/plan-estimation-rework.md](docs/plan-estimation-rework.md).
 

@@ -520,6 +520,12 @@ form .nt-radios label { display: inline-flex; align-items: center; gap: 4px; mar
 .mc-label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
 .mc-check { display: block; margin: 3px 0; cursor: pointer; }
 .mc-error { color: var(--red); font-size: 13px; padding: 8px 0; }
+.mc-manual { margin: 4px 0 0 22px; }
+.mc-manual select { font-size: 12px; margin-bottom: 6px; }
+.mc-manual-range { display: flex; gap: 10px; flex-wrap: wrap; }
+.mc-manual-field { display: flex; flex-direction: column; font-size: 11px; color: var(--text-muted); gap: 2px; }
+.mc-manual-field input { width: 76px; }
+.mc-hint { font-size: 12px; color: var(--text-muted); background: var(--bg); border-left: 3px solid var(--accent); padding: 4px 8px; margin-bottom: 10px; }
 .mc-table { max-width: 420px; }
 .mc-notes { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-top: 8px; }
 .mc-hist { display: block; width: 100%; max-width: 480px; height: auto; margin-top: 12px; overflow: visible; }

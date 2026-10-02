@@ -16,14 +16,20 @@ import (
 	"hate/internal/ticket"
 )
 
-// EstimateInputs are a project's Monte Carlo estimate inputs, with min_cfp and
-// count_unc_pct as their effective values (defaults filled in).
+// EstimateInputs are a project's Monte Carlo estimate inputs, as their
+// effective values (defaults filled in). With no saved reference inputs the
+// defaults are the manual baseline (Agentic) + own features, and
+// DefaultsApplied is true.
 type EstimateInputs struct {
-	RefProjects []string `json:"ref_projects"`
-	RefAll      bool     `json:"ref_all"`
-	RefOwn      bool     `json:"ref_own"`
-	MinCFP      int      `json:"min_cfp"`
-	CountUncPct float64  `json:"count_unc_pct"`
+	RefProjects     []string              `json:"ref_projects"`
+	RefAll          bool                  `json:"ref_all"`
+	RefOwn          bool                  `json:"ref_own"`
+	RefManual       bool                  `json:"ref_manual"`
+	Manual          ticket.ManualBaseline `json:"manual"`
+	ManualPreset    string                `json:"manual_preset"` // agentic | traditional | custom
+	DefaultsApplied bool                  `json:"defaults_applied"`
+	MinCFP          int                   `json:"min_cfp"`
+	CountUncPct     float64               `json:"count_unc_pct"`
 }
 
 // AvailableProject is another known project, offered as a reference.
@@ -37,23 +43,27 @@ type AvailableProject struct {
 type CosmicResponse struct {
 	pm.CosmicReport
 	EstimateInputs    EstimateInputs      `json:"estimate_inputs"`
+	ManualPresets     []pm.ManualPreset   `json:"manual_presets"`
 	AvailableProjects []AvailableProject  `json:"available_projects"`
 	MonteCarlo        pm.MonteCarloResult `json:"monte_carlo"`
 }
 
 // estimateInputsOf reads the effective estimate inputs from a project config.
 func estimateInputsOf(cfg *ticket.ProjectConfig) EstimateInputs {
+	refs := pm.EffectiveEstimateRefs(cfg)
 	in := EstimateInputs{
-		RefProjects: []string{},
-		MinCFP:      pm.EffectiveEstimateMinCFP(cfg),
-		CountUncPct: pm.EffectiveCountUncPct(cfg),
+		RefProjects:     []string{},
+		RefAll:          refs.All,
+		RefOwn:          refs.Own,
+		RefManual:       refs.Manual,
+		Manual:          refs.ManualBaseline,
+		ManualPreset:    pm.ManualPresetID(refs.ManualBaseline),
+		DefaultsApplied: refs.DefaultsApplied,
+		MinCFP:          pm.EffectiveEstimateMinCFP(cfg),
+		CountUncPct:     pm.EffectiveCountUncPct(cfg),
 	}
-	if cfg != nil {
-		if cfg.EstimateRefProjects != nil {
-			in.RefProjects = cfg.EstimateRefProjects
-		}
-		in.RefAll = cfg.EstimateRefAll
-		in.RefOwn = cfg.EstimateRefOwn
+	if refs.Projects != nil {
+		in.RefProjects = refs.Projects
 	}
 	return in
 }
@@ -73,7 +83,8 @@ func availableProjects(projectID, root string) []AvailableProject {
 
 // getCosmic handles GET /api/projects/{projectId}/cosmic.
 // Returns the COSMIC calibration report (per-feature rollups + project aggregate),
-// the Monte Carlo estimate, its inputs, and the projects that can be referenced.
+// the Monte Carlo estimate, its inputs, the manual baseline presets, and the
+// projects that can be referenced.
 func getCosmic(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
@@ -92,6 +103,7 @@ func getCosmic(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, CosmicResponse{
 		CosmicReport:      pm.ComputeCosmic(tickets),
 		EstimateInputs:    estimateInputsOf(cfg),
+		ManualPresets:     pm.ManualPresets,
 		AvailableProjects: availableProjects(projectID, root),
 		MonteCarlo:        pm.ProjectMonteCarlo(projectID, root, tickets, cfg),
 	})
@@ -99,9 +111,12 @@ func getCosmic(w http.ResponseWriter, r *http.Request) {
 
 // updateCosmicEstimate handles PUT /api/projects/{projectId}/cosmic-estimate.
 // Body: {"ref_projects": [ids], "ref_all": bool, "ref_own": bool,
+// "ref_manual": bool, "manual": {"low", "likely", "high"} (h/CFP, optional),
 // "min_cfp": int|null, "count_unc_pct": number|null}. Nulls reset to the
-// defaults. Validates (400), persists and commits the config, and returns the
-// effective inputs with the recomputed Monte Carlo estimate.
+// defaults; an omitted manual keeps the saved range (or the default preset).
+// Validates (400; manual needs 0 < low <= likely <= high), persists and
+// commits the config, and returns the effective inputs with the recomputed
+// Monte Carlo estimate.
 func updateCosmicEstimate(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
@@ -109,11 +124,13 @@ func updateCosmicEstimate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		RefProjects []string `json:"ref_projects"`
-		RefAll      bool     `json:"ref_all"`
-		RefOwn      bool     `json:"ref_own"`
-		MinCFP      *float64 `json:"min_cfp"` // float so a fraction is a 400, not a decode error
-		CountUncPct *float64 `json:"count_unc_pct"`
+		RefProjects []string               `json:"ref_projects"`
+		RefAll      bool                   `json:"ref_all"`
+		RefOwn      bool                   `json:"ref_own"`
+		RefManual   bool                   `json:"ref_manual"`
+		Manual      *ticket.ManualBaseline `json:"manual"`
+		MinCFP      *float64               `json:"min_cfp"` // float so a fraction is a 400, not a decode error
+		CountUncPct *float64               `json:"count_unc_pct"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -129,6 +146,10 @@ func updateCosmicEstimate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CountUncPct != nil && (*req.CountUncPct < 0 || *req.CountUncPct > 100) {
 		respondError(w, http.StatusBadRequest, "count_unc_pct must be between 0 and 100")
+		return
+	}
+	if req.Manual != nil && !pm.ValidManualBaseline(*req.Manual) {
+		respondError(w, http.StatusBadRequest, "manual: 0 < low <= likely <= high required")
 		return
 	}
 	known := map[string]bool{}
@@ -159,6 +180,12 @@ func updateCosmicEstimate(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg.EstimateRefAll = req.RefAll
 	cfg.EstimateRefOwn = req.RefOwn
+	refManual := req.RefManual
+	cfg.EstimateRefManual = &refManual
+	if req.Manual != nil {
+		m := *req.Manual
+		cfg.EstimateManual = &m
+	}
 	cfg.EstimateMinCFP = minCFP
 	cfg.EstimateCountUncPct = req.CountUncPct
 	if err := ticket.WriteConfig(root, cfg); err != nil {

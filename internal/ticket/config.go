@@ -120,6 +120,14 @@ type ProjectConfig struct {
 	EstimateRefProjects []string `json:"estimate_ref_projects,omitempty"` // project ids
 	EstimateRefAll      bool     `json:"estimate_ref_all,omitempty"`      // all other known projects
 	EstimateRefOwn      bool     `json:"estimate_ref_own,omitempty"`      // this project's finished features
+	// EstimateRefManual selects the manual baseline (EstimateManual) as a
+	// reference. A pointer so "never saved" (nil) is distinguishable from an
+	// explicit false: a project with no saved estimate inputs at all defaults
+	// to the manual baseline + its own features.
+	EstimateRefManual *bool `json:"estimate_ref_manual,omitempty"`
+	// EstimateManual is the manual baseline rate range in h/CFP (Low / Likely
+	// / High read as P10 / P50 / P90). nil = the default (Agentic) preset.
+	EstimateManual *ManualBaseline `json:"estimate_manual,omitempty"`
 	// EstimateMinCFP is the smallest feature (CFP) used as a reference sample.
 	// nil = default 3.
 	EstimateMinCFP *int `json:"estimate_min_cfp,omitempty"`
@@ -166,6 +174,14 @@ func (c *ProjectConfig) EffectiveWorkHours() *float64 {
 		return c.WorkHours
 	}
 	return c.MaxHours
+}
+
+// ManualBaseline is a typed h/CFP rate range for the Monte Carlo estimate:
+// Low / Likely / High read as P10 / P50 / P90.
+type ManualBaseline struct {
+	Low    float64 `json:"low"`
+	Likely float64 `json:"likely"`
+	High   float64 `json:"high"`
 }
 
 // DefaultEffortToDays maps effort sizes to estimated days. Values are days and
