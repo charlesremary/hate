@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"hate/internal/fsutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -290,7 +292,7 @@ func RunWBS(params KickoffParams, projectRoot, templateDir string) (*Baseline, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal baseline: %w", err)
 	}
-	if err := os.WriteFile(outPath, data, 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(outPath, data, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write baseline: %w", err)
 	}
 

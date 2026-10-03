@@ -57,6 +57,7 @@ func updateOverview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req OverviewRequest
 	if !decodeJSON(w, r, &req) {
 		return

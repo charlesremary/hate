@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
+	"hate/internal/fsutil"
 	"hate/internal/ticket"
 )
 
@@ -26,6 +26,10 @@ type ForecastHistoryEntry struct {
 	P85Finish      string  `json:"p85_finish"`
 	RequestedEnd   string  `json:"requested_end"`
 	RemainingHours float64 `json:"remaining_hours"`
+	// ComputedAt is when this entry was computed (RFC 3339, UTC). Two machines
+	// can each record the same day; a sync merge keeps the later computation.
+	// Empty in entries written before it existed.
+	ComputedAt string `json:"computed_at,omitempty"`
 }
 
 // sameForecast reports whether two entries carry the same forecast (dates aside).
@@ -77,33 +81,14 @@ func MergeForecastHistory(hist []ForecastHistoryEntry, e ForecastHistoryEntry) (
 	return append(append([]ForecastHistoryEntry{}, hist...), e), true
 }
 
-// forecastLocks serialises the history read-modify-write (and its commit) per
-// project, so concurrent dashboard loads don't corrupt the file.
-var (
-	forecastLocksMu sync.Mutex
-	forecastLocks   = map[string]*sync.Mutex{}
-)
-
-func forecastLock(projectRoot string) *sync.Mutex {
-	key := filepath.Clean(projectRoot)
-	forecastLocksMu.Lock()
-	defer forecastLocksMu.Unlock()
-	m := forecastLocks[key]
-	if m == nil {
-		m = &sync.Mutex{}
-		forecastLocks[key] = m
-	}
-	return m
-}
-
 // RecordForecastHistory records rep (computed on `today`) in the project's
 // history and commits the file when it changed. Nothing is recorded without a
 // requested end. Returns the (possibly updated) history and whether it changed.
-// Shared by the dashboard and GET /forecast.
+// Shared by the dashboard and GET /forecast. Takes the project lock (so
+// concurrent dashboard loads don't corrupt the file); a failed commit is only
+// logged (by ticket.CommitFiles).
 func RecordForecastHistory(projectRoot string, rep ForecastReport, today time.Time) ([]ForecastHistoryEntry, bool, error) {
-	mu := forecastLock(projectRoot)
-	mu.Lock()
-	defer mu.Unlock()
+	defer ticket.LockProject(projectRoot)()
 
 	hist, err := ReadForecastHistory(projectRoot)
 	if err != nil {
@@ -118,21 +103,19 @@ func RecordForecastHistory(projectRoot string, rep ForecastReport, today time.Ti
 		P85Finish:      rep.P85Finish,
 		RequestedEnd:   rep.RequestedEnd,
 		RemainingHours: rep.RemainingHours,
+		ComputedAt:     today.UTC().Format(time.RFC3339),
 	})
 	if !changed {
 		return hist, false, nil
 	}
 	path := ForecastHistoryPath(projectRoot)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return hist, false, err
-	}
 	data, err := json.MarshalIndent(hist, "", "  ")
 	if err != nil {
 		return hist, false, err
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(path, append(data, '\n'), 0644); err != nil {
 		return hist, false, err
 	}
-	ticket.GitCommit(projectRoot, []string{path}, "forecast history")
+	_ = ticket.CommitFiles(projectRoot, []string{path}, "forecast history")
 	return hist, true, nil
 }

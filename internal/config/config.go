@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"hate/internal/fsutil"
 )
 
 // ============================================================================
@@ -158,7 +160,7 @@ func SaveConfig(cfg *AppConfig) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 	data = append(data, '\n')
-	return os.WriteFile(AppConfigPath, data, 0644)
+	return fsutil.WriteFileAtomic(AppConfigPath, data, 0644)
 }
 
 // GetProjectsRoot returns the projects root directory path.

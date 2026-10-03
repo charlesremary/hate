@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"hate/internal/fsutil"
 )
 
 // CreateTicketParams holds all parameters for creating a new ticket.
@@ -74,6 +76,7 @@ func ReadTicket(repoRoot, ticketID string) (*Ticket, error) {
 	if t.Attachments == nil {
 		t.Attachments = []Attachment{}
 	}
+	NormalizeLegacy(&t)
 	return &t, nil
 }
 
@@ -122,6 +125,7 @@ func ReadAllTickets(repoRoot string) ([]*Ticket, error) {
 		if t.Attachments == nil {
 			t.Attachments = []Attachment{}
 		}
+		NormalizeLegacy(&t)
 		tickets = append(tickets, &t)
 	}
 	if tickets == nil {
@@ -130,8 +134,12 @@ func ReadAllTickets(repoRoot string) ([]*Ticket, error) {
 	return tickets, nil
 }
 
-// WriteTicket validates and writes a ticket to disk.
+// WriteTicket validates and writes a ticket to disk (atomically). A ticket
+// that was normalized on read (see NormalizeLegacy) gets its activity notes
+// here, so the normalized form is written with the edit that caused it. The
+// caller holds the project lock.
 func WriteTicket(repoRoot string, t *Ticket) error {
+	recordNormalization(t)
 	errors := ValidateTicket(t)
 	if len(errors) > 0 {
 		return fmt.Errorf("Invalid ticket: %s", strings.Join(errors, "; "))
@@ -146,7 +154,7 @@ func WriteTicket(repoRoot string, t *Ticket) error {
 		return fmt.Errorf("failed to marshal ticket: %w", err)
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0644)
+	return fsutil.WriteFileAtomic(path, data, 0644)
 }
 
 // CreateTicket creates a new ticket and writes it to disk.

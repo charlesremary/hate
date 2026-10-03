@@ -178,12 +178,18 @@ func TestPlanAuditTrailCommits(t *testing.T) {
 		t.Error("strip should show 1 unresolved slip")
 	}
 
-	// tc3: resolving commits the resolution.
-	code, body := do(t, h, "PATCH", base+"/slip/SE-est-001", map[string]interface{}{"reason_category": "client_delay", "reason_narrative": "waiting on the client"})
+	// tc3: resolving commits the resolution. (Slip ids are deterministic,
+	// HATE-wn0y: SE-<project>-<hash>.)
+	pending, _ := pm.ReadSlipEvents(root)
+	if len(pending) != 1 || !strings.HasPrefix(pending[0].SlipEventID, "SE-est-") || len(pending[0].SlipEventID) != len("SE-est-")+10 {
+		t.Fatalf("slip events = %+v", pending)
+	}
+	slipID := pending[0].SlipEventID
+	code, body := do(t, h, "PATCH", base+"/slip/"+slipID, map[string]interface{}{"reason_category": "client_delay", "reason_narrative": "waiting on the client"})
 	if code != http.StatusOK {
 		t.Fatalf("resolve: %d %v", code, body)
 	}
-	if msg := git("log", "-1", "--format=%s"); msg != "slip SE-est-001 resolved: client_delay" {
+	if msg := git("log", "-1", "--format=%s"); msg != "slip "+slipID+" resolved: client_delay" {
 		t.Errorf("resolve commit = %q", msg)
 	}
 	if st := git("status", "--porcelain"); st != "" {
@@ -318,7 +324,8 @@ func TestRebaseline(t *testing.T) {
 		t.Errorf("slip after re-baseline: %d %v", code, body["unresolved_slip_events"])
 	}
 	evs, _ = pm.ReadSlipEvents(root)
-	if len(evs) != 2 || evs[1].SlipEventID != "SE-est-002" || evs[1].SlipDays != 3 || evs[1].SupersededBy != nil {
+	if len(evs) != 2 || evs[1].SlipEventID == evs[0].SlipEventID || !strings.HasPrefix(evs[1].SlipEventID, "SE-est-") ||
+		evs[1].SlipDays != 3 || evs[1].SupersededBy != nil {
 		t.Errorf("events = %+v", evs)
 	}
 

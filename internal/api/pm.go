@@ -143,7 +143,7 @@ func createSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshot, err := pm.TakeSnapshot(projectID, root)
+	snapshot, warn, err := pm.TakeSnapshot(projectID, root)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "No baseline") {
 			respondError(w, http.StatusNotFound, err.Error())
@@ -152,7 +152,10 @@ func createSnapshot(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	respondJSON(w, http.StatusOK, snapshot)
+	respondJSON(w, http.StatusOK, struct {
+		*pm.Snapshot
+		CommitWarning string `json:"commit_warning,omitempty"`
+	}{snapshot, warn})
 }
 
 // getGanttDrawio handles GET /api/projects/{projectId}/gantt.drawio — the
@@ -348,10 +351,11 @@ func createBaseline(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:           createdBy,
 	}
 
-	unlock := pm.LockPlan(root)
+	unlock := ticket.LockProject(root)
 	baseline, err := pm.RunWBS(params, root, templateDir)
+	warn := ""
 	if err == nil {
-		pm.CommitBaseline(root, fmt.Sprintf("baseline: %s from template %s", req.ProjectName, req.TemplateID))
+		warn = pm.CommitBaseline(root, fmt.Sprintf("baseline: %s from template %s", req.ProjectName, req.TemplateID))
 	}
 	unlock()
 	if err != nil {
@@ -362,7 +366,10 @@ func createBaseline(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	respondJSON(w, http.StatusOK, baseline)
+	respondJSON(w, http.StatusOK, struct {
+		*pm.Baseline
+		CommitWarning string `json:"commit_warning,omitempty"`
+	}{baseline, warn})
 }
 
 // readOptionalAuthor reads an optional {"author": ...} body (empty or absent
@@ -399,7 +406,7 @@ func baselineFromTickets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	author := pm.ResolveAuthor(root, readOptionalAuthor(r))
-	baseline, err := pm.BaselineNow(root, projectID, projectName, author)
+	baseline, warn, err := pm.BaselineNow(root, projectID, projectName, author)
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			respondError(w, http.StatusConflict, err.Error())
@@ -408,7 +415,10 @@ func baselineFromTickets(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	respondJSON(w, http.StatusOK, baseline)
+	respondJSON(w, http.StatusOK, struct {
+		*pm.Baseline
+		CommitWarning string `json:"commit_warning,omitempty"`
+	}{baseline, warn})
 }
 
 // generateReport handles POST /api/projects/{projectId}/report
@@ -452,7 +462,7 @@ func resolveSlip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer pm.LockPlan(root)()
+	defer ticket.LockProject(root)()
 	events, err := pm.ReadSlipEvents(root)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "No slip events file found.")
@@ -492,12 +502,14 @@ func resolveSlip(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	pm.CommitSlipEvents(root, fmt.Sprintf("slip %s resolved: %s", slipEventID, req.ReasonCategory))
-
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"updated": slipEventID,
 		"status":  "resolved",
-	})
+	}
+	if warn := pm.CommitSlipEvents(root, fmt.Sprintf("slip %s resolved: %s", slipEventID, req.ReasonCategory)); warn != "" {
+		resp["commit_warning"] = warn
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 // rebaseline handles POST /api/projects/{projectId}/rebaseline.

@@ -4,6 +4,9 @@
 package pm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -151,34 +154,38 @@ func fmtDate(t time.Time) string {
 // Slip event detection
 // ---------------------------------------------------------------------------
 
-// slipEventSeqCounter tracks the next sequence number for slip event IDs within a project.
-var slipEventSeqCounter = map[string]int{}
+// BaselineKey identifies a baseline for slip event ids: a short hash of its
+// content (dates, author and tasks). Two machines holding the same baseline
+// get the same key; a re-baseline gets a new one.
+func BaselineKey(b Baseline) string {
+	data, _ := json.Marshal(b)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])[:12]
+}
 
-// DetectSlipEvents compares baseline planned_end vs current due_date for each task.
-// Returns a list of NEW slip events to append.
-func DetectSlipEvents(baselineTasks []BaselineTask, currentTasks map[string]map[string]interface{}, existingSlipEvents []SlipEvent) []SlipEvent {
-	today := time.Now()
+// SlipEventID is the deterministic id of the slip of taskID to revisedDue
+// measured against the baseline with key baselineKey:
+// "SE-<project>-<10 hex>". Two machines that detect the same slip produce the
+// same id (and, on the same day, the same event), so slip_events.json merges
+// as a union by id. Ids written by older versions ("SE-<project>-001") stay
+// valid; nothing is renumbered.
+func SlipEventID(projectID, baselineKey, taskID, revisedDue string) string {
+	sum := sha256.Sum256([]byte(baselineKey + "|" + taskID + "|" + revisedDue))
+	return fmt.Sprintf("SE-%s-%s", projectID, hex.EncodeToString(sum[:])[:10])
+}
 
+// DetectSlipEvents compares baseline planned_end vs current due_date for each
+// task and returns the NEW slip events to append, detected on `today`.
+// baselineKey is BaselineKey of the baseline the tasks come from; it makes
+// the event ids deterministic (see SlipEventID).
+func DetectSlipEvents(baselineKey string, baselineTasks []BaselineTask, currentTasks map[string]map[string]interface{}, existingSlipEvents []SlipEvent, today time.Time) []SlipEvent {
 	// Build lookup of existing unresolved events by task_id
 	unresolvedByTask := map[string][]SlipEvent{}
+	existingIDs := map[string]bool{}
 	for _, ev := range existingSlipEvents {
+		existingIDs[ev.SlipEventID] = true
 		if ev.Status == "unresolved" && ev.Current() {
 			unresolvedByTask[ev.TaskID] = append(unresolvedByTask[ev.TaskID], ev)
-		}
-	}
-
-	// Find max existing sequence number per project
-	seqByProject := map[string]int{}
-	for _, ev := range existingSlipEvents {
-		// Parse sequence from slip_event_id like "SE-PROJ-001"
-		parts := strings.Split(ev.SlipEventID, "-")
-		if len(parts) >= 3 {
-			var seq int
-			fmt.Sscanf(parts[len(parts)-1], "%d", &seq)
-			projID := ev.ProjectID
-			if seq > seqByProject[projID] {
-				seqByProject[projID] = seq
-			}
 		}
 	}
 
@@ -220,11 +227,14 @@ func DetectSlipEvents(baselineTasks []BaselineTask, currentTasks map[string]map[
 				if projID == "" {
 					projID = "UNKNOWN"
 				}
-				seqByProject[projID]++
-				seqNum := seqByProject[projID]
+				id := SlipEventID(projID, baselineKey, taskID, fmtDate(currentDue))
+				if existingIDs[id] {
+					continue // this exact slip is already recorded
+				}
+				existingIDs[id] = true
 
 				newEvents = append(newEvents, SlipEvent{
-					SlipEventID:      fmt.Sprintf("SE-%s-%03d", projID, seqNum),
+					SlipEventID:      id,
 					TaskID:           taskID,
 					ProjectID:        projID,
 					DetectedDate:     fmtDate(today),

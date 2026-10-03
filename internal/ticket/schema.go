@@ -38,6 +38,8 @@ var (
 		"test_case_added",
 		"test_case_result",
 		"test_case_removed",
+		ActionNormalized,
+		ActionSyncMerge,
 	}
 
 	// TypeSpecificFields maps ticket types to their type-specific field names.
@@ -61,6 +63,10 @@ var (
 		"meeting_attendees":  nil,
 	}
 )
+
+// ActionSyncMerge is the activity action of the note a sync merge adds when
+// the same field was changed on two machines (see internal/merge).
+const ActionSyncMerge = "sync_merge"
 
 // BacklogTag marks a ticket as backlog — present in the project but out of
 // committed scope. Backlog tickets are excluded from completion %, the
@@ -186,6 +192,10 @@ type Ticket struct {
 
 	// TestCases are the QA test cases for this ticket (how to test it + results).
 	TestCases []TestCase `json:"test_cases,omitempty"`
+
+	// legacyNotes are the retired values NormalizeLegacy mapped on read, not
+	// yet written (see legacy.go). Not serialized.
+	legacyNotes []string
 }
 
 // NowISO returns the current UTC time in ISO 8601 format matching Python's output.

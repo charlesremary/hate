@@ -12,6 +12,7 @@ import (
 	"sort"
 	"time"
 
+	"hate/internal/fsutil"
 	"hate/internal/ticket"
 )
 
@@ -229,19 +230,17 @@ func runSnapshot(projectID, projectRoot, generatedBy string) (*Snapshot, error) 
 		baseline.Tasks[i].ProjectID = projectID
 	}
 
-	// Detect new slip events (sequence numbers run over the whole file;
-	// events superseded by a re-baseline are otherwise ignored)
-	newEvents := DetectSlipEvents(baseline.Tasks, currentTasks, slipEvents)
+	// Detect new slip events (ids are derived from the baseline, ticket and
+	// revised due date, so two machines detecting the same slip agree; events
+	// superseded by a re-baseline are otherwise ignored)
+	newEvents := DetectSlipEvents(BaselineKey(baseline), baseline.Tasks, currentTasks, slipEvents, today)
 	if len(newEvents) > 0 {
 		slipEvents = append(slipEvents, newEvents...)
-		if err := os.MkdirAll(filepath.Dir(sep), 0755); err != nil {
-			return nil, fmt.Errorf("failed to create slip events directory: %w", err)
-		}
 		slipData, err := json.MarshalIndent(slipEvents, "", "  ")
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal slip events: %w", err)
 		}
-		if err := os.WriteFile(sep, slipData, 0644); err != nil {
+		if err := fsutil.WriteFileAtomic(sep, slipData, 0644); err != nil {
 			return nil, fmt.Errorf("failed to write slip events: %w", err)
 		}
 	}
@@ -266,7 +265,7 @@ func runSnapshot(projectID, projectRoot, generatedBy string) (*Snapshot, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal snapshot: %w", err)
 	}
-	if err := os.WriteFile(outPath, snapData, 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(outPath, snapData, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write snapshot: %w", err)
 	}
 
@@ -449,7 +448,7 @@ func writeBaseline(projectRoot string, baseline *Baseline) error {
 		return fmt.Errorf("failed to marshal baseline: %w", err)
 	}
 	bdata = append(bdata, '\n')
-	if err := os.WriteFile(bp, bdata, 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(bp, bdata, 0644); err != nil {
 		return fmt.Errorf("failed to write baseline: %w", err)
 	}
 	return nil

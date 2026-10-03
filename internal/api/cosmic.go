@@ -123,6 +123,7 @@ func updateCosmicEstimate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req struct {
 		RefProjects []string               `json:"ref_projects"`
 		RefAll      bool                   `json:"ref_all"`
@@ -192,16 +193,19 @@ func updateCosmicEstimate(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ticket.EnsureProjectIdentity(root, cfg)
-	ticket.GitCommit(root, []string{ticket.ConfigPath(root)}, "estimate inputs")
+	warn := ticket.CommitWarning(ticket.CommitFiles(root, []string{ticket.ConfigPath(root)}, "estimate inputs"))
 
 	tickets, err := ticket.ReadAllTickets(root)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"estimate_inputs": estimateInputsOf(cfg),
 		"monte_carlo":     pm.ProjectMonteCarlo(projectID, root, tickets, cfg),
-	})
+	}
+	if warn != "" {
+		resp["commit_warning"] = warn
+	}
+	respondJSON(w, http.StatusOK, resp)
 }

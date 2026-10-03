@@ -453,6 +453,7 @@ func syncProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	cfg, err := ticket.ReadConfig(root)
 	if err == nil {
@@ -508,6 +509,7 @@ func setGitIdentity(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	var req GitIdentityRequest
 	if !decodeJSON(w, r, &req) {
@@ -572,6 +574,7 @@ func addResource(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	var req ResourceRequest
 	if !decodeJSON(w, r, &req) {
@@ -626,6 +629,7 @@ func updateResource(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	var req ResourceRequest
 	if !decodeJSON(w, r, &req) {
@@ -698,6 +702,7 @@ func removeResource(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	cfg, err := ticket.ReadConfig(root)
 	if err != nil {
@@ -816,6 +821,7 @@ func updateEffortToDays(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req struct {
 		EffortToDays map[string]float64 `json:"effort_to_days"`
 	}
@@ -888,6 +894,7 @@ func updateHourBudget(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req struct {
 		WorkHours  *float64 `json:"work_hours"`
 		AdminHours *float64 `json:"admin_hours"`
@@ -945,6 +952,7 @@ func updateStrictTime(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req struct {
 		StrictTimeEnforcement bool `json:"strict_time_enforcement"`
 	}
@@ -987,6 +995,7 @@ func updateEnforceQA(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req struct {
 		EnforceQA bool `json:"enforce_qa"`
 	}
@@ -1015,6 +1024,7 @@ func updateProjectInfo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req struct {
 		ProjectName *string `json:"project_name"`
 	}
@@ -1046,9 +1056,11 @@ func updateProjectInfo(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ticket.EnsureProjectIdentity(root, cfg)
-	ticket.GitCommit(root, []string{ticket.ConfigPath(root)}, "rename project: "+cfg.ProjectName)
-	respondJSON(w, http.StatusOK, cfg)
+	warn := ticket.CommitWarning(ticket.CommitFiles(root, []string{ticket.ConfigPath(root)}, "rename project: "+cfg.ProjectName))
+	respondJSON(w, http.StatusOK, struct {
+		*ticket.ProjectConfig
+		CommitWarning string `json:"commit_warning,omitempty"`
+	}{cfg, warn})
 }
 
 // closeProject handles POST /api/projects/{projectId}/close. Stamps
@@ -1059,6 +1071,7 @@ func closeProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	cfg, err := ticket.ReadConfig(root)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -1082,6 +1095,7 @@ func reopenProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	cfg, err := ticket.ReadConfig(root)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())

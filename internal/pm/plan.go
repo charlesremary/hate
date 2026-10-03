@@ -15,10 +15,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
+	"hate/internal/fsutil"
 	"hate/internal/ticket"
 )
 
@@ -53,27 +53,11 @@ func TodaySnapshotPath(projectRoot string, today time.Time) string {
 	return filepath.Join(SnapshotsDir(projectRoot), today.Format("2006-01-02")+".json")
 }
 
-// planLocks serialise the baseline / snapshot / slip read-modify-writes (and
-// their commits) per project, so concurrent requests can't duplicate a daily
-// snapshot or slip events, or interleave commits.
-var (
-	planLocksMu sync.Mutex
-	planLocks   = map[string]*sync.Mutex{}
-)
-
-// LockPlan takes the project's plan lock and returns the unlock function.
-func LockPlan(projectRoot string) func() {
-	key := filepath.Clean(projectRoot)
-	planLocksMu.Lock()
-	m := planLocks[key]
-	if m == nil {
-		m = &sync.Mutex{}
-		planLocks[key] = m
-	}
-	planLocksMu.Unlock()
-	m.Lock()
-	return m.Unlock
-}
+// The baseline / snapshot / slip read-modify-writes (and their commits) run
+// under the project write lock (ticket.LockProject), so concurrent requests
+// can't duplicate a daily snapshot or slip events, or interleave commits. The
+// exported entry points below say whether they take it; see the rule in
+// internal/ticket/lock.go.
 
 // ensurePMGitignore makes .tkt/pm/.gitignore ignore snapshots/ (creating the
 // file, or appending the line to an existing one). Returns its path.
@@ -95,23 +79,22 @@ func ensurePMGitignore(projectRoot string) (string, error) {
 		data = append(data, '\n')
 	}
 	data = append(data, []byte("snapshots/\n")...)
-	return path, os.WriteFile(path, data, 0644)
+	return path, fsutil.WriteFileAtomic(path, data, 0644)
 }
 
-// commitPlan commits the given (existing) paths with the project's git identity.
-func commitPlan(projectRoot string, paths []string, message string) {
-	if cfg, err := ticket.ReadConfig(projectRoot); err == nil {
-		ticket.EnsureProjectIdentity(projectRoot, cfg)
-	}
+// commitPlan commits the given (existing) paths with ticket.CommitFiles.
+// Returns the commit warning ("" when it committed or had nothing to commit).
+func commitPlan(projectRoot string, paths []string, message string) string {
 	var files []string
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
 			files = append(files, p)
 		}
 	}
-	if len(files) > 0 {
-		ticket.GitCommit(projectRoot, files, message)
+	if len(files) == 0 {
+		return ""
 	}
+	return ticket.CommitWarning(ticket.CommitFiles(projectRoot, files, message))
 }
 
 // ResolveAuthor returns the requested author, else the project's git identity
@@ -139,38 +122,41 @@ func ResolveAuthor(projectRoot, requested string) string {
 }
 
 // BaselineNow creates the baseline from the current tickets and commits it
-// (with .tkt/pm/.gitignore).
-func BaselineNow(projectRoot, projectID, projectName, author string) (*Baseline, error) {
-	defer LockPlan(projectRoot)()
-	b, err := CreateBaselineFromTickets(projectRoot, projectID, projectName, author)
+// (with .tkt/pm/.gitignore). Takes the project lock. commitWarning is "" unless
+// the commit failed.
+func BaselineNow(projectRoot, projectID, projectName, author string) (b *Baseline, commitWarning string, err error) {
+	defer ticket.LockProject(projectRoot)()
+	b, err = CreateBaselineFromTickets(projectRoot, projectID, projectName, author)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	CommitBaseline(projectRoot, fmt.Sprintf("baseline: %d tickets, planned end %s", len(b.Tasks), b.PlannedEnd))
-	return b, nil
+	warn := CommitBaseline(projectRoot, fmt.Sprintf("baseline: %d tickets, planned end %s", len(b.Tasks), b.PlannedEnd))
+	return b, warn, nil
 }
 
 // CommitBaseline commits baseline.json (and the snapshots .gitignore) after a
-// baseline was written, e.g. by the template WBS route.
-func CommitBaseline(projectRoot, message string) {
+// baseline was written, e.g. by the template WBS route. The caller holds the
+// project lock. Returns the commit warning ("" on success).
+func CommitBaseline(projectRoot, message string) string {
 	gi, _ := ensurePMGitignore(projectRoot)
-	commitPlan(projectRoot, []string{BaselinePath(projectRoot), gi}, message)
+	return commitPlan(projectRoot, []string{BaselinePath(projectRoot), gi}, message)
 }
 
-// CommitSlipEvents commits slip_events.json. Callers hold LockPlan.
-func CommitSlipEvents(projectRoot, message string) {
-	commitPlan(projectRoot, []string{SlipEventsPath(projectRoot)}, message)
+// CommitSlipEvents commits slip_events.json. The caller holds the project
+// lock. Returns the commit warning ("" on success).
+func CommitSlipEvents(projectRoot, message string) string {
+	return commitPlan(projectRoot, []string{SlipEventsPath(projectRoot)}, message)
 }
 
 // snapshotLocked runs a snapshot and commits slip_events.json when the
 // snapshot changed it (plus the .gitignore when it had to be written).
-// Callers hold LockPlan.
-func snapshotLocked(projectID, projectRoot, generatedBy string) (*Snapshot, error) {
+// The caller holds the project lock. Returns the commit warning.
+func snapshotLocked(projectID, projectRoot, generatedBy string) (*Snapshot, string, error) {
 	before, _ := os.ReadFile(SlipEventsPath(projectRoot))
 	nBefore := countEvents(before)
 	snap, err := runSnapshot(projectID, projectRoot, generatedBy)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	giBefore, _ := os.ReadFile(PMGitignorePath(projectRoot))
 	gi, _ := ensurePMGitignore(projectRoot)
@@ -178,15 +164,15 @@ func snapshotLocked(projectID, projectRoot, generatedBy string) (*Snapshot, erro
 	after, _ := os.ReadFile(SlipEventsPath(projectRoot))
 	slipsChanged := !bytes.Equal(before, after)
 	if !slipsChanged && bytes.Equal(giBefore, giAfter) {
-		return snap, nil
+		return snap, "", nil
 	}
 	msg := "ignore PM snapshots"
 	if slipsChanged {
 		n := countEvents(after) - nBefore
 		msg = fmt.Sprintf("snapshot %s: %d new slip event%s", snap.SnapshotDate, n, pluralS(n))
 	}
-	commitPlan(projectRoot, []string{SlipEventsPath(projectRoot), gi}, msg)
-	return snap, nil
+	warn := commitPlan(projectRoot, []string{SlipEventsPath(projectRoot), gi}, msg)
+	return snap, warn, nil
 }
 
 func countEvents(data []byte) int {
@@ -198,24 +184,26 @@ func countEvents(data []byte) int {
 }
 
 // TakeSnapshot is the manual snapshot (POST /snapshot): it always runs and
-// commits slip_events.json when new slip events were detected.
-func TakeSnapshot(projectID, projectRoot string) (*Snapshot, error) {
-	defer LockPlan(projectRoot)()
+// commits slip_events.json when new slip events were detected. Takes the
+// project lock. commitWarning is "" unless the commit failed.
+func TakeSnapshot(projectID, projectRoot string) (snap *Snapshot, commitWarning string, err error) {
+	defer ticket.LockProject(projectRoot)()
 	return snapshotLocked(projectID, projectRoot, "manual")
 }
 
 // AutoSnapshot takes today's snapshot when the project has a baseline and no
 // snapshot for today yet (at most once a calendar day; concurrent callers
-// produce one). Reports whether it ran.
+// produce one). Reports whether it ran. Takes the project lock; a failed
+// commit is only logged (by ticket.CommitFiles).
 func AutoSnapshot(projectID, projectRoot string) (bool, error) {
-	defer LockPlan(projectRoot)()
+	defer ticket.LockProject(projectRoot)()
 	if !BaselineExists(projectRoot) {
 		return false, nil
 	}
 	if _, err := os.Stat(TodaySnapshotPath(projectRoot, time.Now())); err == nil {
 		return false, nil
 	}
-	if _, err := snapshotLocked(projectID, projectRoot, "auto"); err != nil {
+	if _, _, err := snapshotLocked(projectID, projectRoot, "auto"); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -240,6 +228,9 @@ type RebaselineResult struct {
 	ArchivePath   string    `json:"archive_path"` // relative to the project root
 	ClosedSlips   int       `json:"closed_slip_events"`
 	SupersededAll int       `json:"superseded_slip_events"`
+	// CommitWarning is set when the re-baseline commit failed (the files are
+	// written either way).
+	CommitWarning string `json:"commit_warning,omitempty"`
 }
 
 // ValidRebaselineReason trims the reason and checks its length.
@@ -256,13 +247,13 @@ func ValidRebaselineReason(reason string) (string, error) {
 // "rebaseline" with the reason as narrative, and every event against it is
 // marked superseded; a new baseline is created from the current tickets and
 // today's snapshot is retaken against it. All of it is one commit
-// "re-baseline: <reason>".
+// "re-baseline: <reason>". Takes the project lock.
 func Rebaseline(projectRoot, projectID, projectName, reason, author string) (*RebaselineResult, error) {
 	reason, err := ValidRebaselineReason(reason)
 	if err != nil {
 		return nil, err
 	}
-	defer LockPlan(projectRoot)()
+	defer ticket.LockProject(projectRoot)()
 
 	oldRaw, err := os.ReadFile(BaselinePath(projectRoot))
 	if os.IsNotExist(err) {
@@ -300,7 +291,7 @@ func Rebaseline(projectRoot, projectID, projectName, reason, author string) (*Re
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(archivePath, append(data, '\n'), 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(archivePath, append(data, '\n'), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write baseline archive: %w", err)
 	}
 
@@ -337,7 +328,7 @@ func Rebaseline(projectRoot, projectID, projectName, reason, author string) (*Re
 	_ = os.Remove(TodaySnapshotPath(projectRoot, now))
 	_, _ = runSnapshot(projectID, projectRoot, "re-baseline")
 	gi, _ := ensurePMGitignore(projectRoot)
-	commitPlan(projectRoot, []string{archivePath, BaselinePath(projectRoot), SlipEventsPath(projectRoot), gi},
+	res.CommitWarning = commitPlan(projectRoot, []string{archivePath, BaselinePath(projectRoot), SlipEventsPath(projectRoot), gi},
 		"re-baseline: "+strings.Join(strings.Fields(reason), " "))
 	return res, nil
 }

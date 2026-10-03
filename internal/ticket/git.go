@@ -4,10 +4,16 @@
 package ticket
 
 import (
+	"bytes"
 	"fmt"
+	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"hate/internal/fsutil"
 )
 
 // GitUserIdentity returns the local Git user identity for the repo.
@@ -55,8 +61,143 @@ func EnsureProjectIdentity(repoRoot string, cfg *ProjectConfig) {
 	}
 }
 
+// CommitFiles is the one commit path for everything hate writes: it applies
+// the project's git identity, stops tracking the derived index.json the first
+// time it finds it tracked (see UntrackIndex), drops index.json from files,
+// and commits exactly the remaining paths with GitCommit.
+//
+// A failure (not a git repo, hook rejected, ...) is logged and returned as an
+// error; callers pass its text to the API caller as a commit warning. "Nothing
+// to commit" is not a failure. The caller holds the project lock.
+func CommitFiles(repoRoot string, files []string, message string) error {
+	if cfg, err := ReadConfig(repoRoot); err == nil {
+		EnsureProjectIdentity(repoRoot, cfg)
+	}
+	if _, err := UntrackIndex(repoRoot); err != nil {
+		log.Printf("commit (%s): untrack index.json: %v", repoRoot, err)
+	}
+	idx := filepath.Clean(IndexPath(repoRoot))
+	kept := make([]string, 0, len(files))
+	for _, f := range files {
+		p := f
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(repoRoot, p)
+		}
+		if filepath.Clean(p) == idx {
+			continue
+		}
+		kept = append(kept, f)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	ok, out := GitCommit(repoRoot, kept, message)
+	if ok {
+		return nil
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		out = "git commit failed"
+	}
+	err := fmt.Errorf("commit %q failed: %s", message, out)
+	log.Printf("commit warning (%s): %v", repoRoot, err)
+	return err
+}
+
+// CommitWarning is the API form of a CommitFiles error: "" for success, else
+// the error text.
+func CommitWarning(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// IndexUntrackMessage is the commit message of the one-off commit that stops
+// tracking index.json.
+const IndexUntrackMessage = "stop tracking derived index.json"
+
+// UntrackIndex stops tracking the derived index.json in a repo that still
+// tracks it: index.json is removed from git (kept on disk), added to the
+// repo's .gitignore, and that is committed once on its own
+// (IndexUntrackMessage). The commit is built in a temporary index from HEAD,
+// so nothing else the user has staged is swept in. Returns whether it made
+// the commit. A repo that doesn't track index.json (or isn't a git repo) is
+// left alone. The caller holds the project lock.
+func UntrackIndex(repoRoot string) (bool, error) {
+	cmd := exec.Command("git", "ls-files", "--", "index.json")
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		return false, nil // not a git repo, or not tracked
+	}
+	gi := filepath.Join(repoRoot, ".gitignore")
+	if err := ensureIgnoreLine(gi, "index.json"); err != nil {
+		return false, err
+	}
+
+	tmpDir, err := os.MkdirTemp("", "hate-index-")
+	if err != nil {
+		return false, err
+	}
+	defer os.RemoveAll(tmpDir)
+	env := append(os.Environ(), "GIT_INDEX_FILE="+filepath.Join(tmpDir, "index"))
+	run := func(env []string, args ...string) error {
+		c := exec.Command("git", args...)
+		c.Dir = repoRoot
+		if env != nil {
+			c.Env = env
+		}
+		if o, err := c.CombinedOutput(); err != nil {
+			return fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(o)))
+		}
+		return nil
+	}
+	for _, args := range [][]string{
+		{"read-tree", "HEAD"},
+		{"rm", "--cached", "-q", "--ignore-unmatch", "--", "index.json"},
+		{"add", "--", ".gitignore"},
+		{"commit", "-q", "-m", IndexUntrackMessage},
+	} {
+		if err := run(env, args...); err != nil {
+			return false, err
+		}
+	}
+	// Bring the real index in line with the new HEAD for those two paths
+	// (-f: the staged index.json now differs from HEAD, which no longer has
+	// it; --cached keeps the file on disk).
+	if err := run(nil, "rm", "--cached", "-f", "-q", "--ignore-unmatch", "--", "index.json"); err != nil {
+		return true, err
+	}
+	if err := run(nil, "add", "--", ".gitignore"); err != nil {
+		return true, err
+	}
+	log.Printf("%s: %s", repoRoot, IndexUntrackMessage)
+	return true, nil
+}
+
+// ensureIgnoreLine appends line to the .gitignore at path unless an equivalent
+// entry is already there.
+func ensureIgnoreLine(path, line string) error {
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		if t := strings.TrimSpace(l); t == line || t == "/"+line {
+			return nil
+		}
+	}
+	if len(data) > 0 && !bytes.HasSuffix(data, []byte("\n")) {
+		data = append(data, '\n')
+	}
+	data = append(data, []byte(line+"\n")...)
+	return fsutil.WriteFileAtomic(path, data, 0644)
+}
+
 // GitCommit stages specific files and commits with the given message.
-// Returns (success, output_or_error).
+// Returns (success, output_or_error). Prefer CommitFiles, which also applies
+// the identity, keeps index.json out and reports failures.
 func GitCommit(repoRoot string, files []string, message string) (bool, string) {
 	args := append([]string{"add"}, files...)
 	cmd := exec.Command("git", args...)
@@ -188,7 +329,8 @@ func GitFetchStatus(repoRoot string) map[string]interface{} {
 	return result
 }
 
-// GitSync pulls (rebase) then pushes. Aborts rebase on conflict.
+// GitSync pulls (rebase) then pushes. Aborts rebase on conflict. The caller
+// holds the project lock.
 func GitSync(repoRoot string) map[string]interface{} {
 	fetchStatus := GitFetchStatus(repoRoot)
 	hasRemote, _ := fetchStatus["has_remote"].(bool)

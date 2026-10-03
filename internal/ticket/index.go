@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"hate/internal/fsutil"
 )
 
 // IndexSummary is the summary representation of a ticket in the index.
@@ -90,7 +92,9 @@ func IndexPath(repoRoot string) string {
 	return filepath.Join(repoRoot, "index.json")
 }
 
-// RegenerateIndex rebuilds index.json from all ticket files.
+// RegenerateIndex rebuilds index.json from all ticket files. index.json is
+// derived and not tracked in git (see UntrackIndex); it is rewritten
+// atomically, so it is safe to call without the project lock.
 func RegenerateIndex(repoRoot string) error {
 	tickets, err := ReadAllTickets(repoRoot)
 	if err != nil {
@@ -103,7 +107,7 @@ func RegenerateIndex(repoRoot string) error {
 	}
 	data = append(data, '\n')
 	path := IndexPath(repoRoot)
-	return os.WriteFile(path, data, 0644)
+	return fsutil.WriteFileAtomic(path, data, 0644)
 }
 
 // ReadIndex reads the current index. Returns empty index if file is missing.

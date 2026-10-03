@@ -10,6 +10,8 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+
+	"hate/internal/fsutil"
 )
 
 // Resource represents a team member in the project config.
@@ -323,7 +325,8 @@ func ReadConfig(repoRoot string) (*ProjectConfig, error) {
 	return &cfg, nil
 }
 
-// WriteConfig writes the project config to .tkt/config.json.
+// WriteConfig writes the project config to .tkt/config.json (atomically). The
+// caller holds the project lock.
 func WriteConfig(repoRoot string, cfg *ProjectConfig) error {
 	path := ConfigPath(repoRoot)
 	dir := filepath.Dir(path)
@@ -335,7 +338,7 @@ func WriteConfig(repoRoot string, cfg *ProjectConfig) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0644)
+	return fsutil.WriteFileAtomic(path, data, 0644)
 }
 
 // NextTicketID allocates the next ticket ID by incrementing the sequence counter.

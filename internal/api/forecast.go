@@ -54,11 +54,14 @@ func parseOptionalDate(v *string, field string) (string, error) {
 
 // saveRequestedDates validates start <= end, writes the config (requested_end
 // replaces the legacy target_date) and commits it, only when something changed.
-// Returns the config and an HTTP status + message on failure.
+// Returns the config and an HTTP status + message on failure; a failed commit
+// is not a failure (the message is the commit warning, with status 0). Takes
+// the project lock: callers must not hold it.
 func saveRequestedDates(root, start, end, commitMsg string) (*ticket.ProjectConfig, int, string) {
 	if start != "" && end != "" && start > end {
 		return nil, http.StatusBadRequest, fmt.Sprintf("requested start (%s) is after the requested end (%s)", start, end)
 	}
+	defer ticket.LockProject(root)()
 	cfg, err := ticket.ReadConfig(root)
 	if err != nil {
 		return nil, http.StatusInternalServerError, err.Error()
@@ -70,9 +73,7 @@ func saveRequestedDates(root, start, end, commitMsg string) (*ticket.ProjectConf
 	if err := ticket.WriteConfig(root, cfg); err != nil {
 		return nil, http.StatusInternalServerError, err.Error()
 	}
-	ticket.EnsureProjectIdentity(root, cfg)
-	ticket.GitCommit(root, []string{ticket.ConfigPath(root)}, commitMsg)
-	return cfg, 0, ""
+	return cfg, 0, ticket.CommitWarning(ticket.CommitFiles(root, []string{ticket.ConfigPath(root)}, commitMsg))
 }
 
 // getRequestedDates handles GET /api/projects/{projectId}/requested-dates.
@@ -126,7 +127,11 @@ func updateRequestedDates(w http.ResponseWriter, r *http.Request) {
 		respondError(w, code, detail)
 		return
 	}
-	respondJSON(w, http.StatusOK, requestedDatesJSON(cfg))
+	resp := requestedDatesJSON(cfg)
+	if detail != "" {
+		resp["commit_warning"] = detail
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func orDash(s string) string {
@@ -184,7 +189,11 @@ func updateTargetDate(w http.ResponseWriter, r *http.Request) {
 		respondError(w, code, detail)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]interface{}{"target_date": dateOrNull(cfg.EffectiveRequestedEnd())})
+	resp := map[string]interface{}{"target_date": dateOrNull(cfg.EffectiveRequestedEnd())}
+	if detail != "" {
+		resp["commit_warning"] = detail
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 // computeForecast computes the Schedule vs request card for a project and

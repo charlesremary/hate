@@ -6,8 +6,9 @@ package pm
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"hate/internal/fsutil"
 )
 
 // ValidSlipCategories is the list of valid slip reason categories.
@@ -55,17 +56,14 @@ func ReadSlipEvents(projectRoot string) ([]SlipEvent, error) {
 	return events, nil
 }
 
-// WriteSlipEvents marshals and writes the slip events to disk.
+// WriteSlipEvents marshals and writes the slip events to disk (atomically).
+// The caller holds the project lock.
 func WriteSlipEvents(projectRoot string, events []SlipEvent) error {
-	path := SlipEventsPath(projectRoot)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(events, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return fsutil.WriteFileAtomic(SlipEventsPath(projectRoot), data, 0o644)
 }
 
 // ValidSlipCategoriesString returns the categories joined for error messages.

@@ -53,18 +53,20 @@ func getProjectRoot(w http.ResponseWriter, projectID string) (string, bool) {
 	return path, true
 }
 
-// commitTicket auto-commits the ticket file and index after a mutation.
-// Enforces project git identity first.
-func commitTicket(repoRoot, ticketID, action string) {
-	cfg, err := ticket.ReadConfig(repoRoot)
-	if err == nil {
-		ticket.EnsureProjectIdentity(repoRoot, cfg)
-	}
-	files := []string{
-		ticket.TicketPath(repoRoot, ticketID),
-		ticket.IndexPath(repoRoot),
-	}
-	ticket.GitCommit(repoRoot, files, ticketID+": "+action)
+// commitTicket commits the ticket file after a mutation (index.json is
+// derived and never committed). Returns the commit warning ("" on success).
+// The caller holds the project lock.
+func commitTicket(repoRoot, ticketID, action string) string {
+	return ticket.CommitWarning(ticket.CommitFiles(repoRoot, []string{ticket.TicketPath(repoRoot, ticketID)}, ticketID+": "+action))
+}
+
+// respondTicket writes the ticket as JSON plus "commit_warning" when the
+// auto-commit failed (the change itself is saved either way).
+func respondTicket(w http.ResponseWriter, tk *ticket.Ticket, commitWarning string) {
+	respondJSON(w, http.StatusOK, struct {
+		*ticket.Ticket
+		CommitWarning string `json:"commit_warning,omitempty"`
+	}{tk, commitWarning})
 }
 
 // decodeJSON decodes a JSON request body into dst. Returns false and writes
@@ -210,10 +212,12 @@ func handleListTickets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Regenerate index to ensure it includes all current fields
+	// Regenerate index to ensure it includes all current fields (under the
+	// lock, so a list can't overwrite the index a concurrent edit just wrote).
+	unlock := ticket.LockProject(root)
 	_ = ticket.RegenerateIndex(root)
-
 	idx, err := ticket.ReadIndex(root)
+	unlock()
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -316,6 +320,7 @@ func handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	var req CreateTicketRequest
 	if !decodeJSON(w, r, &req) {
@@ -390,8 +395,7 @@ func handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, tk.ID, "created")
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, tk.ID, "created"))
 }
 
 // handleGetBilling handles GET /api/projects/{projectId}/tickets/billing
@@ -574,6 +578,7 @@ func handleEditTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	var req EditTicketRequest
 	if !decodeJSON(w, r, &req) {
@@ -595,8 +600,7 @@ func handleEditTicket(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, req.Field+" updated")
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, req.Field+" updated"))
 }
 
 // handlePromoteTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/promote
@@ -607,6 +611,7 @@ func handlePromoteTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	author := r.URL.Query().Get("author")
 	tk, err := ticket.Promote(root, ticketID, author)
@@ -636,8 +641,7 @@ func handlePromoteTicket(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "status \u2192 "+tk.Status)
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "status \u2192 "+tk.Status))
 }
 
 // handleDemoteTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/demote
@@ -648,6 +652,7 @@ func handleDemoteTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	author := r.URL.Query().Get("author")
 	tk, err := ticket.Demote(root, ticketID, author)
@@ -660,8 +665,7 @@ func handleDemoteTicket(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "status \u2192 "+tk.Status)
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "status \u2192 "+tk.Status))
 }
 
 // handleBlockTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/block.
@@ -675,6 +679,7 @@ func handleBlockTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	author := r.URL.Query().Get("author")
 	// Optional {reason, author} body — the reason is captured on the ticket and
@@ -699,8 +704,7 @@ func handleBlockTicket(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "status → blocked")
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "status → blocked"))
 }
 
 // handleAddTestCase handles POST /api/projects/{projectId}/tickets/{ticketId}/test-cases
@@ -711,6 +715,7 @@ func handleAddTestCase(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req struct {
 		Step     string `json:"step"`
 		Expected string `json:"expected"`
@@ -724,8 +729,7 @@ func handleAddTestCase(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "add test case")
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "add test case"))
 }
 
 // handleAddTestCasesBulk handles POST /api/projects/{projectId}/tickets/{ticketId}/test-cases/bulk
@@ -738,6 +742,7 @@ func handleAddTestCasesBulk(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req struct {
 		Cases []struct {
 			Step     string `json:"step"`
@@ -757,8 +762,7 @@ func handleAddTestCasesBulk(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "add test cases (bulk)")
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "add test cases (bulk)"))
 }
 
 // handleUpdateTestCase handles PATCH /api/projects/{projectId}/tickets/{ticketId}/test-cases/{caseId}
@@ -770,6 +774,7 @@ func handleUpdateTestCase(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req struct {
 		Step     *string `json:"step"`
 		Expected *string `json:"expected"`
@@ -791,8 +796,7 @@ func handleUpdateTestCase(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "update test case")
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "update test case"))
 }
 
 // handleDeleteTestCase handles DELETE /api/projects/{projectId}/tickets/{ticketId}/test-cases/{caseId}
@@ -804,14 +808,14 @@ func handleDeleteTestCase(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	author := r.URL.Query().Get("author")
 	tk, err := ticket.DeleteTestCase(root, ticketID, caseID, author)
 	if err != nil {
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "delete test case")
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "delete test case"))
 }
 
 // handleForceCloseTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/force-close.
@@ -823,6 +827,7 @@ func handleForceCloseTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	var req struct {
 		Reason string `json:"reason"`
 		Author string `json:"author"`
@@ -839,8 +844,7 @@ func handleForceCloseTicket(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "force-closed: "+req.Reason)
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "force-closed: "+req.Reason))
 }
 
 // handleAddComment handles POST /api/projects/{projectId}/tickets/{ticketId}/comment
@@ -851,6 +855,7 @@ func handleAddComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	var req CommentRequest
 	if !decodeJSON(w, r, &req) {
@@ -868,8 +873,7 @@ func handleAddComment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "comment added")
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "comment added"))
 }
 
 // handleAddTimeEntry handles POST /api/projects/{projectId}/tickets/{ticketId}/time
@@ -880,6 +884,7 @@ func handleAddTimeEntry(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	var req TimeEntryRequest
 	if !decodeJSON(w, r, &req) {
@@ -930,8 +935,7 @@ func handleAddTimeEntry(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "time logged")
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "time logged"))
 }
 
 // handleDeleteTimeEntry handles DELETE /api/projects/{projectId}/tickets/{ticketId}/time/{entryId}
@@ -943,6 +947,7 @@ func handleDeleteTimeEntry(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	author := r.URL.Query().Get("author")
 	tk, err := ticket.DeleteTimeEntry(root, ticketID, entryID, author)
@@ -955,8 +960,7 @@ func handleDeleteTimeEntry(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "time entry deleted")
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "time entry deleted"))
 }
 
 // handleAddPredecessor handles POST /api/projects/{projectId}/tickets/{ticketId}/predecessors
@@ -967,6 +971,7 @@ func handleAddPredecessor(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	var req PredecessorRequest
 	if !decodeJSON(w, r, &req) {
@@ -984,8 +989,7 @@ func handleAddPredecessor(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "predecessor added: "+req.PredecessorID)
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "predecessor added: "+req.PredecessorID))
 }
 
 // handleRemovePredecessor handles DELETE /api/projects/{projectId}/tickets/{ticketId}/predecessors/{predecessorId}
@@ -997,6 +1001,7 @@ func handleRemovePredecessor(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 
 	author := r.URL.Query().Get("author")
 	tk, err := ticket.RemovePredecessor(root, ticketID, predecessorID, author)
@@ -1009,26 +1014,19 @@ func handleRemovePredecessor(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitTicket(root, ticketID, "predecessor removed: "+predecessorID)
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitTicket(root, ticketID, "predecessor removed: "+predecessorID))
 }
 
 // commitAttachment commits a ticket JSON change plus an attachment file with a
 // descriptive message. Used by upload and delete — pass the on-disk path of
-// the attachment file (or empty if no file change applies).
-func commitAttachment(repoRoot, ticketID, attPath, action string) {
-	cfg, err := ticket.ReadConfig(repoRoot)
-	if err == nil {
-		ticket.EnsureProjectIdentity(repoRoot, cfg)
-	}
-	files := []string{
-		ticket.TicketPath(repoRoot, ticketID),
-		ticket.IndexPath(repoRoot),
-	}
+// the attachment file (or empty if no file change applies). Returns the commit
+// warning. The caller holds the project lock.
+func commitAttachment(repoRoot, ticketID, attPath, action string) string {
+	files := []string{ticket.TicketPath(repoRoot, ticketID)}
 	if attPath != "" {
 		files = append(files, attPath)
 	}
-	ticket.GitCommit(repoRoot, files, ticketID+": "+action)
+	return ticket.CommitWarning(ticket.CommitFiles(repoRoot, files, ticketID+": "+action))
 }
 
 // handleUploadAttachment handles POST /api/projects/{projectId}/tickets/{ticketId}/attachments.
@@ -1103,6 +1101,9 @@ func handleUploadAttachment(w http.ResponseWriter, r *http.Request) {
 		UploadedAt:  ticket.NowISO(),
 		UploadedBy:  author,
 	}
+	// The file has its own unique path; only the ticket update and the commit
+	// need the lock (not the upload itself).
+	defer ticket.LockProject(root)()
 	tk, err := ticket.AppendAttachment(root, ticketID, att, author)
 	if err != nil {
 		os.Remove(dstPath)
@@ -1113,8 +1114,7 @@ func handleUploadAttachment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitAttachment(root, ticketID, dstPath, "attachment added: "+filename)
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitAttachment(root, ticketID, dstPath, "attachment added: "+filename))
 }
 
 // handleDownloadAttachment handles GET /api/projects/{projectId}/tickets/{ticketId}/attachments/{attachmentId}.
@@ -1165,6 +1165,7 @@ func handleDeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer ticket.LockProject(root)()
 	author := r.URL.Query().Get("author")
 	// Resolve the file path before removing so we can include it in the commit.
 	t, err := ticket.ReadTicket(root, ticketID)
@@ -1187,6 +1188,5 @@ func handleDeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commitAttachment(root, ticketID, delPath, "attachment removed: "+att.Filename)
-	respondJSON(w, http.StatusOK, tk)
+	respondTicket(w, tk, commitAttachment(root, ticketID, delPath, "attachment removed: "+att.Filename))
 }
