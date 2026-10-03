@@ -924,8 +924,9 @@ const dashboardJS = `
 
 // GenerateDashboard returns a complete self-contained HTML string for the PM dashboard.
 // topHTML (the Plan strip, then the Schedule vs request card) sits right
-// under the header, above the tabs; costHTML holds the report sections.
-func GenerateDashboard(snapshot *Snapshot, topHTML, costHTML string) string {
+// under the header, above the tabs; costHTML holds the report sections. blocks
+// are the project's planning blocks (empty when it doesn't plan in blocks).
+func GenerateDashboard(snapshot *Snapshot, blocks []Block, topHTML, costHTML string) string {
 	health := snapshot.ComputedHealth
 	hcolor := healthColors[health]
 	hlabel := healthLabels[health]
@@ -935,7 +936,7 @@ func GenerateDashboard(snapshot *Snapshot, topHTML, costHTML string) string {
 
 	statusHTML := renderStatusPanel(snapshot)
 	depHTML := renderDependencyPanel(snapshot)
-	ganttHTML := renderGanttPanel(snapshot,
+	ganttHTML := renderGanttPanel(snapshot, blocks,
 		"Baselined schedule — read-only. Reschedule by editing tickets.",
 		fmt.Sprintf("/api/projects/%s/gantt.drawio", snapshot.ProjectID))
 

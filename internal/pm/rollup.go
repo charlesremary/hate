@@ -31,6 +31,13 @@ type PhaseProgress struct {
 
 	PlannedStart string `json:"planned_start"` // earliest planned_start_date in phase
 	DueDate      string `json:"due_date"`      // latest due_date in phase
+
+	// Block is N for a "Block NN ..." phase (0 otherwise); BlockStart /
+	// BlockEnd are that block's dates when the project plans in blocks (see
+	// ApplyBlockDates).
+	Block      int    `json:"block,omitempty"`
+	BlockStart string `json:"block_start,omitempty"`
+	BlockEnd   string `json:"block_end,omitempty"`
 }
 
 // RollupReport is the per-phase progress rollup for a project.
@@ -86,6 +93,9 @@ func PhaseRollup(tickets []*ticket.Ticket, ctx EstimateContext) RollupReport {
 				label = "(no phase)"
 			}
 			p = &PhaseProgress{Phase: phase, Label: label}
+			if n, ok := ParseBlockPhase(phase); ok {
+				p.Block = n
+			}
 			byPhase[phase] = p
 		}
 		return p
@@ -158,12 +168,20 @@ func PhaseRollup(tickets []*ticket.Ticket, ctx EstimateContext) RollupReport {
 		projDoneTickets += p.CompleteCount
 	}
 
-	// Sort by phase string ascending; "(no phase)" sorts last.
+	// "Block NN" phases first, by block number (so Block 10 follows Block 9),
+	// then the other phases by phase string; "(no phase)" sorts last.
 	sort.SliceStable(phases, func(i, j int) bool {
-		if (phases[i].Phase == "") != (phases[j].Phase == "") {
-			return phases[j].Phase == ""
+		a, b := phases[i], phases[j]
+		if (a.Phase == "") != (b.Phase == "") {
+			return b.Phase == ""
 		}
-		return phases[i].Phase < phases[j].Phase
+		if (a.Block > 0) != (b.Block > 0) {
+			return a.Block > 0
+		}
+		if a.Block != b.Block {
+			return a.Block < b.Block
+		}
+		return a.Phase < b.Phase
 	})
 
 	report := RollupReport{
@@ -182,6 +200,20 @@ func PhaseRollup(tickets []*ticket.Ticket, ctx EstimateContext) RollupReport {
 		report.Phases = []PhaseProgress{}
 	}
 	return report
+}
+
+// ApplyBlockDates fills BlockStart / BlockEnd on each "Block NN" phase from the
+// project's blocks (by number). No-op when blocks is empty.
+func ApplyBlockDates(rep *RollupReport, blocks []Block) {
+	byN := map[int]Block{}
+	for _, b := range blocks {
+		byN[b.N] = b
+	}
+	for i := range rep.Phases {
+		if b, ok := byN[rep.Phases[i].Block]; ok && rep.Phases[i].Block > 0 {
+			rep.Phases[i].BlockStart, rep.Phases[i].BlockEnd = b.Start, b.End
+		}
+	}
 }
 
 // round1 rounds to one decimal place.

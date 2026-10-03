@@ -66,6 +66,10 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Put("/target-date", updateTargetDate)
 	r.Get("/forecast", getForecast)
 	r.Get("/phase-rollup", getPhaseRollup)
+	r.Get("/block-weeks", getBlockWeeks)
+	r.Put("/block-weeks", updateBlockWeeks)
+	r.Get("/blocks", getBlocks)
+	r.Get("/ready", getReady)
 	r.Get("/test-summary", getTestSummary)
 	r.Get("/cosmic", getCosmic)
 	r.Put("/cosmic-estimate", updateCosmicEstimate)
@@ -89,7 +93,8 @@ func getTestSummary(w http.ResponseWriter, r *http.Request) {
 
 // getPhaseRollup handles GET /api/projects/{projectId}/phase-rollup.
 // Pure analysis: groups the current tickets by phase and returns an
-// hours-weighted percent-complete per phase. Nothing is written.
+// hours-weighted percent-complete per phase ("Block NN" phases in block order,
+// with each block's dates when the project plans in blocks). Nothing is written.
 func getPhaseRollup(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
@@ -106,7 +111,9 @@ func getPhaseRollup(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	report := pm.PhaseRollup(tickets, pm.ProjectEstimateContext(root, tickets, cfg))
+	estCtx := pm.ProjectEstimateContext(root, tickets, cfg)
+	report := pm.PhaseRollup(tickets, estCtx)
+	pm.ApplyBlockDates(&report, pm.BlocksForProject(cfg, tickets, estCtx, time.Now()))
 	respondJSON(w, http.StatusOK, report)
 }
 
@@ -166,33 +173,34 @@ func getGanttDrawio(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	tickets, err := ticket.ReadAllTickets(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	projectName := projectID
+	cfg, cerr := ticket.ReadConfig(root)
+	var resources []ticket.Resource
+	if cerr == nil {
+		if cfg.ProjectName != "" {
+			projectName = cfg.ProjectName
+		}
+		resources = cfg.Resources
+	} else {
+		cfg = nil
+	}
+	estCtx := pm.ProjectEstimateContext(root, tickets, cfg)
+	blocks := pm.BlocksForProject(cfg, tickets, estCtx, time.Now())
 	// Baselined snapshot if there is one; otherwise the floating projected
 	// schedule from ?start= (default today), so export works pre-baseline too.
 	snapshot, err := pm.LoadLatestSnapshot(root)
 	if err != nil || snapshot == nil {
-		tickets, terr := ticket.ReadAllTickets(root)
-		if terr != nil {
-			respondError(w, http.StatusInternalServerError, terr.Error())
-			return
-		}
-		projectName := projectID
-		cfg, cerr := ticket.ReadConfig(root)
-		var resources []ticket.Resource
-		if cerr == nil {
-			if cfg.ProjectName != "" {
-				projectName = cfg.ProjectName
-			}
-			resources = cfg.Resources
-		} else {
-			cfg = nil
-		}
-		estCtx := pm.ProjectEstimateContext(root, tickets, cfg)
 		snapshot, _ = pm.ProjectSchedule(projectID, projectName, tickets, resources, estCtx, ganttStart(r))
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-gantt.drawio"`, projectID))
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(pm.RenderGanttDrawio(snapshot)))
+	w.Write([]byte(pm.RenderGanttDrawio(snapshot, blocks)))
 }
 
 // ganttStart resolves the projection start date from ?start=YYYY-MM-DD,
@@ -251,8 +259,8 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		if s := r.URL.Query().Get("start"); s != "" {
 			exportURL += "?start=" + s
 		}
-		reportsHTML := pm.RenderProjectedGanttHTML(projectID, projectName, tickets, resources, estCtx, start, exportURL) +
-			pm.RenderExecPlanHTML(tickets, resources, estCtx) +
+		blocks := pm.BlocksForProject(cfg, tickets, estCtx, time.Now())
+		reportsHTML := pm.RenderProjectedGanttHTML(projectID, projectName, tickets, resources, estCtx, start, exportURL, blocks) +
 			pm.RenderLoadHTML(pm.ComputeLoad(tickets, resources, estCtx, time.Now(), targetDate)) +
 			pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, workHours, adminHours, qaHours)) +
 			pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(tickets, estCtx)) +
@@ -296,8 +304,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		cfg = nil
 	}
 	estCtx := pm.ProjectEstimateContext(root, costTickets, cfg)
-	reportsHTML := pm.RenderExecPlanHTML(costTickets, resources, estCtx) +
-		pm.RenderLoadHTML(pm.ComputeLoad(costTickets, resources, estCtx, time.Now(), targetDate)) +
+	reportsHTML := pm.RenderLoadHTML(pm.ComputeLoad(costTickets, resources, estCtx, time.Now(), targetDate)) +
 		pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, workHours, adminHours, qaHours)) +
 		pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(costTickets, estCtx)) +
 		pm.RenderBlockedHTML(pm.ComputeBlocked(costTickets)) +
@@ -305,7 +312,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, estCtx)) +
 		pm.RenderOverridesHTML(pm.ComputeOverrides(costTickets)) +
 		pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))
-	html := pm.GenerateDashboard(snapshot, stripHTML+forecastCardHTML(projectID, root, costTickets, cfg), reportsHTML)
+	html := pm.GenerateDashboard(snapshot, pm.BlocksForProject(cfg, costTickets, estCtx, time.Now()), stripHTML+forecastCardHTML(projectID, root, costTickets, cfg), reportsHTML)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(html))

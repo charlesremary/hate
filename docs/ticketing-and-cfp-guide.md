@@ -452,9 +452,14 @@ a stakeholder "Phase 2 is 40% done" without them ever seeing individual tickets.
   the number meaningful.
 - Tickets with no phase land in a **`(no phase)`** bucket — fine for stray items,
   but don't leave committed work there.
-- Use `phase` only for the work-stage grouping. Don't park out-of-scope work in a
-  phase — that's the `backlog` tag (§7). Descoped/force-closed tickets are excluded
-  from the rollup automatically.
+- Don't park out-of-scope work in a phase — that's the `backlog` tag (§7).
+  Descoped/force-closed tickets are excluded from the rollup automatically.
+- **Per project, `phase` means EITHER the lifecycle stage OR the planning
+  block, never a mix.** Check `GET /{projectId}/block-weeks` first. Unset
+  (`null`): use stage phases as above (`01 - Discovery`, `02 - Build`, ...).
+  Set (2 or 3): the phase is the block label (`Block 01 (Nov 2-13)`), assigned
+  when you plan the blocks (§14); leave new tickets unphased until then. The
+  rollup sorts `Block NN` phases by number and shows each block's dates.
 
 ---
 
@@ -504,7 +509,10 @@ PROJ-100  "Semantic search over docs"   tags: cfp:18   (E/X/R/W breakdown in the
 - [ ] No hours logged on parents.
 - [ ] Recurring deliverables have a `type:<name>` (on the parent, or on the wrap
       child for per-item history).
-- [ ] Every committed ticket has a consistent `phase`.
+- [ ] Every committed ticket has a consistent `phase` (stage phases, or block
+      phases when the project plans in blocks; never both, §8).
+- [ ] If the project plans in blocks (`block_weeks` set), the blocks are
+      planned and baselined (§14).
 - [ ] Anything not committed is tagged `backlog`.
 - [ ] For a new kind of project, the calibration-slice parents are tagged
       `calibration-slice` (§11).
@@ -770,6 +778,7 @@ Conventions:
 | `PUT /{projectId}/effort-to-days` | **Legacy.** Set the map. All five sizes required, each ≥ 0.25. | `{"effort_to_days": {"xs":1,"s":2,"m":3,"l":5,"xl":8}}` |
 | `GET /{projectId}/hour-budget` | The three hour pools: work, admin/meeting, QA (`null` if unset); `work_hours` migrates a legacy `max_hours`. | — |
 | `PUT /{projectId}/hour-budget` | Set/clear the pools. Positive sets; `null` clears; ≤ 0 → 400. | `{"work_hours": 400, "admin_hours": 100, "qa_hours": 80}` |
+| `GET /{projectId}/block-weeks` · `PUT …/block-weeks` | Read / set the planning block length: `2`, `3`, or `null` for no blocks (anything else → 400). Saved to `.tkt/config.json` and committed when it changes. | PUT: `{"block_weeks": 2}` |
 | `GET /{projectId}/strict-time` · `PUT …/strict-time` | Read / set strict time enforcement (gate time logs that go past a wrap ticket's estimate). | PUT: `{"strict_time_enforcement": true}` |
 | `GET /{projectId}/enforce-qa` · `PUT …/enforce-qa` | Read / set enforce-QA (keep tickets without test cases out of QA). | PUT: `{"enforce_qa": true}` |
 | `GET /{projectId}/overview` · `PUT …/overview` | Read / replace the Project Overview content (contacts, links, instructions). | PUT: `{contacts:[…], links:[…], instructions:[…]}` |
@@ -811,7 +820,7 @@ Conventions:
 
 | Method & path | What it does | Body |
 |---|---|---|
-| `GET /{projectId}/dashboard` | **HTML** PM dashboard (the Plan strip — baseline, last snapshot, unresolved slips, Re-baseline — then the Schedule vs request card, Load table, hours budget vs cap, estimate variance, project cost, status/slip; the capacity-aware projected Gantt before a baseline). With a baseline and no snapshot for today, it first takes today's snapshot (at most once a day, per-project lock) and commits `slip_events.json` if new slips were found. | — |
+| `GET /{projectId}/dashboard` | **HTML** PM dashboard (the Plan strip — baseline, last snapshot, unresolved slips, Re-baseline — then the Schedule vs request card, Load table, hours budget vs cap, estimate variance, project cost, status/slip; the capacity-aware projected Gantt before a baseline). The Gantt groups rows by planning block, with shaded block bands, when `block_weeks` is set, else by person. With a baseline and no snapshot for today, it first takes today's snapshot (at most once a day, per-project lock) and commits `slip_events.json` if new slips were found. | — |
 | `GET /{projectId}/gantt.drawio` | Download the Gantt as an editable draw.io file. Uses the baseline if there is one, otherwise the capacity-aware projected schedule from `?start=YYYY-MM-DD` (default today). | `?start=` optional |
 | `GET /{projectId}/snapshot` · `POST …/snapshot` | Read latest / take a new slip snapshot. POST commits `.tkt/pm/slip_events.json` when new slip events were detected (only that file, plus `.tkt/pm/.gitignore` the first time). Snapshot files themselves are never committed: `.tkt/pm/.gitignore` ignores `snapshots/`. 404 without a baseline. | — |
 | `POST /{projectId}/baseline` | Create the schedule baseline from a template; committed. 409 if one exists (use `/rebaseline`). | `{project_name, template_id, start_date, owner_assignments, duration_adjustments, created_by?}` |
@@ -823,7 +832,9 @@ Conventions:
 | `GET /{projectId}/requested-dates` · `PUT …/requested-dates` | Read / set the optional requested start and end (the dates the client asked for). PUT validates the dates and start ≤ end (400), saves `requested_start` / `requested_end` to `.tkt/config.json` (dropping a legacy `target_date`) and commits when changed; `null` clears a date. GET reads an old `target_date` as the requested end. | PUT: `{"requested_start": "2026-11-02", "requested_end": "2027-01-29"}` |
 | `GET /{projectId}/target-date` · `PUT …/target-date` | Alias for the requested end (kept for v1.0.6 clients): `{"target_date": …}` reads / sets `requested_end`, keeping the start. | PUT: `{"target_date": "2026-10-30"}` or `{"target_date": null}` |
 | `GET /{projectId}/forecast` | The Schedule vs request card as JSON: `requested_start`, `requested_end`, `actual_start`, `start_variance_days`, `schedule_start`, `likely_finish`, `p85_finish`, `p85_factor`, `finish_variance_days`, `p85_finish_variance_days`, `remaining_hours`, `unsized`, `working_days_left`, `needs_per_day`, `has_per_day`, `hours_to_cut`, `spare_hours`, `status` (`ON TRACK` / `AT RISK` / `LATE`, empty without a requested end), and `history`. Records the forecast history like the dashboard (one entry per day, committed when it changes). | — |
-| `GET /{projectId}/phase-rollup` | % complete per phase, weighted by estimated hours. | — |
+| `GET /{projectId}/phase-rollup` | % complete per phase, weighted by estimated hours. `Block NN` phases sort by number and carry `block`, `block_start`, `block_end`. | — |
+| `GET /{projectId}/blocks` | The planning blocks `[{n, label, start, end}]` (e.g. `{"n":1,"label":"Block 01 (Nov 2-13)","start":"2026-11-02","end":"2026-11-13"}`), from block 1 to the later of the requested end and the projected finish, plus one block. `[]` when `block_weeks` is unset. Read-only. | — |
+| `GET /{projectId}/ready` | The work order from the dependency stages: `ready` (open tickets whose predecessors are all done, not blocked: work them in parallel), `next` (tickets unlocked once the ready set finishes), `stages` (`[{stage, hours, tickets}]`, every open work ticket in dependency order). Each ticket: `id, title, status, priority, assignee, phase, stage, estimated_hours, waits_on`. Feature parents, backlog, and done tickets are left out. Read-only. | — |
 | `GET /{projectId}/test-summary` | Per-ticket test-case tallies (pass / fail / untested) plus the cases, for the Test cases tab. | — |
 | `POST /{projectId}/report` | **Not implemented** (returns 501). | — |
 
@@ -943,3 +954,82 @@ planning ticket. It contains:
 - features or movements found by only one counter: kept or dropped, and why;
 - requirement gaps;
 - questions flagged for the human, and their answers once given.
+
+---
+
+## 14. Planning in blocks
+
+Use this when the project's `block_weeks` is set (2 or 3). It comes **after**
+the tickets exist (§13 creates them): you plan the committed tickets into
+fixed blocks so the baseline, slips, velocity, and Schedule vs request all
+read in blocks. A block is just a phase named for its dates; there is no
+other block object to create.
+
+### The rules
+
+1. **Read the setup.** `GET /{projectId}/block-weeks` (stop if `null`: the
+   project doesn't plan in blocks), `GET /{projectId}/blocks` for the block
+   list, `GET /{projectId}/resources` for the people and their
+   `daily_hours_available` (8 when unset), `GET /{projectId}/requested-dates`,
+   and `GET /{projectId}/ready` for the dependency stages.
+2. **Capacity per person per block** = daily hours × working days in the block
+   (Mon-Fri between `start` and `end`, so 10 for a 2-week block, 15 for a
+   3-week block, fewer for a block cut short by a holiday the team names)
+   × **0.7** focus. Example: 8 h/day, 2-week block → 8 × 10 × 0.7 = 56 h.
+3. **Fill in stage order.** Walk the work order from `/ready` (`stages`, in
+   order). A ticket goes into the earliest block that has room for its
+   assignee's `estimated_hours` and that starts no earlier than the block of
+   every predecessor (a predecessor in the same block is fine if it fits
+   first). Unassigned work takes the person with the most room left.
+4. **Keep a feature's tickets together** where possible: when one child of a
+   parent lands in a block, try its siblings in the same block before moving
+   on. Don't split a feature just to top a block up with unrelated work.
+5. **Set the plan on each ticket** (`PATCH …/tickets/{ticketId}`, one field at
+   a time): `phase` = the block `label` exactly as `/blocks` gives it,
+   `planned_start_date` = the block `start`, `due_date` = the block `end`.
+   Feature parents get no block phase (they finish with their children).
+6. **Overflow stays backlog.** Work that doesn't fit in a block that ends on
+   or before the requested end gets the `backlog` tag and no block phase; list
+   it for the human, with the hours, as the scope to cut or the date to move.
+   Don't pack blocks past capacity to make the date.
+7. **Baseline after planning.** `POST /{projectId}/baseline-now` (or
+   `POST /{projectId}/rebaseline` with a reason if one exists) freezes the
+   block plan.
+8. **Re-plan at each block boundary.** After a block ends: for every ticket
+   in it that isn't done, move it to the next block (new `phase`,
+   `planned_start_date`, `due_date`), re-check the next block's capacity, and
+   push the lowest-priority work it displaces forward the same way. Then
+   `POST /{projectId}/snapshot`; each moved due date is a slip event.
+   `GET /{projectId}/slip` and resolve each new one with
+   `PATCH /{projectId}/slip/{slipEventId}` and a real reason (category +
+   narrative: what took longer and why). Velocity is the done estimated hours
+   per block, from `GET /{projectId}/phase-rollup`.
+
+Per project, `phase` means a block **or** a lifecycle stage, never both
+(§8). If the project already has stage phases, replace them all when you
+plan blocks.
+
+### The exact calls
+
+```
+GET   /api/projects/{projectId}/block-weeks          -> {"block_weeks": 2}
+GET   /api/projects/{projectId}/blocks               -> [{"n":1,"label":"Block 01 (Nov 2-13)","start":"2026-11-02","end":"2026-11-13"}, ...]
+GET   /api/projects/{projectId}/resources            -> [{"email":..., "daily_hours_available": 6}, ...]
+GET   /api/projects/{projectId}/ready                -> {"ready":[...], "next":[...], "stages":[{"stage":1,"hours":..,"tickets":[...]}]}
+PATCH /api/projects/{projectId}/tickets/{ticketId}   {"field":"phase","value":"Block 01 (Nov 2-13)"}
+PATCH /api/projects/{projectId}/tickets/{ticketId}   {"field":"planned_start_date","value":"2026-11-02"}
+PATCH /api/projects/{projectId}/tickets/{ticketId}   {"field":"due_date","value":"2026-11-13"}
+PATCH /api/projects/{projectId}/tickets/{ticketId}   {"field":"tags","value":[..., "backlog"]}        (overflow)
+POST  /api/projects/{projectId}/baseline-now
+POST  /api/projects/{projectId}/snapshot                                                           (at a boundary)
+PATCH /api/projects/{projectId}/slip/{slipEventId}   {"reason_category":"estimation_error","reason_narrative":"..."}
+```
+
+### Working the plan as an agent: the /ready loop
+
+Agents aren't capacity-limited, so they don't wait for a block's dates. Pull
+`GET /{projectId}/ready`, work the whole `ready` set in parallel (one agent
+per ticket), promote each as it finishes (§3 still applies: log time, test
+cases), then pull `/ready` again: the `next` tickets are now ready. Repeat
+until `ready` is empty. Blocked tickets never show as ready; unblock them
+first.

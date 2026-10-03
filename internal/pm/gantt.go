@@ -11,12 +11,14 @@ import (
 	"time"
 )
 
-// The Gantt panel renders the schedule as time-scaled bars grouped into stages
-// (parallel waves): a stage is the batch of tasks whose blockers are all done,
-// so they can run at once — the same grouping the ticket exec-plan uses. Within
-// a stage the bars are time-positioned; stages step forward in time. It is a
-// read-only, self-contained view (inline SVG, no external assets). Rescheduling
-// happens by editing tickets, not here.
+// The Gantt panel renders the schedule as time-scaled bars in groups. When the
+// project plans in blocks (block_weeks set) the rows are grouped by the block
+// each bar starts in and the blocks are drawn as faint labelled bands behind
+// the bars; otherwise the rows are grouped by person, matching the capacity
+// schedule's lanes (one person works their tickets in order, so a group reads
+// top to bottom). Dependency stages are not drawn here: they ignore people and
+// time (see stages.go). It is a read-only, self-contained view (inline SVG, no
+// external assets). Rescheduling happens by editing tickets, not here.
 
 // ganttRow is a single task with its dates parsed and laid out.
 type ganttRow struct {
@@ -27,9 +29,16 @@ type ganttRow struct {
 	barEnd       time.Time // actual/projected end when known, else planned end
 	milestone    bool
 	critical     bool
-	phase        string // project phase, for within-stage ordering
-	wave         int    // parallel-group / stage (longest dependency chain)
+	phase        string // project phase, for within-group ordering
+	group        int    // index into the groups returned by ganttData
 	y            int
+}
+
+// ganttGroup is one row group: a block or a person.
+type ganttGroup struct {
+	label string
+	count int // tasks
+	days  int // Σ planned days
 }
 
 const (
@@ -37,7 +46,7 @@ const (
 	gTopAxis    = 48  // axis header height
 	gRowH       = 26
 	gBarH       = 13
-	gStageH     = 26 // stage-header band height
+	gGroupH     = 26 // group-header band height
 	gPadDays    = 2
 	gRightPad   = 40
 	gBottomPad  = 28
@@ -49,53 +58,11 @@ func daysBetween(a, b time.Time) int {
 	return int(b.Sub(a).Hours() / 24)
 }
 
-// ganttWaves assigns each row a stage = longest chain of in-set predecessors.
-func ganttWaves(rows []ganttRow) map[string]int {
-	inSet := map[string]bool{}
-	for _, r := range rows {
-		inSet[r.task.TaskID] = true
-	}
-	depsOf := map[string][]string{}
-	for _, r := range rows {
-		var ds []string
-		for _, d := range r.task.Dependencies {
-			if inSet[d] {
-				ds = append(ds, d)
-			}
-		}
-		depsOf[r.task.TaskID] = ds
-	}
-	memo := map[string]int{}
-	var wave func(id string, stk map[string]bool) int
-	wave = func(id string, stk map[string]bool) int {
-		if v, ok := memo[id]; ok {
-			return v
-		}
-		if stk[id] {
-			return 0 // cycle guard
-		}
-		stk[id] = true
-		best := 0
-		for _, d := range depsOf[id] {
-			if w := wave(d, stk) + 1; w > best {
-				best = w
-			}
-		}
-		delete(stk, id)
-		memo[id] = best
-		return best
-	}
-	out := map[string]int{}
-	for _, r := range rows {
-		out[r.task.TaskID] = wave(r.task.TaskID, map[string]bool{})
-	}
-	return out
-}
-
-// ganttData parses the snapshot's tasks into rows (grouped by stage, then by
-// planned start) and the chart's date window. Tasks with no valid planned start
-// are skipped (nothing to place).
-func ganttData(snapshot *Snapshot) (rows []ganttRow, chartStart, chartEnd time.Time) {
+// ganttData parses the snapshot's tasks into rows, groups them (by block when
+// blocks are given, else by person) and returns the chart's date window. Rows
+// are ordered by group, then planned start, then phase, then title. Tasks with
+// no valid planned start are skipped (nothing to place).
+func ganttData(snapshot *Snapshot, blocks []Block) (rows []ganttRow, groups []ganttGroup, chartStart, chartEnd time.Time) {
 	cp := map[string]bool{}
 	for _, id := range snapshot.CriticalPathIDs {
 		cp[id] = true
@@ -129,12 +96,60 @@ func ganttData(snapshot *Snapshot) (rows []ganttRow, chartStart, chartEnd time.T
 		}
 		rows = append(rows, row)
 	}
-	waves := ganttWaves(rows)
-	for i := range rows {
-		rows[i].wave = waves[rows[i].task.TaskID]
+
+	// Group key per row: an order key and a label.
+	type gkey struct {
+		rank  int
+		label string
 	}
-	// Group by stage, then by project phase (so "00 - …" leads regardless of
-	// start date; unphased sorts last), then earliest start, then title.
+	keyOf := func(r ganttRow) gkey {
+		if len(blocks) > 0 {
+			i := blockIndexAt(blocks, r.plannedStart)
+			switch {
+			case i < 0:
+				return gkey{-1, "Before " + blockShortLabel(blocks[0])}
+			case i >= len(blocks):
+				return gkey{len(blocks), "After " + blockShortLabel(blocks[len(blocks)-1])}
+			}
+			return gkey{i, blocks[i].Label}
+		}
+		if r.task.Lane != "" {
+			return gkey{r.task.LaneRank, r.task.Lane}
+		}
+		// A baselined snapshot: group by owner.
+		if o := ownerShort(r.task.Owner); o != "" {
+			return gkey{0, o}
+		}
+		return gkey{1, UnassignedLane}
+	}
+	keys := map[gkey]bool{}
+	rowKey := make([]gkey, len(rows))
+	for i := range rows {
+		rowKey[i] = keyOf(rows[i])
+		keys[rowKey[i]] = true
+	}
+	ordered := make([]gkey, 0, len(keys))
+	for k := range keys {
+		ordered = append(ordered, k)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].rank != ordered[j].rank {
+			return ordered[i].rank < ordered[j].rank
+		}
+		return ordered[i].label < ordered[j].label
+	})
+	idx := map[gkey]int{}
+	for i, k := range ordered {
+		idx[k] = i
+		groups = append(groups, ganttGroup{label: k.label})
+	}
+	for i := range rows {
+		g := idx[rowKey[i]]
+		rows[i].group = g
+		groups[g].count++
+		groups[g].days += rows[i].task.Baseline.PlannedDays
+	}
+
 	phaseKey := func(p string) string {
 		if p == "" {
 			return "~" // sort unphased last
@@ -142,14 +157,14 @@ func ganttData(snapshot *Snapshot) (rows []ganttRow, chartStart, chartEnd time.T
 		return p
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].wave != rows[j].wave {
-			return rows[i].wave < rows[j].wave
-		}
-		if pi, pj := phaseKey(rows[i].phase), phaseKey(rows[j].phase); pi != pj {
-			return pi < pj
+		if rows[i].group != rows[j].group {
+			return rows[i].group < rows[j].group
 		}
 		if !rows[i].plannedStart.Equal(rows[j].plannedStart) {
 			return rows[i].plannedStart.Before(rows[j].plannedStart)
+		}
+		if pi, pj := phaseKey(rows[i].phase), phaseKey(rows[j].phase); pi != pj {
+			return pi < pj
 		}
 		return rows[i].task.Title < rows[j].task.Title
 	})
@@ -169,7 +184,39 @@ func ganttData(snapshot *Snapshot) (rows []ganttRow, chartStart, chartEnd time.T
 		chartStart = chartStart.AddDate(0, 0, -gPadDays)
 		chartEnd = chartEnd.AddDate(0, 0, gPadDays)
 	}
-	return rows, chartStart, chartEnd
+	return rows, groups, chartStart, chartEnd
+}
+
+// blockShortLabel is "Block 01" (the label without its dates).
+func blockShortLabel(b Block) string {
+	return fmt.Sprintf("Block %02d", b.N)
+}
+
+// blockBand is a block's span clipped to the chart window: from its Monday to
+// the Monday after its last Friday.
+type blockBand struct {
+	block      Block
+	start, end time.Time // end exclusive
+	odd        bool
+}
+
+// visibleBands returns the blocks overlapping the chart window.
+func visibleBands(blocks []Block, chartStart, chartEnd time.Time) []blockBand {
+	var out []blockBand
+	for i, b := range blocks {
+		s, e := parseDate(b.Start), parseDate(b.End).AddDate(0, 0, 3)
+		if !e.After(chartStart) || s.After(chartEnd) {
+			continue
+		}
+		if s.Before(chartStart) {
+			s = chartStart
+		}
+		if e.After(chartEnd.AddDate(0, 0, 1)) {
+			e = chartEnd.AddDate(0, 0, 1)
+		}
+		out = append(out, blockBand{block: b, start: s, end: e, odd: i%2 == 1})
+	}
+	return out
 }
 
 // pxPerDay scales the timeline: readable for short projects, compressed (but
@@ -207,22 +254,10 @@ func ganttBarColor(status string, critical bool) (string, string) {
 	return fill, stroke
 }
 
-// stageTally returns per-stage task count and total planned days.
-func stageTally(rows []ganttRow) (count map[int]int, days map[int]int) {
-	count, days = map[int]int{}, map[int]int{}
-	for _, r := range rows {
-		count[r.wave]++
-		days[r.wave] += r.task.Baseline.PlannedDays
-	}
-	return count, days
-}
-
-// renderGanttPanel renders the Gantt tab body (SVG + toolbar + legend). note is
-// the descriptor shown top-left (baselined vs projected); exportURL is the
-// draw.io download link.
-// ganttSVG builds the stage-grouped, time-scaled SVG for a set of rows (already
-// grouped by ganttData). Returns "" when there are no rows.
-func ganttSVG(rows []ganttRow, chartStart, chartEnd time.Time, snapshotDate string) string {
+// ganttSVG builds the grouped, time-scaled SVG for a set of rows (already
+// grouped by ganttData), with block bands behind the bars when blocks are
+// given. Returns "" when there are no rows.
+func ganttSVG(rows []ganttRow, groups []ganttGroup, blocks []Block, chartStart, chartEnd time.Time, snapshotDate string) string {
 	if len(rows) == 0 {
 		return ""
 	}
@@ -230,19 +265,18 @@ func ganttSVG(rows []ganttRow, chartStart, chartEnd time.Time, snapshotDate stri
 	ppd := ganttPxPerDay(totalDays)
 	chartW := int(float64(totalDays)*ppd) + 1
 
-	// Lay out rows with a stage-header band whenever the wave changes.
-	stageCount, stageDays := stageTally(rows)
-	type stageHdr struct {
-		wave, y int
+	// Lay out rows with a group-header band whenever the group changes.
+	type groupHdr struct {
+		group, y int
 	}
-	var headers []stageHdr
+	var headers []groupHdr
 	y := gTopAxis
-	curWave := -1
+	cur := -1
 	for i := range rows {
-		if rows[i].wave != curWave {
-			headers = append(headers, stageHdr{rows[i].wave, y})
-			y += gStageH
-			curWave = rows[i].wave
+		if rows[i].group != cur {
+			headers = append(headers, groupHdr{rows[i].group, y})
+			y += gGroupH
+			cur = rows[i].group
 		}
 		rows[i].y = y
 		y += gRowH
@@ -296,12 +330,32 @@ func ganttSVG(rows []ganttRow, chartStart, chartEnd time.Time, snapshotDate stri
 		}
 	}
 
-	// --- Stage header bands. ---
+	// --- Group header bands. ---
 	for _, h := range headers {
-		sb.WriteString(fmt.Sprintf(`<rect x="0" y="%d" width="%d" height="%d" fill="#eef2f7"/>`, h.y, svgW, gStageH))
-		sb.WriteString(fmt.Sprintf(`<text x="10" y="%d" font-size="12" font-weight="700" fill="#334155" font-family="sans-serif">Stage %d</text>`, h.y+17, h.wave+1))
-		sb.WriteString(fmt.Sprintf(`<text x="76" y="%d" font-size="11" fill="#64748b" font-family="sans-serif">%d task%s &middot; &Sigma; %dd</text>`,
-			h.y+17, stageCount[h.wave], plif(stageCount[h.wave]), stageDays[h.wave]))
+		g := groups[h.group]
+		sb.WriteString(fmt.Sprintf(`<rect x="0" y="%d" width="%d" height="%d" fill="#eef2f7"/>`, h.y, svgW, gGroupH))
+		sb.WriteString(fmt.Sprintf(`<text x="10" y="%d" font-size="12" font-weight="700" fill="#334155" font-family="sans-serif" class="gantt-group">%s<tspan font-size="11" font-weight="400" fill="#64748b"> &middot; %d task%s &middot; &Sigma; %dd</tspan></text>`,
+			h.y+17, esc(g.label), g.count, plif(g.count), g.days))
+	}
+
+	// --- Block bands: faint alternating columns with a boundary line and a
+	// label in the axis header (drawn over the zebra, under the bars). ---
+	for _, b := range visibleBands(blocks, chartStart, chartEnd) {
+		bx, bw := x(b.start), x(b.end)-x(b.start)
+		if bw < 1 {
+			continue
+		}
+		if b.odd {
+			sb.WriteString(fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" fill="#7c3aed" opacity="0.06" class="gantt-block-band"/>`, bx, gTopAxis-2, bw, axisBottom-gTopAxis+2))
+		} else {
+			sb.WriteString(fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" fill="#7c3aed" opacity="0.02" class="gantt-block-band"/>`, bx, gTopAxis-2, bw, axisBottom-gTopAxis+2))
+		}
+		sb.WriteString(fmt.Sprintf(`<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="#a78bfa" stroke-width="1" stroke-dasharray="2 3"/>`, bx, gTopAxis-12, bx, axisBottom))
+		lbl := b.block.Label
+		if float64(bw) < float64(len(lbl))*5.6 {
+			lbl = blockShortLabel(b.block)
+		}
+		sb.WriteString(fmt.Sprintf(`<text x="%d" y="%d" font-size="10" fill="#6d28d9" font-family="sans-serif" class="gantt-block-label">%s</text>`, bx+3, gTopAxis-6, esc(lbl)))
 	}
 
 	// --- Dependency connectors (finish-to-start): pred end → succ start. ---
@@ -413,14 +467,18 @@ func criticalOnly(s *Snapshot) *Snapshot {
 
 // renderGanttPanel renders the Gantt tab body: a Full plan / Critical path
 // toggle over two SVGs, the draw.io export button, and a legend.
-func renderGanttPanel(snapshot *Snapshot, note, exportURL string) string {
-	rows, cs, ce := ganttData(snapshot)
+func renderGanttPanel(snapshot *Snapshot, blocks []Block, note, exportURL string) string {
+	rows, groups, cs, ce := ganttData(snapshot, blocks)
 	if len(rows) == 0 {
 		return `<div style="padding:24px;color:#9ca3af">No scheduled tasks to chart yet — add estimates (and dependencies) to your tickets.</div>`
 	}
-	full := ganttSVG(rows, cs, ce, snapshot.SnapshotDate)
-	cpRows, ccs, cce := ganttData(criticalOnly(snapshot))
-	cp := ganttSVG(cpRows, ccs, cce, snapshot.SnapshotDate)
+	full := ganttSVG(rows, groups, blocks, cs, ce, snapshot.SnapshotDate)
+	cpRows, cpGroups, ccs, cce := ganttData(criticalOnly(snapshot), blocks)
+	cp := ganttSVG(cpRows, cpGroups, blocks, ccs, cce, snapshot.SnapshotDate)
+	grouping := `<span>Rows grouped by person: each works their tickets in order, top to bottom</span>`
+	if len(blocks) > 0 {
+		grouping = `<span><span style="display:inline-block;width:22px;height:8px;background:#7c3aed;opacity:.15;border-radius:2px;vertical-align:middle"></span> planning block (rows grouped by the block they start in)</span>`
+	}
 	if cp == "" {
 		cp = `<div style="padding:24px;color:#9ca3af">No critical path identified for this schedule.</div>`
 	}
@@ -430,8 +488,9 @@ func renderGanttPanel(snapshot *Snapshot, note, exportURL string) string {
       <span><span style="display:inline-block;width:22px;height:8px;background:#ef4444;opacity:.35;border-radius:2px;vertical-align:middle"></span> slip</span>
       <span><span style="color:#dc2626">&#9644;</span> critical path</span>
       <span><span style="color:#7c3aed">&#9670;</span> milestone</span>
-      <span>Stages = parallel groups (tasks that can run at once)</span>
+      %s
     </div>`
+	legend = fmt.Sprintf(legend, grouping)
 	const btn = `border:none;padding:6px 13px;font-size:13px;cursor:pointer;`
 	return fmt.Sprintf(`
 <div style="padding:16px 24px 8px">
@@ -495,27 +554,31 @@ func plif(n int) string {
 // ---------------------------------------------------------------------------
 
 // RenderGanttDrawio renders the Gantt as an uncompressed draw.io (mxGraph) file:
-// stage-banded task rows with truncated labels in a left column, time-scaled
-// planned bars (critical-path red stroke), milestone diamonds, month gridlines,
-// a today line, and finish-to-start dependency edges. draw.io reads this XML
-// directly (no deflate needed).
-func RenderGanttDrawio(snapshot *Snapshot) string {
+// task rows grouped by block (with block bands and labels) or by person, with
+// truncated labels in a left column, time-scaled planned bars (critical-path
+// red stroke), milestone diamonds, month gridlines, a today line, and
+// finish-to-start dependency edges. draw.io reads this XML directly (no
+// deflate needed). blocks may be empty (no planning blocks).
+func RenderGanttDrawio(snapshot *Snapshot, blocks []Block) string {
 	return `<mxfile host="hate" type="device">` +
-		ganttDrawioDiagram(snapshot.ProjectName+" — Full plan", snapshot) +
-		ganttDrawioDiagram("Critical path", criticalOnly(snapshot)) +
+		ganttDrawioDiagram(snapshot.ProjectName+" — Full plan", snapshot, blocks) +
+		ganttDrawioDiagram("Critical path", criticalOnly(snapshot), blocks) +
 		`</mxfile>`
 }
 
 // ganttDrawioDiagram builds one <diagram> (a draw.io tab) for the given
 // snapshot's rows.
-func ganttDrawioDiagram(name string, snapshot *Snapshot) string {
+func ganttDrawioDiagram(name string, snapshot *Snapshot, blocks []Block) string {
 	const (
 		gut  = 340
 		rowH = 24
 		barH = 13
-		top  = 40
 	)
-	rows, chartStart, chartEnd := ganttData(snapshot)
+	top := 40
+	if len(blocks) > 0 {
+		top = 56 // room for the block labels above the month labels
+	}
+	rows, groups, chartStart, chartEnd := ganttData(snapshot, blocks)
 	esc := html.EscapeString
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf(`<diagram name="%s"><mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/>`,
@@ -530,23 +593,38 @@ func ganttDrawioDiagram(name string, snapshot *Snapshot) string {
 	ppd := ganttPxPerDay(totalDays)
 	x := func(d time.Time) int { return gut + int(float64(daysBetween(chartStart, d))*ppd) }
 
-	// Lay out rows with a stage-header band whenever the wave changes.
-	stageCount, stageDays := stageTally(rows)
+	// Lay out rows with a group-header band whenever the group changes.
 	rowY := make([]int, len(rows))
-	type stageHdr struct{ wave, y int }
-	var headers []stageHdr
+	type groupHdr struct{ group, y int }
+	var headers []groupHdr
 	y := top
-	curWave := -1
+	cur := -1
 	for i := range rows {
-		if rows[i].wave != curWave {
-			headers = append(headers, stageHdr{rows[i].wave, y})
+		if rows[i].group != cur {
+			headers = append(headers, groupHdr{rows[i].group, y})
 			y += 22
-			curWave = rows[i].wave
+			cur = rows[i].group
 		}
 		rowY[i] = y
 		y += rowH
 	}
 	chartW := x(chartEnd) + int(ppd) + 40
+
+	// Block bands first, so everything else draws over them.
+	for i, bb := range visibleBands(blocks, chartStart, chartEnd) {
+		bx, bw := x(bb.start), x(bb.end)-x(bb.start)
+		if bw < 1 {
+			continue
+		}
+		opacity := 4
+		if bb.odd {
+			opacity = 10
+		}
+		b.WriteString(fmt.Sprintf(`<mxCell id="block%d" value="" style="rounded=0;fillColor=#7c3aed;opacity=%d;strokeColor=#a78bfa;dashed=1;html=1;" vertex="1" parent="1"><mxGeometry x="%d" y="%d" width="%d" height="%d" as="geometry"/></mxCell>`,
+			i, opacity, bx, top, bw, y-top))
+		b.WriteString(fmt.Sprintf(`<mxCell id="blocklbl%d" value="%s" style="text;html=1;align=left;fontSize=10;fontColor=#6d28d9;" vertex="1" parent="1"><mxGeometry x="%d" y="%d" width="%d" height="16" as="geometry"/></mxCell>`,
+			i, esc(bb.block.Label), bx+2, top-36, bw))
+	}
 
 	// Month gridlines + labels.
 	m := time.Date(chartStart.Year(), chartStart.Month(), 1, 0, 0, 0, 0, time.UTC)
@@ -568,10 +646,11 @@ func ganttDrawioDiagram(name string, snapshot *Snapshot) string {
 			x(today), top, y-top))
 	}
 
-	// Stage header bands (span the label column + chart).
+	// Group header bands (span the label column + chart).
 	for i, h := range headers {
-		b.WriteString(fmt.Sprintf(`<mxCell id="stage%d" value="Stage %d — %d task%s, Σ %dd" style="text;html=1;align=left;fontStyle=1;fontSize=11;fontColor=#334155;fillColor=#eef2f7;strokeColor=none;verticalAlign=middle;spacingLeft=8;" vertex="1" parent="1"><mxGeometry x="0" y="%d" width="%d" height="20" as="geometry"/></mxCell>`,
-			i, h.wave+1, stageCount[h.wave], plif(stageCount[h.wave]), stageDays[h.wave], h.y, chartW))
+		g := groups[h.group]
+		b.WriteString(fmt.Sprintf(`<mxCell id="group%d" value="%s — %d task%s, Σ %dd" style="text;html=1;align=left;fontStyle=1;fontSize=11;fontColor=#334155;fillColor=#eef2f7;strokeColor=none;verticalAlign=middle;spacingLeft=8;" vertex="1" parent="1"><mxGeometry x="0" y="%d" width="%d" height="20" as="geometry"/></mxCell>`,
+			i, esc(g.label), g.count, plif(g.count), g.days, h.y, chartW))
 	}
 
 	cellID := map[string]string{}

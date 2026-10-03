@@ -33,7 +33,7 @@ func ganttFixture() *Snapshot {
 }
 
 func TestRenderGanttPanel(t *testing.T) {
-	svg := renderGanttPanel(ganttFixture(), "Baselined schedule — read-only.", "/api/projects/TEST/gantt.drawio")
+	svg := renderGanttPanel(ganttFixture(), nil, "Baselined schedule — read-only.", "/api/projects/TEST/gantt.drawio")
 	wants := []string{
 		`class="gantt-svg"`,
 		`/api/projects/TEST/gantt.drawio`, // export button href
@@ -42,8 +42,8 @@ func TestRenderGanttPanel(t *testing.T) {
 		`Critical path`,  // view toggle
 		`id="gantt-cp"`,  // critical-path view container
 		`function ganttView`,
-		`Stage 1`, // parallel-group band
-		`Stage 2`,
+		`class="gantt-group"`, // person group header (owner: none → unassigned)
+		`unassigned`,
 		`#dc2626`, // critical-path red stroke
 		`#7c3aed`, // milestone diamond fill
 		`+3d`,     // slip label
@@ -61,7 +61,7 @@ func TestRenderGanttPanel(t *testing.T) {
 }
 
 func TestRenderGanttDrawioIsValidXML(t *testing.T) {
-	out := RenderGanttDrawio(ganttFixture())
+	out := RenderGanttDrawio(ganttFixture(), nil)
 
 	// Well-formedness: decode every token, expect no error.
 	dec := xml.NewDecoder(strings.NewReader(out))
@@ -75,15 +75,14 @@ func TestRenderGanttDrawioIsValidXML(t *testing.T) {
 		}
 	}
 
-	// Stage grouping: A & the milestone are stage 0 (t0, t1), B is stage 1 (t2),
-	// so the A→B dependency edge runs t0→t2.
+	// One group (no owners), rows by planned start: A (t0), B (t1), M (t2), so
+	// the A→B dependency edge runs t0→t1.
 	wants := []string{
 		`<mxfile`,
 		`<diagram name="Test Project — Full plan">`, // full-plan tab
 		`<diagram name="Critical path">`,            // critical-path tab
-		`source="t0" target="t2"`,                   // dependency edge A→B (full plan)
-		`Stage 1`,                                   // stage band
-		`Stage 2`,
+		`source="t0" target="t1"`,                   // dependency edge A→B (full plan)
+		`unassigned — 3 tasks`,                      // group band
 		`rhombus`,  // milestone
 		`+3d`,      // slip cell
 		`Aug 2026`, // month label
@@ -92,5 +91,8 @@ func TestRenderGanttDrawioIsValidXML(t *testing.T) {
 		if !strings.Contains(out, w) {
 			t.Errorf("draw.io export missing %q", w)
 		}
+	}
+	if strings.Contains(out, "Stage ") {
+		t.Error("draw.io export still groups by stage")
 	}
 }

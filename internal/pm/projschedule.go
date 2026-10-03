@@ -375,34 +375,14 @@ func ScheduleCapacity(tickets []*ticket.Ticket, resources []ticket.Resource, ctx
 		}
 	}
 
-	// Work order: longest chain of open explicit predecessors (ready = 0).
-	depth := map[string]int{}
-	var depthOf func(id string, stk map[string]bool) int
-	depthOf = func(id string, stk map[string]bool) int {
-		if d, ok := depth[id]; ok {
-			return d
-		}
-		if stk[id] {
-			return 0
-		}
-		stk[id] = true
-		best := 0
-		for _, p := range open[id].Ticket.Predecessors {
-			if _, ok := open[p]; ok {
-				if d := depthOf(p, stk) + 1; d > best {
-					best = d
-				}
-			}
-		}
-		delete(stk, id)
-		depth[id] = best
-		return best
-	}
+	// Work order: dependency stage (the longest chain of open explicit
+	// predecessors; ready = 0), shared with the Work order view and /ready.
+	depth := DependencyStages(tickets)
 	less := func(a, b *CapacityItem) bool {
 		if ra, rb := priorityRank(a.Ticket.Priority), priorityRank(b.Ticket.Priority); ra != rb {
 			return ra < rb
 		}
-		if da, db := depthOf(a.Ticket.ID, map[string]bool{}), depthOf(b.Ticket.ID, map[string]bool{}); da != db {
+		if da, db := depth[a.Ticket.ID], depth[b.Ticket.ID]; da != db {
 			return da < db
 		}
 		return a.Ticket.ID < b.Ticket.ID
@@ -558,6 +538,10 @@ func (p *CapacityPlan) Snapshot(projectID, projectName string) *Snapshot {
 	for _, it := range p.Items {
 		inSet[it.Ticket.ID] = true
 	}
+	laneRank := map[string]int{}
+	for i, l := range p.Lanes {
+		laneRank[l.Key] = i
+	}
 	for _, it := range p.Items {
 		t := it.Ticket
 		phase := ""
@@ -570,7 +554,13 @@ func (p *CapacityPlan) Snapshot(projectID, projectName string) *Snapshot {
 				deps = append(deps, d)
 			}
 		}
+		lane, rank := "Features", len(p.Lanes) // parents: containers, listed last
+		if l := p.Lane(it.Lane); l != nil {
+			lane, rank = l.Label, laneRank[l.Key]
+		}
 		snap.Tasks = append(snap.Tasks, SnapshotTask{
+			Lane:         lane,
+			LaneRank:     rank,
 			TaskID:       t.ID,
 			Title:        t.Title,
 			Owner:        ownerOf(t),
@@ -609,8 +599,9 @@ func projectedNote(plan *CapacityPlan) string {
 }
 
 // RenderProjectedGanttHTML builds the floating schedule and renders the Gantt
-// panel for the pre-baseline dashboard.
-func RenderProjectedGanttHTML(projectID, projectName string, tickets []*ticket.Ticket, resources []ticket.Resource, ctx EstimateContext, start time.Time, exportURL string) string {
+// panel for the pre-baseline dashboard: grouped by block with block bands when
+// blocks are given, else by person (lane).
+func RenderProjectedGanttHTML(projectID, projectName string, tickets []*ticket.Ticket, resources []ticket.Resource, ctx EstimateContext, start time.Time, exportURL string, blocks []Block) string {
 	plan := ScheduleCapacity(tickets, resources, ctx, start)
-	return renderGanttPanel(plan.Snapshot(projectID, projectName), projectedNote(plan), exportURL)
+	return renderGanttPanel(plan.Snapshot(projectID, projectName), blocks, projectedNote(plan), exportURL)
 }

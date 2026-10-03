@@ -253,10 +253,10 @@ func TestProjectScheduleRenders(t *testing.T) {
 	if snap.Tasks[1].Baseline.PlannedStart != "2026-07-23" || snap.Tasks[1].Dependencies[0] != "A" {
 		t.Errorf("B = %+v", snap.Tasks[1])
 	}
-	if html := RenderProjectedGanttHTML("P", "Proj", tickets, nil, NewEstimateContext(tickets, 0, nil), schedStart, "/x"); !contains(html, "gantt-svg") || !contains(html, "Capacity-aware projection") {
+	if html := RenderProjectedGanttHTML("P", "Proj", tickets, nil, NewEstimateContext(tickets, 0, nil), schedStart, "/x", nil); !contains(html, "gantt-svg") || !contains(html, "Capacity-aware projection") {
 		t.Error("projected Gantt did not render")
 	}
-	if x := RenderGanttDrawio(snap); !contains(x, "<mxfile") {
+	if x := RenderGanttDrawio(snap, nil); !contains(x, "<mxfile") {
 		t.Error("draw.io export did not render")
 	}
 }

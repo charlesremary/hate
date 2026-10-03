@@ -100,7 +100,7 @@ type SnapshotTask struct {
 	Title          string       `json:"title"`
 	Owner          string       `json:"owner"`
 	Status         string       `json:"status"`
-	Phase          string       `json:"phase,omitempty"` // project phase, for within-stage ordering
+	Phase          string       `json:"phase,omitempty"` // project phase, for within-group ordering
 	Dependencies   []string     `json:"dependencies"`
 	IsMilestone    bool         `json:"is_milestone"`
 	Baseline       BaselineInfo `json:"baseline"`
@@ -109,6 +109,11 @@ type SnapshotTask struct {
 	SlipEvents     []SlipEvent  `json:"slip_events"`
 	IsCriticalPath bool         `json:"is_critical_path"`
 	FloatDays      int          `json:"float_days"`
+	// Lane / LaneRank place the task in the projected Gantt's person grouping
+	// (the capacity schedule's lane and its order). In memory only: a
+	// baselined snapshot has none and groups by owner instead.
+	Lane     string `json:"-"`
+	LaneRank int    `json:"-"`
 }
 
 // Snapshot represents the full denormalized project snapshot.

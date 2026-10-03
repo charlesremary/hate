@@ -678,7 +678,12 @@ async function loadTickets() {
     if (phase) params.push(`phase=${encodeURIComponent(phase)}`);
     if (params.length) url += '?' + params.join('&');
 
-    allTickets = await API.get(url);
+    const [tickets, wo] = await Promise.all([
+      API.get(url),
+      API.get(`/api/projects/${currentProject.id}/ready`).catch(() => null),
+    ]);
+    allTickets = tickets;
+    workOrder = wo;
     populatePhaseFilter(allTickets);
     populateTagFilter(allTickets);
     populateAssigneeFilter(allTickets);
@@ -748,28 +753,16 @@ function depBadge(t, byId) {
   return '';
 }
 
-// Topological depth = longest chain of *unfinished* predecessors. Ready tickets
-// (no unfinished preds) are depth 0; a ticket always ranks after its blockers.
-// Cycle-safe via the recursion stack guard.
-function computeWorkOrder(tickets, byId) {
+// The work order from GET /ready (the server's dependency stages: the one stage
+// computation, shared with the capacity schedule and the agent API). Loaded with
+// the tickets; null until then.
+let workOrder = null;
+
+// Stage per open ticket (0-based, so ready work is 0) from the work order.
+// Tickets not in it (done, backlog, parents) are 0: they're ranked separately.
+function workOrderDepth() {
   const depth = new Map();
-  function computeDepth(id, stack) {
-    if (depth.has(id)) return depth.get(id);
-    if (stack.has(id)) return 0; // cycle: stop climbing
-    stack.add(id);
-    const t = byId.get(id);
-    let d = 0;
-    if (t) {
-      for (const pid of (t.predecessors || [])) {
-        const p = byId.get(pid);
-        if (p && !isDone(p)) d = Math.max(d, 1 + computeDepth(pid, stack));
-      }
-    }
-    stack.delete(id);
-    depth.set(id, d);
-    return d;
-  }
-  tickets.forEach(t => computeDepth(t.id, new Set()));
+  ((workOrder && workOrder.stages) || []).forEach(g => (g.tickets || []).forEach(w => depth.set(w.id, w.stage - 1)));
   return depth;
 }
 
@@ -821,7 +814,7 @@ function renderTicketTable(tickets) {
   const kidCount = childCountMap();
 
   if (mode === 'work') {
-    const depth = computeWorkOrder(tickets, byId);
+    const depth = workOrderDepth();
     // Committed-active first, then backlog, then done — so uncommitted/finished
     // work never leads the order.
     const rank = t => isDone(t) ? 2 : (isBacklogTicket(t) ? 1 : 0);
@@ -955,7 +948,7 @@ function visibleTickets() {
   return visible;
 }
 
-// Render the ticket set in whichever view is active (flat list vs dependency plan).
+// Render the ticket set in whichever view is active (flat list vs work order).
 function renderTickets() {
   const planActive = ticketView === 'plan';
   const table = document.getElementById('ticket-table');
@@ -967,114 +960,61 @@ function renderTickets() {
   else renderTicketTable(visible);
 }
 
-// Compute dependency stages + critical path from the loaded tickets (mirrors the
-// server's execution-plan logic). Backlog excluded; parents tracked separately.
-// Durations are the server's computed estimate (estimated_hours): wrap
-// estimate_hours, converted legacy effort, or a code ticket's share of its
-// feature's CFP-based hours.
-function computeExecPlan(all) {
-  const byId = {};
-  all.forEach(t => { if (!isBacklogTicket(t)) byId[t.id] = t; });
-  const ids = Object.keys(byId);
-  const preds = {};
-  ids.forEach(id => { preds[id] = (byId[id].predecessors || []).filter(p => byId[p]); });
-  const wave = {};
-  const waveOf = (id, stk) => {
-    if (id in wave) return wave[id];
-    if (stk.has(id)) return 0;
-    stk.add(id);
-    let best = 0;
-    for (const p of preds[id]) best = Math.max(best, waveOf(p, stk) + 1);
-    stk.delete(id);
-    wave[id] = best; return best;
-  };
-  ids.forEach(id => waveOf(id, new Set()));
-  const dur = id => {
-    const t = byId[id];
-    const h = t && (t.estimated_hours > 0 ? t.estimated_hours : t.estimate_hours);
-    return h > 0 ? h : 0;
-  };
-  const ef = {};
-  const efOf = (id, stk) => {
-    if (id in ef) return ef[id];
-    if (stk.has(id)) return 0;
-    stk.add(id);
-    let best = 0;
-    for (const p of preds[id]) best = Math.max(best, efOf(p, stk));
-    stk.delete(id);
-    ef[id] = best + dur(id); return ef[id];
-  };
-  ids.forEach(id => efOf(id, new Set()));
-  let endNode = null, maxEF = -1;
-  ids.slice().sort().forEach(id => { if (ef[id] > maxEF) { maxEF = ef[id]; endNode = id; } });
-  const critical = new Set();
-  let cur = endNode;
-  while (cur) {
-    critical.add(cur);
-    const want = ef[cur] - dur(cur);
-    let next = null;
-    for (const p of preds[cur]) { if (Math.abs(ef[p] - want) < 1e-9) { next = p; break; } }
-    cur = next;
-  }
-  const isParent = new Set();
-  all.forEach(t => (t.tags || []).forEach(tag => { if (tag.startsWith('parent:')) isParent.add(tag.slice(7)); }));
-  return { byId, preds, wave, dur, critical, isParent };
-}
-
-// Interactive dependency-stage view: filtered tickets grouped by stage, each row
-// clickable to open/start it.
+// Work order view: the "Ready now" group (open tickets whose predecessors are
+// all done; they can run in parallel), then the rest of the open work in
+// dependency order with a small stage label. Comes from GET /ready; respects the
+// filters. Each row opens the ticket.
 function renderTicketPlan(visible) {
   const el = document.getElementById('ticket-plan');
-  if (!allTickets.length) { el.innerHTML = '<p style="color:#999;padding:16px">No tickets.</p>'; return; }
-  const P = computeExecPlan(allTickets);
-  const stages = {};
-  visible.forEach(t => {
-    if (P.isParent.has(t.id) || !P.byId[t.id]) return; // skip parents/backlog
-    const w = P.wave[t.id] ?? 0;
-    (stages[w] = stages[w] || []).push(t.id);
-  });
-  const stageNums = Object.keys(stages).map(Number).sort((a, b) => a - b);
-  if (!stageNums.length) { el.innerHTML = '<p style="color:#999;padding:16px">No tickets match the current filters.</p>'; return; }
-  const stageHours = {}; let maxStageHours = 0;
-  stageNums.forEach(w => { stageHours[w] = stages[w].reduce((s, id) => s + P.dur(id), 0); if (stageHours[w] > maxStageHours) maxStageHours = stageHours[w]; });
-  const blocks = stageNums.map(w => {
-    const list = stages[w].slice().sort((a, b) => {
-      const ca = P.critical.has(a), cb = P.critical.has(b);
-      if (ca !== cb) return ca ? -1 : 1;
-      return a < b ? -1 : 1;
-    });
-    const bar = maxStageHours > 0 ? stageHours[w] / maxStageHours * 100 : 0;
-    const crit = list.filter(id => P.critical.has(id)).length;
-    const count = list.length === 1 ? '<strong>1</strong> ticket' : `<strong>${list.length}</strong> tickets, independent (can run at once)`;
-    const note = w === 0 ? ' · <span style="color:#16a34a">can start now</span>' : '';
-    const critNote = crit > 0 ? ` · <span style="color:#dc2626">${crit} on critical path ★</span>` : '';
-    const rows = list.map(id => {
-      const t = P.byId[id];
-      const star = P.critical.has(id) ? '<span style="color:#dc2626">★</span> ' : '';
-      const needs = (P.preds[id] || []).filter(p => !P.isParent.has(p)).map(p => `${p} (stage ${(P.wave[p] ?? 0) + 1})`);
-      const nstr = needs.length ? ` <span style="color:#b45309;font-size:11px">needs ${escapeHtml(needs.join(', '))}</span>` : '';
-      const eff = P.dur(id) ? ` <span style="color:#aaa;font-size:11px">${fmtHours(P.dur(id))}h</span>` : '';
-      return `<div onclick="openTicketPanel('${id}')" style="cursor:pointer;padding:5px 8px 5px 22px;display:flex;gap:8px;align-items:center;border-radius:4px" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
-        ${statusBadge(t.status)}
-        <span style="font-weight:600;color:#1565c0">${id}</span>
-        <span style="flex:1;min-width:0">${star}${escapeHtml(t.title)}</span>${eff}${nstr}
-      </div>`;
-    }).join('');
-    const open = w === 0 ? ' open' : '';
-    return `<details${open} style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:10px">
-      <summary style="cursor:pointer;padding:10px 12px">
-        <span style="display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <strong style="color:#334155">Stage ${w + 1}</strong>
-          <span style="display:inline-block;width:120px;height:12px;background:#f1f5f9;border-radius:3px"><span style="display:block;height:100%;width:${bar.toFixed(1)}%;min-width:3px;background:#3b82f6;border-radius:3px"></span></span>
-          <span style="font-size:12.5px;color:#334155">${count} · <span style="color:#0d9488;font-weight:600" title="Sum of estimated hours: wrap estimates plus code hours from each feature's CFP">Σ ${fmtHours(stageHours[w])}h est.</span>${note}${critNote}</span>
-        </span>
-      </summary>
-      <div style="padding:2px 6px 8px">${rows}</div>
-    </details>`;
-  }).join('');
+  if (!workOrder) { el.innerHTML = '<p style="color:#999;padding:16px">Work order unavailable.</p>'; return; }
+  const show = new Set(visible.map(t => t.id));
+  const readyIds = new Set((workOrder.ready || []).map(w => w.id));
+  const nextIds = new Set((workOrder.next || []).map(w => w.id));
+  const ready = (workOrder.ready || []).filter(w => show.has(w.id));
+  const rest = [];
+  (workOrder.stages || []).forEach(g => (g.tickets || []).forEach(w => {
+    if (show.has(w.id) && !readyIds.has(w.id)) rest.push(w);
+  }));
+  if (!ready.length && !rest.length) {
+    el.innerHTML = '<p style="color:#999;padding:16px">No open work matches the current filters.</p>';
+    return;
+  }
+  const sumHours = list => list.reduce((s, w) => s + (w.estimated_hours || 0), 0);
+  const row = w => {
+    const waits = (w.waits_on || []).length
+      ? ` <span style="color:#b45309;font-size:11px">waits on ${escapeHtml(w.waits_on.join(', '))}</span>` : '';
+    const next = nextIds.has(w.id) ? ' <span style="color:#16a34a;font-size:11px">next</span>' : '';
+    const eff = w.estimated_hours ? ` <span style="color:#aaa;font-size:11px">${fmtHours(w.estimated_hours)}h</span>` : '';
+    const who = w.assignee ? ` <span style="color:#94a3b8;font-size:11px">${escapeHtml(w.assignee.split('@')[0])}</span>` : '';
+    return `<div class="wo-row" data-id="${escapeHtml(w.id)}" style="cursor:pointer;padding:5px 8px;display:flex;gap:8px;align-items:center;border-radius:4px">
+      <span style="flex:0 0 52px;font-size:11px;color:#64748b" title="Dependency stage: how many open predecessors deep">stage ${Number(w.stage) || 1}</span>
+      ${statusBadge(escapeHtml(w.status))}
+      <span style="font-weight:600;color:#1565c0">${escapeHtml(w.id)}</span>
+      <span style="flex:1;min-width:0">${escapeHtml(w.title)}</span>${who}${eff}${next}${waits}
+    </div>`;
+  };
+  const readyHtml = ready.length
+    ? ready.map(row).join('')
+    : '<p style="color:#999;font-size:12px;margin:4px 8px">Nothing is ready under these filters.</p>';
+  const restHtml = rest.length ? `
+    <div style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:10px">
+      <div style="padding:10px 12px;border-bottom:1px solid #f1f5f9"><strong style="color:#334155">Then, in dependency order</strong>
+        <span style="font-size:12.5px;color:#64748b"> · ${rest.length} ticket${rest.length === 1 ? '' : 's'} · Σ ${fmtHours(sumHours(rest))}h est.</span></div>
+      <div style="padding:2px 6px 8px">${rest.map(row).join('')}</div>
+    </div>` : '';
   el.innerHTML = `<div style="max-width:1000px;margin:0 auto">
-    <p style="font-size:12px;color:#777;margin:4px 0 12px">A <strong>stage</strong> groups tickets that don't depend on each other, so they can run at once. <strong>Click a ticket to open it and start work.</strong> <span style="color:#b45309">needs</span> points to earlier stages that must finish first. Respects the filters above.</p>
-    ${blocks}</div>`;
+    <p style="font-size:12px;color:#777;margin:4px 0 12px"><strong>Ready now</strong> tickets have every predecessor done, so they can be worked in parallel. The rest follow in dependency order; <span style="color:#16a34a">next</span> marks tickets the ready set unlocks. <strong>Click a ticket to open it.</strong> Done, backlog and feature parents aren't listed. Respects the filters above.</p>
+    <div style="border:1px solid #bbf7d0;border-radius:8px;margin-bottom:10px">
+      <div style="padding:10px 12px;border-bottom:1px solid #f1f5f9;background:#f0fdf4;border-radius:8px 8px 0 0"><strong style="color:#166534">Ready now</strong>
+        <span style="font-size:12.5px;color:#64748b"> · ${ready.length} ticket${ready.length === 1 ? '' : 's'} · Σ ${fmtHours(sumHours(ready))}h est.</span></div>
+      <div style="padding:2px 6px 8px">${readyHtml}</div>
+    </div>
+    ${restHtml}</div>`;
+  el.querySelectorAll('.wo-row').forEach(r => {
+    r.addEventListener('click', () => openTicketPanel(r.dataset.id));
+    r.addEventListener('mouseover', () => { r.style.background = '#f8fafc'; });
+    r.addEventListener('mouseout', () => { r.style.background = ''; });
+  });
 }
 
 function setTicketView(v) {
@@ -1855,7 +1795,9 @@ function renderPhaseRollup(report) {
       <td style="padding:6px 8px;white-space:nowrap">${bar(p.percent_complete)} ${pctText(p.percent_complete)}</td>
       <td style="padding:6px 8px">${p.complete_count}/${p.ticket_count}</td>
       <td style="padding:6px 8px;white-space:nowrap">${fmtHours(p.est_hours_done)}/${fmtHours(p.est_hours_total)}h</td>
-      <td style="padding:6px 8px;white-space:nowrap">${p.planned_start || '—'} → ${p.due_date || '—'}</td>
+      <td style="padding:6px 8px;white-space:nowrap">${p.block_start
+        ? `<span title="The block's dates (tickets: ${escapeHtml(p.planned_start || '—')} → ${escapeHtml(p.due_date || '—')})">${escapeHtml(p.block_start)} → ${escapeHtml(p.block_end)}</span>`
+        : `${escapeHtml(p.planned_start || '—')} → ${escapeHtml(p.due_date || '—')}`}</td>
       <td style="padding:6px 8px">${flags.join(' ')}</td>
     </tr>`;
   }).join('');
@@ -2355,6 +2297,9 @@ document.getElementById('btn-clear-requested-end').addEventListener('click', () 
   document.getElementById('requested-end').value = '';
 });
 
+// The block length as loaded ('' = none), so saving only commits a change.
+let loadedBlockWeeks = '';
+
 // Per-project settings only edit when a project is active.
 async function loadProjectSettingsSections() {
   const mhInputs = document.getElementById('max-hours-inputs');
@@ -2367,6 +2312,9 @@ async function loadProjectSettingsSections() {
   const tdEmpty = document.getElementById('requested-dates-empty');
   const tdProj = document.getElementById('requested-dates-project');
   if (!currentProject) {
+    document.getElementById('block-weeks-inputs').classList.add('hidden');
+    document.getElementById('block-weeks-empty').classList.remove('hidden');
+    document.getElementById('block-weeks-project').textContent = '';
     mhInputs.classList.add('hidden');
     mhEmpty.classList.remove('hidden');
     mhProj.textContent = '';
@@ -2397,6 +2345,14 @@ async function loadProjectSettingsSections() {
     document.getElementById('requested-end').value = loadedRequestedEnd;
     tdEmpty.classList.add('hidden');
     tdInputs.classList.remove('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
+  try {
+    const bw = await API.get(`/api/projects/${currentProject.id}/block-weeks`);
+    loadedBlockWeeks = bw.block_weeks ? String(bw.block_weeks) : '';
+    document.getElementById('block-weeks').value = loadedBlockWeeks;
+    document.getElementById('block-weeks-project').textContent = `— ${currentProject.name || currentProject.id}`;
+    document.getElementById('block-weeks-empty').classList.add('hidden');
+    document.getElementById('block-weeks-inputs').classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
   try {
     const st = await API.get(`/api/projects/${currentProject.id}/strict-time`);
@@ -2462,6 +2418,13 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
         });
         loadedRequestedStart = res.requested_start || '';
         loadedRequestedEnd = res.requested_end || '';
+      }
+    }
+    if (currentProject && !document.getElementById('block-weeks-inputs').classList.contains('hidden')) {
+      const bw = document.getElementById('block-weeks').value;
+      if (bw !== loadedBlockWeeks) {
+        const res = await API.put(`/api/projects/${currentProject.id}/block-weeks`, { block_weeks: bw ? parseInt(bw, 10) : null });
+        loadedBlockWeeks = res.block_weeks ? String(res.block_weeks) : '';
       }
     }
     if (currentProject && !document.getElementById('strict-time-inputs').classList.contains('hidden')) {

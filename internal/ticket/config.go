@@ -163,6 +163,10 @@ type ProjectConfig struct {
 	// Still read (as the requested end when that is unset); saving the
 	// requested dates drops it.
 	TargetDate string `json:"target_date,omitempty"`
+	// BlockWeeks is the planning block length in weeks: 2 or 3, or 0 (unset)
+	// for no blocks. Block 1 starts on the Monday on or before the requested
+	// start; see pm.BlocksForProject.
+	BlockWeeks int `json:"block_weeks,omitempty"`
 	// Project Overview tab content — hand-maintained reference material.
 	Contacts     []Contact     `json:"contacts,omitempty"`
 	Links        []Link        `json:"links,omitempty"`

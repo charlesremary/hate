@@ -118,3 +118,40 @@ func TestPhaseRollupFunctionalWeighting(t *testing.T) {
 			p.EstHoursTotal, p.EstHoursDone, p.PercentComplete, p.UnsizedCount)
 	}
 }
+
+// HATE-evqw: "Block NN" phases sort by block number (Block 10 after Block 9),
+// ahead of other phases, and carry their block's dates.
+func TestPhaseRollupBlocks(t *testing.T) {
+	wrap := []string{ticket.ClassConfig}
+	tickets := []*ticket.Ticket{
+		{ID: "a", Phase: strp("Block 10 (Mar 8-19)"), Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
+		{ID: "b", Phase: strp("Block 09 (Feb 22-Mar 5)"), Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
+		{ID: "c", Phase: strp("Block 2"), Tags: wrap, EstimateHours: f64(1), Status: "complete"},
+		{ID: "d", Phase: strp("Admin"), Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
+		{ID: "e", Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
+	}
+	rep := PhaseRollup(tickets, NewEstimateContext(tickets, 0, nil))
+	var got []string
+	for _, p := range rep.Phases {
+		got = append(got, p.Phase)
+	}
+	want := []string{"Block 2", "Block 09 (Feb 22-Mar 5)", "Block 10 (Mar 8-19)", "Admin", ""}
+	if len(got) != len(want) {
+		t.Fatalf("phases = %q", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("phases = %q, want %q", got, want)
+		}
+	}
+	if rep.Phases[0].Block != 2 || rep.Phases[3].Block != 0 {
+		t.Errorf("block numbers: %d %d", rep.Phases[0].Block, rep.Phases[3].Block)
+	}
+	ApplyBlockDates(&rep, BuildBlocks(2, day("2026-11-02"), day("2026-11-20")))
+	if p := rep.Phases[0]; p.BlockStart != "2026-11-16" || p.BlockEnd != "2026-11-27" {
+		t.Errorf("Block 2 dates = %s..%s, want 2026-11-16..2026-11-27", p.BlockStart, p.BlockEnd)
+	}
+	if p := rep.Phases[2]; p.BlockStart != "" {
+		t.Errorf("Block 10 is past the block list, got dates %s", p.BlockStart)
+	}
+}

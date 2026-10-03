@@ -228,6 +228,18 @@ every dashboard view:
   changes, in `.tkt/pm/forecast_history.json` (committed), drawn as a small trend
   of the likely and P85 finish against the requested end once there are 2+
   entries.
+- **Planning blocks.** Optional `block_weeks` (2 or 3; Settings or
+  `PUT …/block-weeks`, committed). Block 1 starts on the Monday on or before the
+  requested start (else the earliest planned start, else today);
+  `GET …/blocks` lists them (`internal/pm/blocks.go`). Claude plans tickets into
+  blocks by phase (`Block 01 (Nov 2-13)`) and dates
+  (`docs/ticketing-and-cfp-guide.md` §14). The Gantt (and draw.io export) groups
+  rows by block with shaded block bands; without blocks it groups rows by person
+  (the capacity lanes). The phase rollup sorts block phases by number.
+- **Dependency stages / work order.** One stage function
+  (`internal/pm/stages.go`: longest chain of open predecessors) orders the
+  capacity schedule, the Tickets tab's Work order view, and
+  `GET …/ready` (`ready`, `next`, `stages`) for agents.
 
 Known simplifications: a flat daily capacity (no holidays, PTO, or per-day
 variation), remaining = estimate − logged (a ticket past its estimate but still

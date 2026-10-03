@@ -88,9 +88,9 @@
               <option value="created">Sort: Created</option>
             </select>
             <label class="toggle-label"><input type="checkbox" id="filter-hide-closed" checked> Hide closed</label>
-            <span style="margin-left:auto;display:inline-flex;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden;font-size:13px" title="List = flat table · Plan = tickets grouped into dependency stages">
+            <span style="margin-left:auto;display:inline-flex;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden;font-size:13px" title="List = flat table · Work order = what's ready now, then the rest in dependency order">
               <button type="button" id="view-list" data-view="list" style="border:0;padding:5px 12px;cursor:pointer;background:#2563eb;color:#fff">List</button>
-              <button type="button" id="view-plan" data-view="plan" style="border:0;padding:5px 12px;cursor:pointer;background:#fff;color:#334155">Plan</button>
+              <button type="button" id="view-plan" data-view="plan" style="border:0;padding:5px 12px;cursor:pointer;background:#fff;color:#334155">Work order</button>
             </span>
           </div>
           <div id="ticket-list-container">
@@ -254,6 +254,25 @@
               </p>
             </div>
           </fieldset>
+          <fieldset id="block-weeks-fieldset">
+            <legend>Planning blocks <span id="block-weeks-project" style="font-weight:normal;color:#999"></span></legend>
+            <p id="block-weeks-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to set its planning blocks.</p>
+            <div id="block-weeks-inputs" class="hidden">
+              <label>Block length
+                <select id="block-weeks">
+                  <option value="">None</option>
+                  <option value="2">2 weeks</option>
+                  <option value="3">3 weeks</option>
+                </select>
+              </label>
+              <p style="font-size:12px;color:#999;margin:6px 0 0">
+                Optional: plan the tickets into fixed blocks of 2 or 3 weeks. Block 1 starts on the Monday on
+                or before the requested start. Claude fills the blocks to capacity (see Help &rarr;
+                <em>Planning in blocks</em>); the Gantt groups its rows by block and shades each block.
+                Saved to the project config and committed.
+              </p>
+            </div>
+          </fieldset>
           <fieldset id="strict-time-fieldset">
             <legend>Time enforcement <span id="strict-time-project" style="font-weight:normal;color:#999"></span></legend>
             <p id="strict-time-empty" style="font-size:12px;color:#999;margin:4px 0 8px">Open a project to configure enforcement.</p>
@@ -305,7 +324,7 @@
             <a href="#help-pm">6. For Project Managers</a>
             <a href="#help-cosmic">7. Sizing &amp; estimating (COSMIC)</a>
             <a href="#help-team">8. Team &amp; Identity</a>
-            <a href="#help-agile">9. Working in Agile</a>
+            <a href="#help-blocks">9. Planning in blocks</a>
           </nav>
 
           <!-- 0 -->
@@ -589,6 +608,10 @@
             <p>Predecessors are what turn a flat list of tickets into a <em>schedule</em>. The PM
               engine uses them to order work, compute the critical path, and project end dates
               (see §6).</p>
+            <p>The Tickets tab's <strong>Work order</strong> view (beside List) shows them as a to-do
+              order: <em>Ready now</em> first (every predecessor done, so they can be worked in
+              parallel), then the rest in dependency order, each with a small <em>stage</em> label
+              (how many open predecessors deep it is).</p>
           </section>
 
           <!-- 6 -->
@@ -1071,76 +1094,32 @@
           </section>
 
           <!-- 9 -->
-          <section id="help-agile">
-            <h2>9. Working in Agile</h2>
-            <p>hate is deliberately <strong>methodology-agnostic</strong>. Its primitives — a
-              parent/child hierarchy, a <code>phase</code> grouping, a <code>backlog</code> tag,
-              per-type status workflows, and hour estimates — assume neither waterfall nor
-              Scrum nor Kanban. The examples elsewhere in this guide read as phase-gated
-              (Discovery → Build → QA → Deploy) because that suits agentic, near-waterfall delivery.
-              <strong>hate is not an Agile tool</strong> — but if you run Scrum, the same primitives map
-              onto it cleanly by convention. Here is the recommended approach.</p>
-
-            <h3>The mapping</h3>
-            <table class="help-table">
-              <thead><tr><th>Agile concept</th><th>In hate</th><th>How</th></tr></thead>
-              <tbody>
-                <tr><td><strong>Epic</strong></td><td>Parent ticket</td><td>A large feature or theme. Carries <code>cfp:</code> and/or <code>type:</code> if you want sizing; never logs hours.</td></tr>
-                <tr><td><strong>Story</strong></td><td>Child ticket</td><td><code>parent:&lt;epic-id&gt;</code>, one class tag (wrap stories get <code>estimate_hours</code>) — and where hours are logged.</td></tr>
-                <tr><td><strong>Sprint</strong></td><td><code>phase</code></td><td>Name phases <code>Sprint 01</code>, <code>Sprint 02</code>, … The phase rollup then reads as sprint progress (hours-weighted % complete).</td></tr>
-                <tr><td><strong>Product backlog</strong></td><td><code>backlog</code> tag</td><td>Already excluded from completion %, schedule, and capacity — i.e. "not committed to a sprint yet."</td></tr>
-                <tr><td><strong>Sprint planning</strong></td><td>Remove <code>backlog</code> + set <code>phase</code></td><td>Pulling a story into a sprint is one tag removal and one phase set.</td></tr>
-                <tr><td><strong>Dev lifecycle / DoD</strong></td><td>Ticket <code>status</code></td><td>The promotion workflow (§3) — Not Started → In Progress → Dev Complete → QA → Complete — is each story's mini-lifecycle inside the sprint.</td></tr>
-                <tr><td><strong>Velocity</strong></td><td>Completed est. hours per phase</td><td>Done estimated hours per sprint, straight off the phase rollup.</td></tr>
-                <tr><td><strong>Ceremonies</strong></td><td><code>meeting</code> / <code>administration</code></td><td>Planning, standups, review, retro — phase them into the sprint; they burn the admin/meeting hour pool (§6).</td></tr>
-              </tbody>
-            </table>
-
-            <div class="help-callout" style="background:#f4f6f8;border-left:4px solid #607d8b;padding:12px 16px;margin:12px 0;border-radius:4px">
-              <p style="margin:0"><strong>The one idea that makes it click.</strong> You have two
-                independent axes. <strong><code>status</code></strong> is where a ticket sits in its dev
-                lifecycle; <strong><code>phase</code></strong> is which bucket of time it belongs to. In
-                phase-gated waterfall you spend <code>phase</code> on the lifecycle stage. In Agile each
-                story runs its own lifecycle via <code>status</code>, which <em>frees up</em>
-                <code>phase</code> to mean the sprint. You are not adding a concept — you are re-assigning
-                which axis carries the timebox.</p>
-            </div>
-
-            <h3>An epic is not a backlog</h3>
-            <p>The backlog is not a container — it's a <em>state</em> (the <code>backlog</code> tag) any
-              story can be in, across many epics. An epic can have three stories already in Sprint 4 and
-              five still in the backlog. So model the epic as a parent and the backlog as a tag on the
-              children, never as the epic itself.</p>
-            <pre style="margin:0;font-size:12px;white-space:pre-wrap">PROJ-100  "Checkout revamp"     tags: cfp:24                                     &larr; epic (parent)
-  PROJ-101  "Guest checkout"     tags: parent:PROJ-100, functional, phase:Sprint 03   &larr; committed story
-  PROJ-102  "Saved cards"        tags: parent:PROJ-100, functional, backlog           &larr; still in the backlog</pre>
-
-            <h3>Where it doesn't fit — know the edges</h3>
-            <p>hate was not built to <em>be</em> Scrum, so a few things are conventions rather than
-              first-class features:</p>
+          <section id="help-blocks">
+            <h2>9. Planning in blocks</h2>
+            <p>A project can be planned in fixed <strong>blocks of 2 or 3 weeks</strong>. Turn it on in
+              ⚙ Settings &rarr; <em>Planning blocks</em>. Block 1 starts on the Monday on or before the
+              requested start (else the earliest planned start, else today); each block runs Monday to
+              the Friday of its last week.</p>
+            <p><strong>Claude does the planning.</strong> When it builds (or re-plans) the tickets it
+              fills each block up to the team's capacity &mdash; each person's daily hours &times; the
+              working days in the block &times; 70% focus &mdash; in dependency order, keeping a
+              feature's tickets together where it can. Each planned ticket gets the block as its
+              <code>phase</code> (<code>Block 01 (Nov 2-13)</code>) and the block's start and end as its
+              planned start and due date. Work that doesn't fit before the requested end stays in the
+              backlog. Then the plan is baselined.</p>
             <ul>
-              <li><strong>Two levels, not three.</strong> The hierarchy is parent → child (one level of
-                nesting); Agile's epic → story → <em>task</em> is three. Pick which two get the real
-                hierarchy. The recommended <em>Epic = parent, Story = child</em> logs hours at the story
-                level. If a team must split stories into tasks and log time per task, instead make the
-                epic a tag (e.g. <code>epic:checkout</code>) with the story as the parent and the task as
-                the child.</li>
-              <li><strong>Story points vs CFP.</strong> <code>cfp:</code> is objective COSMIC functional
-                size, not relative story points — don't cram points into it. Velocity comes from
-                estimated hours on the phase rollup; CFP sizes the code and drives the estimate (§7).</li>
-              <li><strong>No strictly-ranked backlog.</strong> Agile backlogs are totally ordered
-                (1…N). hate has four <code>priority</code> buckets, not a strict rank. If you need an
-                ordered backlog, adopt a convention — a <code>rank:</code> tag, or predecessors.</li>
-              <li><strong>A sprint isn't a first-class timebox.</strong> A phase is a string, not a dated
-                container with a burndown. Infer sprint dates from ticket start/due dates, and run a
-                <strong>snapshot</strong> (§6) at each sprint boundary to capture velocity history. A
-                native sprint entity — fixed dates plus a burndown chart — is the one piece you would
-                have to build for the full ceremony.</li>
+              <li><strong>Gantt:</strong> the PM Dashboard shades each block and groups the rows by the
+                block they start in (without blocks, rows are grouped by person).</li>
+              <li><strong>Σ Phases:</strong> the phase rollup lists the blocks in order with their
+                dates, so "Block 03 is 60% done" is one glance.</li>
+              <li><strong>Slips:</strong> at each block boundary Claude re-plans; anything unfinished
+                moves to the next block, which shows up as a slip with a reason.</li>
+              <li><strong>Schedule vs request</strong> shows whether the blocks land by the requested
+                end.</li>
             </ul>
-            <p><strong>Bottom line:</strong> set <code>phase = sprint</code>, tag uncommitted work
-              <code>backlog</code>, let <code>status</code> carry each story's lifecycle, and read
-              velocity off the phase rollup — and you are running Agile on the same primitives everything
-              else here uses.</p>
+            <p>In a project, <code>phase</code> means <em>either</em> lifecycle stage (Discovery,
+              Build, QA...) <em>or</em> block, never a mix. The rules Claude follows are in
+              <code>docs/ticketing-and-cfp-guide.md</code>, &sect;14 "Planning in blocks".</p>
           </section>
 
           <p class="help-foot">That's the whole tool. Reach this page any time from the ⓘ button
