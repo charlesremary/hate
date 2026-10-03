@@ -396,6 +396,7 @@ async function selectProject(id, path, projectData) {
   renderTeamList();
   refreshSyncStatus();
   refreshCommitAs();
+  startSyncLight();
   switchTab(currentTab);
 }
 
@@ -1943,6 +1944,9 @@ async function refreshSyncStatus() {
   if (!currentProject) return;
   const el = document.getElementById('sync-status');
   const btn = document.getElementById('btn-sync');
+  // With a Git account the status light (below) replaces this badge, and the
+  // automatic sync does the fetching.
+  if (gitAccount && gitAccount.configured) { el.style.display = 'none'; return; }
   try {
     const s = await API.get(`/api/projects/${currentProject.id}/sync-status`);
     el.className = 'sync-status';
@@ -1962,10 +1966,13 @@ document.getElementById('btn-sync').addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = '⇅ Syncing…';
   try {
     const result = await API.post(`/api/projects/${currentProject.id}/sync`);
-    showToast(result.message);
+    showToast(result.message, result.state === 'attention' ? 'error' : 'success');
     refreshSyncStatus();
   } catch (e) { showToast(e.message, 'error'); }
-  finally { btn.disabled = false; btn.textContent = '⇅ Sync'; }
+  finally {
+    btn.disabled = false; btn.textContent = '⇅ Sync';
+    pollSyncLight();
+  }
 });
 
 // ── New ticket modal ─────────────────────────────────
@@ -3185,3 +3192,314 @@ async function initTabVisibility() {
 
 loadProjects();
 initTabVisibility();
+
+// ── Git account (Settings) ───────────────────────────
+// App-level: the token lives in this computer's password store, never in a
+// project. The server only ever sends back who is signed in, not the token.
+let gitAccount = null;
+
+function gaMessage(text, kind) {
+  const el = document.getElementById('ga-message');
+  el.textContent = text || '';
+  el.className = 'ga-message' + (kind ? ' ' + kind : '');
+}
+
+function expiryPhrase(a) {
+  if (a.expired) return 'Your GitHub token has expired. Replace it to keep your projects in sync.';
+  if (a.expires_in_days == null) return '';
+  const d = a.expires_in_days;
+  return `Your GitHub token expires ${d <= 0 ? 'today' : d === 1 ? 'tomorrow' : 'in ' + d + ' days'}. Replace it before then to keep your projects in sync.`;
+}
+
+async function loadGitAccount() {
+  try {
+    gitAccount = await API.get('/api/git-account');
+  } catch (e) { gitAccount = null; }
+  renderTokenBanner();
+  if (!document.getElementById('settings-view').classList.contains('hidden')) renderGitAccount();
+  return gitAccount;
+}
+
+function renderTokenBanner() {
+  const b = document.getElementById('token-banner');
+  const a = gitAccount;
+  if (a && a.configured && (a.expiring_soon || a.expired)) {
+    document.getElementById('token-banner-text').textContent = expiryPhrase(a);
+    b.classList.remove('hidden');
+  } else {
+    b.classList.add('hidden');
+  }
+}
+
+function renderInstallSteps(git) {
+  const steps = document.getElementById('ga-install-steps');
+  const link = `<a href="${escapeHtml(git.install_url)}" target="_blank" rel="noopener">${escapeHtml(git.install_url)}</a>`;
+  if (git.os === 'windows') {
+    steps.innerHTML = `<li>Go to ${link} and download <strong>Git for Windows</strong>.</li>
+      <li>Run the installer and click <em>Next</em> on every screen (the defaults are fine).</li>
+      <li>Close hate's window, start hate again, then click <em>Re-check</em>.</li>`;
+  } else if (git.os === 'darwin') {
+    steps.innerHTML = `<li>Open the <strong>Terminal</strong> app (Applications &rarr; Utilities), type <code>xcode-select --install</code> and press Return.</li>
+      <li>Click <em>Install</em> in the window that appears and wait for it to finish (a few minutes).</li>
+      <li>Click <em>Re-check</em>. (Or download Git from ${link}.)</li>`;
+  } else {
+    steps.innerHTML = `<li>Install Git from ${link} (or your system's package manager).</li><li>Click <em>Re-check</em>.</li>`;
+  }
+}
+
+function renderGitAccount() {
+  const a = gitAccount;
+  const missing = document.getElementById('ga-git-missing');
+  const out = document.getElementById('ga-signed-out');
+  const inn = document.getElementById('ga-signed-in');
+  [missing, out, inn].forEach(el => el.classList.add('hidden'));
+  if (!a) { gaMessage('Couldn\'t load the Git account.', 'error'); return; }
+  if (a.git && !a.git.installed) {
+    renderInstallSteps(a.git);
+    missing.classList.remove('hidden');
+    return;
+  }
+  if (a.token_url) document.getElementById('ga-token-link').href = a.token_url;
+  if (!a.configured) {
+    out.classList.remove('hidden');
+    if (a.warning) gaMessage(a.warning, 'error');
+    return;
+  }
+  inn.classList.remove('hidden');
+  document.getElementById('ga-name').textContent = a.name || a.login;
+  document.getElementById('ga-login').textContent = a.login ? `(@${a.login})` : '';
+  document.getElementById('ga-identity').textContent = a.email ? `Your changes are recorded as ${a.name || a.login} <${a.email}>.` : '';
+  let exp = '';
+  if (a.expires_at) exp = `Token expires ${new Date(a.expires_at).toLocaleDateString()}.`;
+  else exp = 'This token has no expiry date.';
+  document.getElementById('ga-expiry').textContent = exp;
+  const banner = document.getElementById('ga-expiry-banner');
+  if (a.expiring_soon || a.expired) {
+    document.getElementById('ga-expiry-text').textContent = expiryPhrase(a);
+    banner.classList.remove('hidden');
+  } else banner.classList.add('hidden');
+  const sw = document.getElementById('ga-storage-warning');
+  if (a.warning) { sw.textContent = a.warning; sw.classList.remove('hidden'); } else sw.classList.add('hidden');
+}
+
+async function gaConnect(inputId) {
+  const input = document.getElementById(inputId);
+  const token = input.value.trim();
+  if (!token) { gaMessage('Paste the token first.', 'error'); input.focus(); return; }
+  gaMessage('Checking with GitHub…');
+  try {
+    gitAccount = await API.post('/api/git-account', { token });
+    input.value = '';
+    document.getElementById('ga-replace-row').classList.add('hidden');
+    renderGitAccount();
+    renderTokenBanner();
+    gaMessage(`Connected as ${gitAccount.name || gitAccount.login}. Saved in this computer's password store.`, 'ok');
+    if (currentProject) startSyncLight();
+  } catch (e) { gaMessage(e.message, 'error'); }
+}
+
+function showReplaceToken() {
+  const row = document.getElementById('ga-replace-row');
+  row.classList.remove('hidden');
+  document.getElementById('ga-new-token').focus();
+}
+
+document.getElementById('btn-ga-connect').addEventListener('click', () => gaConnect('ga-token'));
+document.getElementById('ga-token').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); gaConnect('ga-token'); } });
+document.getElementById('btn-ga-replace-save').addEventListener('click', () => gaConnect('ga-new-token'));
+document.getElementById('ga-new-token').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); gaConnect('ga-new-token'); } });
+document.getElementById('btn-ga-replace').addEventListener('click', showReplaceToken);
+document.getElementById('btn-ga-show-replace').addEventListener('click', showReplaceToken);
+document.getElementById('btn-ga-test').addEventListener('click', async () => {
+  gaMessage('Checking with GitHub…');
+  try {
+    gitAccount = await API.post('/api/git-account/test');
+    renderGitAccount(); renderTokenBanner();
+    gaMessage(`Connected as ${gitAccount.name || gitAccount.login}.`, 'ok');
+  } catch (e) { gaMessage(e.message, 'error'); }
+});
+document.getElementById('btn-ga-signout').addEventListener('click', async () => {
+  if (!confirm('Sign out of GitHub on this computer? Your projects stay here, but they stop syncing automatically.')) return;
+  try {
+    gitAccount = await API.delete('/api/git-account');
+    renderGitAccount(); renderTokenBanner();
+    gaMessage('Signed out. The token was removed from this computer.', 'ok');
+    if (currentProject) startSyncLight();
+  } catch (e) { gaMessage(e.message, 'error'); }
+});
+document.getElementById('btn-ga-recheck').addEventListener('click', async () => {
+  gaMessage('Checking…');
+  await loadGitAccount();
+  renderGitAccount();
+  gaMessage(gitAccount && gitAccount.git && gitAccount.git.installed ? 'Git is installed.' : 'Git still isn\'t found. If you just installed it, close hate and start it again.',
+    gitAccount && gitAccount.git && gitAccount.git.installed ? 'ok' : 'error');
+});
+
+function openSettingsAtGitAccount() {
+  document.getElementById('btn-settings').click();
+  document.getElementById('git-account-section').scrollIntoView({ block: 'start' });
+}
+document.getElementById('btn-token-banner-replace').addEventListener('click', () => {
+  openSettingsAtGitAccount();
+  setTimeout(showReplaceToken, 300);
+});
+// Settings opens: load the account section too.
+document.getElementById('btn-settings').addEventListener('click', async () => {
+  gaMessage('');
+  await loadGitAccount();
+  renderGitAccount();
+});
+
+// ── Sync status light (project header) ───────────────
+// Synced / Syncing / Offline / Needs attention, with the last sync time. Shown
+// when a Git account is set up (automatic sync on). Polls the server's state
+// (no network on the server side) and refreshes the view when a sync brought
+// in someone else's changes.
+let syncLightTimer = null;
+let syncLightHead = null;
+let syncLightProject = null;
+
+async function startSyncLight() {
+  clearInterval(syncLightTimer);
+  syncLightHead = null;
+  syncLightProject = currentProject ? currentProject.id : null;
+  const light = document.getElementById('sync-light');
+  if (!currentProject) { light.classList.add('hidden'); return; }
+  if (!gitAccount) await loadGitAccount();
+  if (!gitAccount || !gitAccount.configured) { light.classList.add('hidden'); return; }
+  try {
+    const st = await API.post(`/api/projects/${currentProject.id}/autosync/open`);
+    renderSyncLight(st);
+  } catch (e) { /* the poll retries */ }
+  syncLightTimer = setInterval(pollSyncLight, 5000);
+}
+
+async function pollSyncLight() {
+  if (!currentProject || !gitAccount || !gitAccount.configured) return;
+  const id = currentProject.id;
+  try {
+    const st = await API.get(`/api/projects/${id}/autosync`);
+    if (!currentProject || currentProject.id !== id) return;
+    renderSyncLight(st);
+  } catch (e) { /* keep the last state */ }
+}
+
+function timeAgo(iso) {
+  const t = new Date(iso);
+  const mins = Math.round((Date.now() - t.getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  return t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function renderSyncLight(st) {
+  const light = document.getElementById('sync-light');
+  if (!st || !st.enabled) { light.classList.add('hidden'); return; }
+  light.classList.remove('hidden');
+  light.className = 'sync-light ' + (st.state || 'idle');
+  document.getElementById('sync-light-label').textContent = st.label || '';
+  document.getElementById('sync-light-time').textContent = st.last_sync ? '· ' + timeAgo(st.last_sync) : '';
+  let tip = st.message || '';
+  if (st.notes && st.notes.length) tip += (tip ? '\n\n' : '') + st.notes.join('\n');
+  if (st.last_sync) tip += (tip ? '\n\n' : '') + 'Last synced ' + new Date(st.last_sync).toLocaleString();
+  light.title = tip;
+  light.dataset.detail = tip;
+  document.getElementById('btn-sync').style.display = st.state === 'local' ? 'none' : '';
+  // Someone else's changes came in: refresh what's on screen.
+  if (syncLightHead && st.head && st.head !== syncLightHead && syncLightProject === (currentProject && currentProject.id)) {
+    if (currentTab === 'tickets') loadTickets();
+    else if (currentTab === 'dashboard') loadDashboard();
+    else if (currentTab === 'overview') loadOverview();
+  }
+  if (st.head) syncLightHead = st.head;
+}
+
+document.getElementById('sync-light').addEventListener('click', () => {
+  const light = document.getElementById('sync-light');
+  if (light.classList.contains('attention') || light.classList.contains('offline')) alert(light.dataset.detail || '');
+});
+
+// ── Add project from GitHub ──────────────────────────
+let ghRepos = [];
+
+function ghMessage(text, kind) {
+  const el = document.getElementById('gh-message');
+  el.textContent = text || '';
+  el.className = 'ga-message' + (kind ? ' ' + kind : '');
+}
+
+function closeGitHubModal() {
+  document.getElementById('github-project-modal-overlay').classList.add('hidden');
+}
+
+function renderGhRepos() {
+  const list = document.getElementById('gh-repo-list');
+  const only = document.getElementById('gh-only-projects').checked;
+  const shown = only ? ghRepos.filter(r => r.is_project) : ghRepos;
+  if (!shown.length) {
+    list.innerHTML = `<div class="loading">${only && ghRepos.length
+      ? 'None of the repositories you can see is a hate project yet. Untick the box to see them all, or ask the project owner to give you access.'
+      : 'No repositories found for this account. Ask the project owner to give you access, then reopen this window.'}</div>`;
+    return;
+  }
+  list.innerHTML = shown.map((r, i) => `
+    <div class="gh-repo">
+      <div>
+        <div class="gh-repo-name">${escapeHtml(r.full_name)}${r.is_project ? '<span class="gh-badge">hate project</span>' : ''}</div>
+        ${r.description ? `<div class="gh-repo-desc">${escapeHtml(r.description)}</div>` : ''}
+      </div>
+      <button type="button" class="btn-secondary gh-add" data-repo="${escapeHtml(r.full_name)}">Add</button>
+    </div>`).join('');
+  list.querySelectorAll('.gh-add').forEach(btn => btn.addEventListener('click', () => ghClone(btn.dataset.repo, btn)));
+}
+
+async function ghClone(repo, btn) {
+  if (!repo) return;
+  const buttons = document.querySelectorAll('#github-project-modal button, #gh-url-form button');
+  buttons.forEach(b => b.disabled = true);
+  ghMessage(`Downloading ${repo}… this can take a minute.`);
+  try {
+    const project = await API.post('/api/github/clone', { repo });
+    ghMessage('');
+    closeGitHubModal();
+    showToast(`Added ${project.name}`);
+    await loadProjects();
+    selectProject(project.id, project.path, project);
+  } catch (e) {
+    ghMessage(e.message, 'error');
+  } finally {
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+
+document.getElementById('btn-github-project').addEventListener('click', async () => {
+  document.getElementById('github-project-modal-overlay').classList.remove('hidden');
+  ghMessage('');
+  const a = await loadGitAccount();
+  const needs = !a || !a.configured || (a.git && !a.git.installed);
+  document.getElementById('gh-signin-needed').classList.toggle('hidden', !needs);
+  document.getElementById('gh-body').classList.toggle('hidden', needs);
+  if (needs) return;
+  const list = document.getElementById('gh-repo-list');
+  list.innerHTML = '<div class="loading">Loading your GitHub projects…</div>';
+  try {
+    ghRepos = await API.get('/api/github/repos');
+    renderGhRepos();
+  } catch (e) {
+    ghRepos = [];
+    list.innerHTML = `<div class="loading">${escapeHtml(e.message)}</div>`;
+  }
+});
+document.getElementById('gh-only-projects').addEventListener('change', renderGhRepos);
+document.getElementById('gh-url-form').addEventListener('submit', e => {
+  e.preventDefault();
+  ghClone(document.getElementById('gh-url').value.trim());
+});
+document.getElementById('btn-close-github-project').addEventListener('click', closeGitHubModal);
+document.getElementById('btn-gh-go-settings').addEventListener('click', () => { closeGitHubModal(); openSettingsAtGitAccount(); });
+document.getElementById('github-project-modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('github-project-modal-overlay')) closeGitHubModal();
+});
+
+// Last, after every declaration above: the expiring-token banner on start.
+loadGitAccount();

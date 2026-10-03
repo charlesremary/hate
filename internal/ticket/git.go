@@ -5,6 +5,7 @@ package ticket
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -12,9 +13,19 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"hate/internal/fsutil"
+	"hate/internal/gitacct"
 )
+
+// AfterCommit, when set, is called (with the project lock still held) after
+// CommitFiles made a commit. The auto-sync uses it to schedule a push; it must
+// not block or take the lock.
+var AfterCommit func(repoRoot string)
+
+// NetworkTimeout bounds one fetch or push.
+const NetworkTimeout = 90 * time.Second
 
 // GitUserIdentity returns the local Git user identity for the repo.
 // Returns {"name": "...", "email": "..."}.
@@ -46,9 +57,25 @@ func SetGitIdentity(repoRoot, name, email string) error {
 	return nil
 }
 
-// EnsureProjectIdentity applies git_identity from config if set.
+// AccountIdentity is the signed-in Git account's name and email when the repo
+// syncs through that account (see gitacct.CommitIdentity).
+func AccountIdentity(repoRoot string) (name, email string, ok bool) {
+	return gitacct.CommitIdentity(repoRoot)
+}
+
+// EnsureProjectIdentity sets the repo-local commit identity: the signed-in Git
+// account's when the repo syncs through it (the PM commits as themselves, even
+// when the shared config carries someone else's git_identity), else the
+// project's git_identity when set.
 func EnsureProjectIdentity(repoRoot string, cfg *ProjectConfig) {
-	if cfg.GitIdentityV == nil {
+	if name, email, ok := AccountIdentity(repoRoot); ok {
+		current := GitUserIdentity(repoRoot)
+		if current["name"] != name || current["email"] != email {
+			_ = SetGitIdentity(repoRoot, name, email)
+		}
+		return
+	}
+	if cfg == nil || cfg.GitIdentityV == nil {
 		return
 	}
 	gi := cfg.GitIdentityV
@@ -70,9 +97,8 @@ func EnsureProjectIdentity(repoRoot string, cfg *ProjectConfig) {
 // error; callers pass its text to the API caller as a commit warning. "Nothing
 // to commit" is not a failure. The caller holds the project lock.
 func CommitFiles(repoRoot string, files []string, message string) error {
-	if cfg, err := ReadConfig(repoRoot); err == nil {
-		EnsureProjectIdentity(repoRoot, cfg)
-	}
+	cfg, _ := ReadConfig(repoRoot)
+	EnsureProjectIdentity(repoRoot, cfg)
 	if _, err := UntrackIndex(repoRoot); err != nil {
 		log.Printf("commit (%s): untrack index.json: %v", repoRoot, err)
 	}
@@ -93,6 +119,9 @@ func CommitFiles(repoRoot string, files []string, message string) error {
 	}
 	ok, out := GitCommit(repoRoot, kept, message)
 	if ok {
+		if out != "nothing to commit" && AfterCommit != nil {
+			AfterCommit(repoRoot)
+		}
 		return nil
 	}
 	out = strings.TrimSpace(out)
@@ -223,8 +252,9 @@ func GitCommit(repoRoot string, files []string, message string) (bool, string) {
 
 // GitPush pushes to the remote. Returns (success, output_or_error).
 func GitPush(repoRoot string) (bool, string) {
-	cmd := exec.Command("git", "push")
-	cmd.Dir = repoRoot
+	ctx, cancel := context.WithTimeout(context.Background(), NetworkTimeout)
+	defer cancel()
+	cmd := gitacct.NetworkCommand(ctx, repoRoot, "push")
 	out, err := cmd.CombinedOutput()
 	outStr := strings.TrimSpace(string(out))
 	if err != nil {
@@ -294,9 +324,10 @@ func GitFetchStatus(repoRoot string) map[string]interface{} {
 		"has_remote": false,
 	}
 
-	// Fetch latest from remote
-	cmd := exec.Command("git", "fetch")
-	cmd.Dir = repoRoot
+	// Fetch latest from remote (with the Git account's token when one is set up)
+	ctx, cancel := context.WithTimeout(context.Background(), NetworkTimeout)
+	defer cancel()
+	cmd := gitacct.NetworkCommand(ctx, repoRoot, "fetch")
 	_ = cmd.Run()
 
 	// Count commits ahead/behind
@@ -331,6 +362,9 @@ func GitFetchStatus(repoRoot string) map[string]interface{} {
 
 // GitSync pulls (rebase) then pushes. Aborts rebase on conflict. The caller
 // holds the project lock.
+//
+// Deprecated: the Sync button and the auto-sync use teamsync.Sync (fetch +
+// merge with hate's own conflict resolver). Kept for callers outside the app.
 func GitSync(repoRoot string) map[string]interface{} {
 	fetchStatus := GitFetchStatus(repoRoot)
 	hasRemote, _ := fetchStatus["has_remote"].(bool)
@@ -354,9 +388,10 @@ func GitSync(repoRoot string) map[string]interface{} {
 
 	// Pull with rebase if needed
 	if behindVal > 0 || statusVal == "diverged" {
-		cmd := exec.Command("git", "pull", "--rebase")
-		cmd.Dir = repoRoot
+		ctx, cancel := context.WithTimeout(context.Background(), NetworkTimeout)
+		cmd := gitacct.NetworkCommand(ctx, repoRoot, "pull", "--rebase")
 		out, err := cmd.CombinedOutput()
+		cancel()
 		if err != nil {
 			// Conflict -- abort rebase
 			abortCmd := exec.Command("git", "rebase", "--abort")
@@ -371,11 +406,9 @@ func GitSync(repoRoot string) map[string]interface{} {
 	}
 
 	// Push
-	cmd := exec.Command("git", "push")
-	cmd.Dir = repoRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		result["message"] = fmt.Sprintf("Pull succeeded but push failed: %s", strings.TrimSpace(string(out)))
+	ok, outStr := GitPush(repoRoot)
+	if !ok {
+		result["message"] = fmt.Sprintf("Pull succeeded but push failed: %s", outStr)
 		return result
 	}
 

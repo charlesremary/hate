@@ -535,3 +535,61 @@ form .nt-radios label { display: inline-flex; align-items: center; gap: 4px; mar
 .mc-mark { stroke-width: 1.5; stroke-dasharray: 3 2; }
 .mc-mark-p50 { stroke: var(--accent); }
 .mc-mark-p85 { stroke: #e65100; }
+
+/* ── Git account (Settings) ────────────────────────── */
+.git-account { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px;
+               margin-bottom: 16px; background: var(--surface); }
+.git-account h3 { font-size: 14px; margin-bottom: 8px; }
+.ga-sub { font-weight: normal; font-size: 12px; color: var(--text-muted); margin-left: 6px; }
+.ga-hint, .ga-muted { font-size: 12px; color: var(--text-muted); margin: 4px 0 8px; }
+.ga-connected { font-size: 13px; margin: 4px 0; }
+.ga-steps { font-size: 12px; color: var(--text); margin: 6px 0 10px 18px; line-height: 1.5; }
+.ga-steps a { color: var(--accent); }
+.ga-token-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.ga-token-row input { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--border);
+                      border-radius: var(--radius); font-size: 13px; }
+.ga-warning { background: #fff3e0; border-left: 4px solid #e65100; padding: 8px 10px; font-size: 12px;
+              margin: 6px 0 10px; display: flex; gap: 8px; align-items: center; justify-content: space-between;
+              flex-wrap: wrap; }
+.ga-warning.hidden { display: none; }
+.ga-message { font-size: 12px; margin-top: 8px; min-height: 1em; overflow-wrap: anywhere; }
+.ga-message.error { color: var(--red); }
+.ga-message.ok { color: var(--green); }
+
+/* Expiring-token banner (top of the main area) */
+.token-banner { background: #fff3e0; border-bottom: 1px solid #ffcc80; padding: 6px 14px; font-size: 13px;
+                display: flex; gap: 10px; align-items: center; }
+.token-banner.hidden { display: none; }
+
+/* ── Sync status light (project header) ────────────── */
+.sync-light { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text);
+              padding: 2px 8px; border: 1px solid var(--border); border-radius: 10px; white-space: nowrap;
+              cursor: default; }
+.sync-light.hidden { display: none; }
+.sync-dot { width: 9px; height: 9px; border-radius: 50%; background: #9e9e9e; flex: none; }
+.sync-light.synced .sync-dot { background: var(--green); }
+.sync-light.syncing .sync-dot { background: var(--accent); animation: sync-pulse 1s ease-in-out infinite; }
+.sync-light.offline .sync-dot { background: #9e9e9e; }
+.sync-light.attention .sync-dot { background: var(--red); }
+.sync-light.attention { border-color: #ef9a9a; cursor: pointer; }
+.sync-light-time { color: var(--text-muted); }
+@keyframes sync-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .sync-light.syncing .sync-dot { animation: none; } }
+
+/* ── Generic modal (Add project from GitHub) ───────── */
+.modal-overlay-generic { position: fixed; inset: 0; background: rgba(0,0,0,.45);
+                         display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal-overlay-generic.hidden { display: none; }
+.modal-generic { background: var(--surface); border-radius: 8px; padding: 24px; width: 560px;
+                 max-width: calc(100vw - 32px); box-shadow: 0 8px 32px rgba(0,0,0,.2); }
+.modal-generic h3 { margin-bottom: 12px; font-size: 16px; }
+.gh-filter { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text-muted); margin: 6px 0; }
+.gh-repo-list { max-height: 46vh; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.gh-repo { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 10px;
+           border-bottom: 1px solid var(--border); font-size: 13px; }
+.gh-repo:last-child { border-bottom: none; }
+.gh-repo-name { font-weight: 500; overflow-wrap: anywhere; }
+.gh-repo-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.gh-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: #e8f5e9; color: var(--green);
+            margin-left: 6px; white-space: nowrap; }
+.gh-repo .loading, .gh-repo-list .loading { padding: 12px; color: var(--text-muted); }

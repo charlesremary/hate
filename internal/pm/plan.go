@@ -97,11 +97,15 @@ func commitPlan(projectRoot string, paths []string, message string) string {
 	return ticket.CommitWarning(ticket.CommitFiles(projectRoot, files, message))
 }
 
-// ResolveAuthor returns the requested author, else the project's git identity
-// (email, then name), else "unknown".
+// ResolveAuthor returns the requested author, else the signed-in Git
+// account's email (when the repo syncs through it), else the project's git
+// identity (email, then name), else "unknown".
 func ResolveAuthor(projectRoot, requested string) string {
 	if a := strings.TrimSpace(requested); a != "" {
 		return a
+	}
+	if _, email, ok := ticket.AccountIdentity(projectRoot); ok {
+		return email
 	}
 	if cfg, err := ticket.ReadConfig(projectRoot); err == nil && cfg.GitIdentityV != nil {
 		if cfg.GitIdentityV.Email != "" {

@@ -284,14 +284,37 @@ in [docs/plan-estimation-rework.md](docs/plan-estimation-rework.md).
 ## Collaboration via Git
 
 There is no server-side database — the Git repo *is* the shared state
-(`internal/ticket/git.go`):
+(`internal/ticket/git.go`, `internal/teamsync`, `internal/merge`):
 
-- HATE can commit changed ticket files, **push**, and **sync** (`pull --rebase`
-  then `push`).
-- On a rebase conflict, the sync **aborts the rebase** and leaves the repo
-  untouched, reporting that conflicting changes need manual resolution.
-- It tracks branch, uncommitted files, and ahead/behind counts so the UI can show
-  sync status. A project can also pin a repo-local git identity in its config.
+- Every change is committed locally (one commit per action).
+- **Sync** (`teamsync.Sync`, the ⇅ Sync button) fetches, **merges** the shared
+  changes with hate's own conflict resolver, then pushes. Conflicts in files
+  hate understands are combined automatically (slip events by id, forecast
+  history by date, tickets field by field with the newer edit winning plus an
+  activity note, config three-way); anything else keeps the shared version and
+  saves this machine's copy under `.tkt/conflicts/` with a "Needs attention"
+  note. The repo is never left half-merged.
+- **Git account** (Settings, per user and per machine, never in a project): a
+  GitHub token, tested against the API and stored in the OS credential store
+  (macOS Keychain / Windows Credential Manager via go-keyring; an owner-only
+  file with a warning when no store is available). The token reaches git
+  through `GIT_ASKPASS` = the hate binary itself, never through `.git/config` or
+  a remote URL. SSH GitHub remotes (including host aliases such as
+  `github.com-work:`) are rewritten to HTTPS per command. With an account
+  configured, **auto-sync** runs on project open, every 5 minutes, before the PM
+  dashboard (if the last pull is over a minute old), and ~10 s after local
+  commits; a header light shows Synced / Syncing / Offline / Needs attention.
+  Without one, nothing syncs in the background (Chuck's SSH flow is unchanged).
+- **Add from GitHub…** lists the repos the token can see (hate projects
+  marked), or takes a pasted URL, and clones into the projects root.
+
+The PM-facing walkthrough (install, first launch on Mac/Windows, sign in, add a
+project, the status light) and the owner's "grant access" checklist are in
+[docs/pm-guide.md](docs/pm-guide.md). The design is in
+[docs/plan-pm-git-onboarding.md](docs/plan-pm-git-onboarding.md).
+
+hate opens the browser at the app when it starts; pass `-no-browser` (or set
+`HATE_NO_BROWSER=1`) to skip that.
 
 ## License
 

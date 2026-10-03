@@ -23,10 +23,24 @@ import (
 //
 // (See the note in the Makefile, which also reminds you.)
 // ============================================================================
-const AppVersion = "1.0.9"
+const AppVersion = "1.0.10"
 
-// AppConfigPath is the path to the application-level config file.
-var AppConfigPath = filepath.Join(homeDir(), ".pm-agent", "config.json")
+// AppConfigPath is the path to the application-level config file:
+// ~/.pm-agent/config.json, or config.json in $HATE_CONFIG_DIR when that is set
+// (a separate app config per instance, e.g. for testing two "machines" on one
+// computer).
+var AppConfigPath = defaultAppConfigPath()
+
+func defaultAppConfigPath() string {
+	if d := os.Getenv("HATE_CONFIG_DIR"); d != "" {
+		return filepath.Join(d, "config.json")
+	}
+	return filepath.Join(homeDir(), ".pm-agent", "config.json")
+}
+
+// AppConfigDir is the folder holding the app config (and the Git account
+// metadata next to it).
+func AppConfigDir() string { return filepath.Dir(AppConfigPath) }
 
 // SchedulerConfig holds scheduler settings.
 type SchedulerConfig struct {

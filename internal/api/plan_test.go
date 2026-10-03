@@ -404,7 +404,7 @@ func TestHeaderAndHelp(t *testing.T) {
 			t.Errorf("Help does not mention %q", want)
 		}
 	}
-	if config.AppVersion != "1.0.9" {
+	if config.AppVersion != "1.0.10" { // HATE-81r7 tc3: Settings shows v1.0.10
 		t.Errorf("AppVersion = %s", config.AppVersion)
 	}
 }

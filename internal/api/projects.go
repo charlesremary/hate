@@ -100,6 +100,8 @@ func RegisterProjectRoutes(r chi.Router) {
 			r.Get("/", getProject)
 			r.Get("/sync-status", getSyncStatus)
 			r.Post("/sync", syncProject)
+			r.Get("/autosync", getAutoSync)
+			r.Post("/autosync/open", openAutoSync)
 			r.Get("/git-status", getGitStatus)
 			r.Get("/git-identity", getGitIdentity)
 			r.Post("/git-identity", setGitIdentity)
@@ -455,21 +457,21 @@ func syncProject(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ticket.LockProject(root)()
 
-	cfg, err := ticket.ReadConfig(root)
-	if err == nil {
-		ticket.EnsureProjectIdentity(root, cfg)
-	}
-
-	result := ticket.GitSync(root)
-	if success, _ := result["success"].(bool); !success {
-		msg, _ := result["message"].(string)
-		if msg == "" {
-			msg = "Sync failed"
-		}
-		respondError(w, http.StatusConflict, msg)
+	// The same round as the automatic sync (fetch, merge with hate's resolver,
+	// push); it works with or without a Git account.
+	res := SyncManager.Manual(root)
+	if !res.Complete { // offline, refused, or couldn't combine (nothing changed)
+		respondError(w, http.StatusConflict, res.Message)
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"state":   res.State,
+		"message": res.Message,
+		"notes":   res.Notes,
+		"pulled":  res.Pulled,
+		"pushed":  res.Pushed,
+	})
 }
 
 // getGitStatus handles GET /api/projects/{projectId}/git-status
@@ -755,7 +757,11 @@ func whoami(w http.ResponseWriter, r *http.Request) {
 	// with no local git identity falls through to the global config, which may
 	// be a different person entirely.
 	identity := ticket.GitUserIdentity(root)
-	if cfg.GitIdentityV != nil && cfg.GitIdentityV.Email != "" {
+	if name, email, ok := ticket.AccountIdentity(root); ok {
+		// Signed in to the Git account this repo syncs through: that's who
+		// commits (see ticket.EnsureProjectIdentity).
+		identity = map[string]string{"name": name, "email": email}
+	} else if cfg.GitIdentityV != nil && cfg.GitIdentityV.Email != "" {
 		identity = map[string]string{
 			"name":  cfg.GitIdentityV.Name,
 			"email": cfg.GitIdentityV.Email,

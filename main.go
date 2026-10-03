@@ -12,22 +12,35 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"hate/internal/api"
 	"hate/internal/config"
+	"hate/internal/gitacct"
+	"hate/internal/teamsync"
+	"hate/internal/ticket"
 )
 
 //go:embed static/*
 var staticFiles embed.FS
 
 func main() {
+	// git runs this same binary as its GIT_ASKPASS helper (see
+	// gitacct.NetworkCommand): answer the one prompt and exit.
+	if code, ok := askpassMode(os.Args, os.Getenv(gitacct.AskpassEnv)); ok {
+		os.Exit(code)
+	}
+
 	portFlag := flag.Int("port", 0, "HTTP port to listen on (default 8000, or $PORT)")
 	listenFlag := flag.String("listen", "", "interface address to listen on (default 127.0.0.1, or $HATE_LISTEN); 0.0.0.0 exposes the API to the network")
+	noBrowser := flag.Bool("no-browser", false, "don't open the web browser on start (also $HATE_NO_BROWSER=1)")
 	flag.Parse()
 
 	r := chi.NewRouter()
@@ -38,6 +51,7 @@ func main() {
 	api.RegisterProjectRoutes(r)
 	api.RegisterTicketRoutes(r)
 	api.RegisterPMRoutes(r)
+	api.RegisterGitRoutes(r)
 
 	// Serve embedded static files
 	staticFS, err := fs.Sub(staticFiles, "static")
@@ -74,8 +88,72 @@ func main() {
 			"(read and change every project, and commit/push as you). Use the default (127.0.0.1) unless you mean it.", host, port)
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	fmt.Printf("hate v%s running on http://localhost:%d (listening on %s)\n", config.AppVersion, port, addr)
-	log.Fatal(http.ListenAndServe(addr, r))
+
+	if c := gitacct.CheckGit(); !c.Installed {
+		log.Printf("Git isn't installed (or not on the PATH). Projects can't be shared until it is: %s "+
+			"(Settings shows the steps).", c.InstallURL)
+	}
+
+	// Automatic sync (runs only while a Git account is configured): a push
+	// shortly after each commit, and periodic pulls of the open projects.
+	ticket.AfterCommit = teamsync.Default.Committed
+	teamsync.Default.Start()
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("can't listen on %s: %v (is hate already running? try -port)", addr, err)
+	}
+	appURL := fmt.Sprintf("http://localhost:%d/", port)
+	fmt.Printf("hate v%s running on %s (listening on %s)\n", config.AppVersion, appURL, addr)
+	if shouldOpenBrowser(*noBrowser, os.Getenv("HATE_NO_BROWSER")) {
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			if err := openBrowser(appURL); err != nil {
+				log.Printf("couldn't open the browser (%v); open %s yourself", err, appURL)
+			}
+		}()
+	}
+	log.Fatal(http.Serve(ln, r))
+}
+
+// askpassMode handles "hate <prompt>" run by git as GIT_ASKPASS (with
+// HATE_ASKPASS=1 set by hate), or "hate askpass <prompt>" by hand. ok is false
+// for a normal start.
+func askpassMode(args []string, env string) (code int, ok bool) {
+	switch {
+	case len(args) == 3 && args[1] == "askpass":
+		return gitacct.Askpass(args[2], os.Stdout, os.Stderr), true
+	case env == "1" && len(args) == 2:
+		return gitacct.Askpass(args[1], os.Stdout, os.Stderr), true
+	}
+	return 0, false
+}
+
+// shouldOpenBrowser: on unless -no-browser or HATE_NO_BROWSER is set.
+func shouldOpenBrowser(flagOff bool, env string) bool {
+	if flagOff {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "", "0", "false", "no":
+		return true
+	}
+	return false
+}
+
+// openBrowser opens url in the default browser (a variable so tests can
+// capture the call).
+var openBrowser = func(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
 }
 
 // defaultListenHost is where hate listens unless told otherwise: loopback

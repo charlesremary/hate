@@ -214,6 +214,9 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// With a Git account: bring in teammates' changes first (skipped when a
+	// pull ran in the last minute), so the snapshot and slips see them.
+	SyncManager.BeforeDashboard(root)
 	if _, err := pm.AutoSnapshot(projectID, root); err != nil {
 		log.Printf("auto-snapshot (%s): %v", projectID, err)
 	}

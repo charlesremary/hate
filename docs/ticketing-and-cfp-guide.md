@@ -64,9 +64,19 @@ enforced at the **first promote** out of `not_started`.
 
 ### Writing a ticket a human or agent can act on
 
-The ticket is the **source of authority** for its work — a developer or an agent
-should be able to build it without hunting elsewhere. Every ticket you create
-(**including agent-created ones**) must carry these four things:
+The ticket is the **source of authority** for its work. **Write every ticket so
+that a human who has never seen the project, and an AI agent with no access to
+your conversation, could each pick it up and do the work from the ticket alone.**
+Those two readers fail in opposite ways: the human lacks the context you had
+while planning (the chat, the spec you read, the decisions you made), and the
+agent lacks the tribal knowledge a teammate would fill in. Write for both: no
+unstated assumptions, no "as discussed", no references the reader can't open.
+
+When you build a whole project's tickets from a spec, follow the three counters
+and a reviewer workflow in §13 first.
+
+Every ticket you create (**including agent-created ones**) must carry these four
+things:
 
 1. **A verb-first, descriptive title.** Say what to do, in the imperative — name
    the action or the deliverable.
@@ -82,6 +92,34 @@ should be able to build it without hunting elsewhere. Every ticket you create
    - ✅ "Add an admin toggle to enable/disable Virtual Agents per account. Enforce
      the two preconditions (…) before it can be enabled; persist the flag and gate
      the VA features on it."
+
+   Enough detail to **execute**, not just to understand. Cover, in plain
+   sentences:
+   - **Context** — why this exists and what it's part of (one or two lines).
+   - **Scope** — what to build or change, concretely: the screen, endpoint,
+     file, service, or console the work touches, and its inputs and outputs.
+   - **Rules and constraints** — the business rules, validations, limits, and
+     error cases that apply, written out.
+   - **Out of scope** — what this ticket deliberately does *not* do, when a
+     reader might reasonably assume it does.
+   - **References inline, not just cited.** A requirement ID, workbook row, or
+     doc link is fine as a pointer, but restate what it says. `Traces to REQ-029`
+     tells a new reader nothing; "Every group must have exactly one behavior
+     (REQ-029); reject a create or update without one" does.
+
+   Leave out step-by-step implementation instructions unless the approach is
+   genuinely constrained; say *what* and *why*, and the *how* only where it
+   matters.
+
+   - ❌ "Create/update groups with the mandatory single behavior (REQ-024/029)
+     enforced server-side. Backend layer of UI-B2. Workbook: BE-B2." — a reader
+     without REQ-024, UI-B2 and the workbook can't act on it.
+   - ✅ "Add the API to create and update agent groups
+     (`POST /api/groups`, `PUT /api/groups/{id}`). Every group must reference
+     exactly one behavior; reject requests without one (422, message names the
+     missing field). Changing a group's behavior applies to its members on their
+     next stand-up. This is the backend for the Group editor screen (KC-xxxx).
+     Out of scope: group membership changes (KC-yyyy)."
 
 3. **Mockups attached, for any UI ticket.** If the ticket renders a screen, form,
    or component, its design belongs **on the ticket** as an attachment — a
@@ -102,8 +140,36 @@ should be able to build it without hunting elsewhere. Every ticket you create
      reviewed, deployed, docs — is a separate project convention, not a per-ticket
      field.) Test case endpoints are in §12.
 
-**In short: title (verb) + description (what/why) + mockups (if UI) + test cases
-(acceptance criteria) = a ticket that's self-sufficient.**
+   **A test case must be runnable cold** — by a tester who didn't write the
+   ticket, or by an agent, without asking anyone. Each one has:
+   - **Setup** (when needed) — the starting state: which account, which data
+     exists, which setting is on. Put it at the start of the step.
+   - **Concrete step** — the actual action with real values: the screen and
+     button, or the endpoint and payload, or the command. Not "create a group".
+   - **Observable expected result** — what you can see or check: the status
+     code, the message text, the value on screen, the row in the table. Never
+     "works", "persists correctly", or "is handled".
+   - **One condition per case.** A case that checks three things is three cases.
+
+   - ❌ step: "POST a group with a behavior." · expected: "Persists with the
+     behavior reference."
+   - ✅ step: "With an existing behavior B1, `POST /api/groups`
+     `{"name":"Tier 1","behavior_id":"B1"}`, then `GET /api/groups/{id}` on the
+     returned id." · expected: "201 on create; the GET returns
+     `behavior_id: "B1"`."
+   - ❌ step: "Two machines detect the same slip." · expected: "One event."
+   - ✅ step: "On two clones of the same project with the same baseline, move
+     ticket T's due date +10 days on both, open the PM dashboard on both, then
+     sync both." · expected: "`.tkt/pm/slip_events.json` contains exactly one
+     event for T, with the same id on both machines."
+
+**In short: title (verb) + description (context, scope, rules, out of scope,
+references restated) + mockups (if UI) + test cases runnable cold (setup, real
+values, observable result) = a ticket a new human or an agent can execute.**
+
+**Self-check before you create it:** hand the ticket, and only the ticket, to
+someone who joined the project today. Could they do the work and prove it's done
+without messaging you? If not, add what they'd have to ask.
 
 ---
 
@@ -197,6 +263,7 @@ project is counted the same way, so:
   re-run the count.
 - **Note which guide version counted it** (e.g. "Counted with HATE counting guide
   v1").
+- **For a whole project, count three times independently and reconcile** (§13).
 
 The "is your code in the loop?" rule:
 
@@ -414,6 +481,14 @@ PROJ-100  "Semantic search over docs"   tags: cfp:18   (E/X/R/W breakdown in the
 
 ## 10. Quick checklist before you finish
 
+- [ ] Every ticket passes the §1 self-check: a person new to the project, or an
+      agent without your conversation, could do it and prove it from the
+      ticket alone (context, scope, rules, out of scope, references restated).
+- [ ] Every test case is runnable cold: setup, real values, an observable
+      expected result, one condition each.
+- [ ] For a project built from a spec: three independent counts reconciled by a
+      reviewer, gaps and flags resolved, `count_unc_pct` set from the spread,
+      and the reconciliation report recorded (§13).
 - [ ] Each feature is a parent with children for the work (or a self-contained
       feature with `cfp:` and `functional`).
 - [ ] `cfp:<N>` is on the parent and nowhere else (integer; only if it has
@@ -639,7 +714,14 @@ project's folder name / id; `{ticketId}` is the full ticket id (e.g.
 Conventions:
 - Optional `author` (in body or `?author=` query) attributes the action in the
   activity log; it defaults to a system value when omitted.
-- Mutations auto-commit the changed files to the project's git repo.
+- Mutations auto-commit the changed files to the project's git repo. When a
+  Git account is set up on the machine (Settings → Git account), commits are
+  also pushed automatically about 10 s after the last one, and teammates'
+  changes are pulled in (on open, every 5 min, before the PM dashboard). An
+  agent writing ticket files directly (not through the API) should commit them
+  itself; the next sync shares them. Conflicting edits are merged by hate
+  (newest edit wins, with an activity note recording both values), so don't
+  hand-resolve `.tkt` files.
 - Errors return `{"detail": "<message>"}` with a 4xx/5xx status.
 
 ### App
@@ -647,6 +729,13 @@ Conventions:
 | Method & path | What it does | Body |
 |---|---|---|
 | `GET /api/version` | The build version of the running binary (shown in Settings). | — |
+| `GET /api/git/check` | Is git installed (`installed`, `version`, `install_url`). | — |
+| `GET /api/git-account` | The app-level GitHub account: `configured`, name/login/email, `expires_at`, `expiring_soon` (≤ 14 days), `storage`, `git`. Never returns the token. | — |
+| `POST /api/git-account` | Test a token against GitHub and, only if valid, save it in the OS credential store. | `{token}` |
+| `POST /api/git-account/test` | Re-check the saved token (refreshes name, email, expiry). | — |
+| `DELETE /api/git-account` | Sign out: remove the token from the credential store. | — |
+| `GET /api/github/repos` | Repos the token can see, hate projects (with `.tkt/config.json`) marked `is_project` and listed first. | — |
+| `POST /api/github/clone` | Clone a repo over HTTPS into the projects root (folder = repo name; refuses an existing folder) and return the project. | `{repo: "owner/name" or a GitHub URL}` |
 
 ### Projects (app-level) — `/api/projects`
 
@@ -666,8 +755,10 @@ Conventions:
 | Method & path | What it does | Body |
 |---|---|---|
 | `GET /{projectId}` | Project details (name, prefix, counts, closed state). | — |
-| `GET /{projectId}/sync-status` | Git ahead/behind status vs remote. | — |
-| `POST /{projectId}/sync` | Pull/push the project repo. | — |
+| `GET /{projectId}/sync-status` | Git ahead/behind status vs remote (fetches). | — |
+| `POST /{projectId}/sync` | Sync now: fetch, merge with hate's conflict resolver, push. Works with or without a Git account. | — |
+| `GET /{projectId}/autosync` | The header status light: `enabled`, `state` (`synced`/`syncing`/`offline`/`attention`/`idle`/`local`), `label`, `message`, `notes`, `last_sync`, `head`. No network. | — |
+| `POST /{projectId}/autosync/open` | The app opened the project: start a background sync (with a Git account). | — |
 | `GET /{projectId}/git-status` | Working-tree git status. | — |
 | `GET /{projectId}/git-identity` · `POST …/git-identity` | Read / set the project's git author identity. | POST: `{name, email}` |
 | `GET /{projectId}/resources` | List team resources (assignable people + capacity). | — |
@@ -742,3 +833,113 @@ Conventions:
 |---|---|---|
 | `GET /{projectId}/cosmic` | The COSMIC report: per-feature h/CFP (wrap % info-only, `calibration_slice` flag), aggregates, slice counts (`slice_total`, `slice_done`), plus `monte_carlo` (the result, or an error state such as "need at least 3 reference features"), `estimate_inputs` (effective inputs: `ref_projects`, `ref_all`, `ref_own`, `ref_manual`, `manual` {low, likely, high}, `manual_preset` agentic\|traditional\|custom, `defaults_applied` (true when nothing is saved and the manual-baseline + own defaults are in effect), `min_cfp`, `count_unc_pct`), `manual_presets` ([{id, label, low, likely, high}]), and `available_projects` (id + name of the other known projects, for the picker). `monte_carlo` includes `p_own`, `p_manual` (share of draws from the manual baseline) and `manual_in_use`. | — |
 | `PUT /{projectId}/cosmic-estimate` | Set the Monte Carlo inputs. Validates `min_cfp` ≥ 1, `count_unc_pct` 0-100, every project id exists, and `manual` has 0 < low ≤ likely ≤ high (all 400). The saved values are used exactly (an omitted `ref_manual` is false; an omitted `manual` keeps the saved range or the Agentic default). Saves to `.tkt/config.json`, commits it, and returns `estimate_inputs` and the recomputed `monte_carlo`. | `{ref_projects:[ids], ref_all:bool, ref_own:bool, ref_manual:bool, manual:{low,likely,high}, min_cfp:int\|null, count_unc_pct:number\|null}` |
+
+---
+
+## 13. Planning a project: three counters and a reviewer
+
+Use this whenever you turn a spec into a project's tickets. It makes the CFP
+count consistent (three independent counts must agree) and complete (every
+requirement must land somewhere), and it measures how sure the count is.
+
+### The workflow
+
+1. **Spawn three counter agents, independently.** Each gets the same inputs and
+   nothing else: the spec, this guide, and the counting guide version (§4).
+   They must not share context or see each other's output. Each returns the
+   structured count below. **Counters never write to hate.**
+2. **Spawn a fourth agent: the reviewer.** It receives the three counts and the
+   spec, compares them, and produces one reconciled feature list plus a
+   reconciliation report (below).
+3. **Flag, don't guess.** Anything the reviewer can't settle from the spec goes
+   to the human as a question before any ticket is created.
+4. **Create tickets only from the reconciled list** (one agent, following §1–§3):
+   parents with `cfp:` and the E/X/R/W breakdown in the description, children
+   classed, wrap children with `estimate_hours`, test cases runnable cold.
+5. **Set the counting uncertainty** on the COSMIC estimate from the spread
+   (below).
+6. **Record the report on the project** (below).
+
+### What each counter returns
+
+Exactly this shape, so the reviewer can compare mechanically:
+
+```json
+{
+  "counting_guide": "v1",
+  "features": [
+    {
+      "name": "Create and update agent groups",
+      "requirements": ["REQ-024", "REQ-029"],
+      "processes": [
+        {
+          "name": "Create group",
+          "trigger": "Admin submits the new-group form",
+          "movements": [
+            {"type": "E", "data_group": "group (name, behavior)"},
+            {"type": "R", "data_group": "behavior"},
+            {"type": "W", "data_group": "group"},
+            {"type": "X", "data_group": "group / error message"}
+          ],
+          "cfp": 4
+        }
+      ],
+      "cfp": 4
+    }
+  ],
+  "total_cfp": 4,
+  "uncovered_requirements": [],
+  "assumptions": ["Group membership changes are a separate feature"]
+}
+```
+
+`cfp` must equal the number of movements; `total_cfp` the sum of features. List
+every requirement ID the spec contains somewhere (in a feature, or in
+`uncovered_requirements` with the reason, e.g. "manual console step, 0 CFP").
+
+### How the reviewer reconciles
+
+- **Match features across the three counts** by what they do and the
+  requirements they cover, not by name; the counters will word things
+  differently.
+- **CFP per feature:**
+  - All three within about **10%** of each other: take the **middle value**.
+  - Wider spread: compare the three movement lists line by line. A
+    disagreement is always a specific movement counted or not, or a process
+    split or merged differently. Decide each one from the spec and the
+    counting guide, and write down why.
+  - Still unclear from the spec: flag it for the human.
+- **Missing or extra:**
+  - Every requirement in the spec must map to at least one reconciled feature.
+    Anything uncovered is listed as a **gap**.
+  - A feature or movement only **one** of the three found is either something
+    the others missed or something that one invented. Check it against the
+    spec; keep or drop it, and record which.
+- **Consistency is not correctness.** Three runs of the same model can share a
+  blind spot. The requirement coverage check and the human's review of flagged
+  items are the backstop; say so in the report.
+
+### Counting uncertainty from the spread
+
+Use the three totals to set the Monte Carlo estimate's counting uncertainty:
+
+```
+count_unc_pct = (max total − min total) ÷ 2 ÷ reconciled total × 100
+```
+
+For example, totals of 280 / 292 / 301 with a reconciled 292 give ±3.6%.
+`PUT /cosmic-estimate` replaces all estimate inputs, so `GET /cosmic` first and
+send its `estimate_inputs` back with only `count_unc_pct` changed.
+
+### The reconciliation report
+
+Record it on the project: as a Project Overview instruction titled
+"CFP reconciliation (<date>, counting guide v1)", or as an attachment on a
+planning ticket. It contains:
+
+- the three totals and the reconciled total, and the resulting `count_unc_pct`;
+- each feature where the counts differed: the three values, the decision, and
+  why;
+- features or movements found by only one counter: kept or dropped, and why;
+- requirement gaps;
+- questions flagged for the human, and their answers once given.

@@ -19,6 +19,7 @@
       <div class="sidebar-actions">
         <button class="btn-secondary" id="btn-new-project">+ New Project</button>
         <button class="btn-secondary" id="btn-open-project">Open Existing…</button>
+        <button class="btn-secondary" id="btn-github-project" title="Download a shared project from GitHub">Add from GitHub…</button>
         <button class="btn-secondary" id="btn-manage-projects">Project List</button>
         <label class="toggle-label" style="display:flex;gap:6px;align-items:center;padding:6px 8px 0;font-size:12px;color:#999">
           <input type="checkbox" id="filter-show-closed-projects"> Show closed projects
@@ -30,6 +31,10 @@
     </aside>
 
     <main id="main">
+      <div id="token-banner" class="token-banner hidden" role="status">
+        <span id="token-banner-text"></span>
+        <button type="button" class="btn-secondary" id="btn-token-banner-replace">Replace token</button>
+      </div>
       <div id="welcome" class="welcome">
         <h2>Welcome to HATE</h2>
         <p>Select a project from the sidebar to get started.</p>
@@ -45,6 +50,9 @@
           </div>
           <div class="project-actions">
             <span id="commit-as" class="commit-as" title="Git identity for this project"></span>
+            <span id="sync-light" class="sync-light hidden" role="status" aria-live="polite" tabindex="0">
+              <span class="sync-dot"></span><span id="sync-light-label"></span><span id="sync-light-time" class="sync-light-time"></span>
+            </span>
             <span id="sync-status" class="sync-status"></span>
             <button class="btn-secondary" id="btn-sync" title="Pull & push changes">⇅ Sync</button>
             <button class="btn-secondary" id="btn-team" title="Manage team">👤 Team</button>
@@ -143,6 +151,53 @@
       <!-- Settings panel -->
       <div id="settings-view" class="hidden">
         <h2>Settings <span id="app-version" style="font-weight:normal;font-size:13px;color:#999;margin-left:8px">v—</span></h2>
+        <!-- Git account: app-level (this computer, this user). Never per project:
+             team settings are shared with everyone on the project. -->
+        <section id="git-account-section" class="git-account">
+          <h3>Git account <span class="ga-sub">this computer only, never shared with the project</span></h3>
+          <div id="ga-git-missing" class="hidden">
+            <div class="ga-warning">
+              <strong>Git needs to be installed first.</strong>
+              hate uses a free program called Git to share projects with your team.
+            </div>
+            <ol id="ga-install-steps" class="ga-steps"></ol>
+            <button type="button" class="btn-secondary" id="btn-ga-recheck">Re-check</button>
+          </div>
+          <div id="ga-signed-out" class="hidden">
+            <p class="ga-hint">Sign in once so hate can download your projects and keep them up to date with your team.</p>
+            <ol class="ga-steps">
+              <li><a id="ga-token-link" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Open GitHub's new token page</a> (sign in to GitHub if it asks).</li>
+              <li>Under <em>Resource owner</em>, pick the organization that owns your projects (ask the project owner if unsure). Under <em>Repository access</em>, choose <em>All repositories</em> (or pick the project ones). Under <em>Permissions</em> &rarr; <em>Repository permissions</em>, set <em>Contents</em> to <strong>Read and write</strong>. Click <em>Generate token</em>.
+                <br><span class="ga-muted">Project in someone's personal account rather than an organization? Use a <a href="https://github.com/settings/tokens/new?scopes=repo&amp;description=hate" target="_blank" rel="noopener">classic token with the <em>repo</em> box ticked</a> instead.</span></li>
+              <li>Copy the token and paste it here.</li>
+            </ol>
+            <div class="ga-token-row">
+              <input type="password" id="ga-token" placeholder="github_pat_…" autocomplete="off" spellcheck="false" aria-label="GitHub token">
+              <button type="button" class="btn-primary" id="btn-ga-connect">Test connection and save</button>
+            </div>
+          </div>
+          <div id="ga-signed-in" class="hidden">
+            <div id="ga-expiry-banner" class="ga-warning hidden">
+              <span id="ga-expiry-text"></span>
+              <button type="button" class="btn-secondary" id="btn-ga-replace">Replace token</button>
+            </div>
+            <p class="ga-connected">Connected as <strong id="ga-name"></strong> <span id="ga-login" class="ga-muted"></span></p>
+            <p class="ga-muted" id="ga-identity"></p>
+            <p class="ga-muted" id="ga-expiry"></p>
+            <p class="ga-muted">Your projects sync automatically: when you open one, every 5 minutes, and a few seconds after you change something.</p>
+            <div id="ga-storage-warning" class="ga-warning hidden"></div>
+            <div class="ga-token-row hidden" id="ga-replace-row">
+              <input type="password" id="ga-new-token" placeholder="Paste the new token" autocomplete="off" spellcheck="false" aria-label="New GitHub token">
+              <button type="button" class="btn-primary" id="btn-ga-replace-save">Test and save</button>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn-secondary" id="btn-ga-test">Test connection</button>
+              <button type="button" class="btn-secondary" id="btn-ga-show-replace">Replace token</button>
+              <button type="button" class="btn-secondary" id="btn-ga-signout">Sign out</button>
+            </div>
+          </div>
+          <div id="ga-message" class="ga-message" role="status"></div>
+        </section>
         <form id="settings-form">
           <label>Projects root directory
             <input type="text" id="settings-projects-root" placeholder="~/projects">
@@ -313,6 +368,10 @@
               <li><strong>Open Existing…</strong> registers a project that already exists on disk —
                 e.g. a repository a teammate cloned. Point it at the folder that contains the
                 <code>.tkt</code> directory.</li>
+              <li><strong>Add from GitHub…</strong> downloads a shared project you've been given
+                access to: pick it from the list (hate projects are marked) or paste its GitHub
+                address. It goes into your projects folder (an existing folder is never
+                overwritten) and opens. Needs a Git account in Settings.</li>
               <li>Projects in the sidebar are grouped by <em>client</em>.</li>
             </ul>
             <p>Each project has three tabs: <strong>Tickets</strong> (the work),
@@ -979,10 +1038,36 @@
 
             <h3>Sync</h3>
             <p>Each project is a Git repository, and HATE auto-commits after every change (new
-              ticket, status change, logged time, and so on). <strong>⇅ Sync</strong> pulls
-              teammates' changes (rebasing) and pushes yours; on a conflict it aborts cleanly and
-              leaves your repo untouched. The button only appears when the project has a remote
-              configured.</p>
+              ticket, status change, logged time, and so on). <strong>⇅ Sync</strong> brings in
+              teammates' changes and shares yours. When both sides changed the same thing, hate
+              combines them itself: the same slip seen on two computers becomes one; a ticket
+              edited on both keeps the newer edit and notes the other value in its activity;
+              anything it can't combine keeps the shared version and saves yours under
+              <code>.tkt/conflicts/</code>. Your project is never left half-updated. The button
+              only appears when the project has a shared copy (a remote).</p>
+            <h3>Git account and automatic sync</h3>
+            <p>Under ⚙ Settings &rarr; <strong>Git account</strong>, paste a GitHub token and click
+              <em>Test connection and save</em>. It's kept in this computer's password store
+              (Keychain on a Mac, Credential Manager on Windows), never in a project, so it's
+              never shared with the team. Your GitHub name and email are used for your changes.
+              Settings warns 14 days before the token expires, with a <em>Replace token</em>
+              button. If Git isn't installed, Settings shows how to install it instead.</p>
+            <p>With an account set up, projects sync on their own: when you open one, every 5
+              minutes, before the PM dashboard shows (if the last update is over a minute old),
+              and about 10 seconds after you change something. The light in the project header
+              says how it's going:</p>
+            <ul>
+              <li><strong>Synced</strong> (green): up to date with your team, with the time of the
+                last sync.</li>
+              <li><strong>Syncing</strong> (blue): working on it.</li>
+              <li><strong>Offline</strong> (grey): GitHub couldn't be reached. Your changes are
+                saved on this computer and go out automatically when the connection is back.</li>
+              <li><strong>Needs attention</strong> (red): click it for what happened in plain
+                words, e.g. the token was rejected, or two versions of a file couldn't be combined
+                and yours was saved aside.</li>
+            </ul>
+            <p>Without a Git account nothing syncs in the background; ⇅ Sync still works.
+              The PM walkthrough is in <code>docs/pm-guide.md</code>.</p>
           </section>
 
           <!-- 9 -->
@@ -1256,6 +1341,32 @@
             <button type="button" class="btn-secondary" id="btn-cancel-open-project">Cancel</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Add project from GitHub modal -->
+    <div id="github-project-modal-overlay" class="modal-overlay-generic hidden">
+      <div id="github-project-modal" class="modal-generic" role="dialog" aria-labelledby="gh-title">
+        <h3 id="gh-title">Add project from GitHub</h3>
+        <div id="gh-signin-needed" class="hidden">
+          <p class="ga-hint">Sign in to GitHub first, under <strong>Settings &rarr; Git account</strong>.</p>
+          <div class="form-actions">
+            <button type="button" class="btn-primary" id="btn-gh-go-settings">Open Settings</button>
+          </div>
+        </div>
+        <div id="gh-body" class="hidden">
+          <p class="ga-hint">Pick a project you've been given access to, or paste its GitHub address. It's downloaded into your projects folder and opened.</p>
+          <form id="gh-url-form" class="ga-token-row">
+            <input type="text" id="gh-url" placeholder="https://github.com/owner/project" spellcheck="false" aria-label="GitHub project address">
+            <button type="submit" class="btn-primary">Add</button>
+          </form>
+          <label class="gh-filter"><input type="checkbox" id="gh-only-projects" checked> Only show hate projects</label>
+          <div id="gh-repo-list" class="gh-repo-list"><div class="loading">Loading…</div></div>
+          <div id="gh-message" class="ga-message" role="status"></div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn-secondary" id="btn-close-github-project">Close</button>
+        </div>
       </div>
     </div>
 
