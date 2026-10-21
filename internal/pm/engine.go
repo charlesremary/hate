@@ -438,8 +438,38 @@ func addBusinessDaysToDate(start time.Time, days int) time.Time {
 	return d
 }
 
+// scheduleVelocity is how fast work is finishing against the baseline:
+// planned days of complete tasks ÷ planned days of the tasks the baseline had
+// finishing by today (planned end on or before today). Both sides are planned
+// business days summed over the same tasks, so on plan is 1.0 for any team
+// size (HATE-12zw; it used to divide by calendar days since the start, which
+// read ~0.7 for one person on plan and ~2 for three). > 1 is ahead, < 1 behind;
+// 1 when nothing was due yet. Clamped to 0.25–10.
+func scheduleVelocity(tasks []SnapshotTask, today time.Time) float64 {
+	var donePlannedDays, duePlannedDays int
+	for _, t := range tasks {
+		if t.Status == "complete" {
+			donePlannedDays += t.Baseline.PlannedDays
+		}
+		if end := parseDate(t.Baseline.PlannedEnd); !end.IsZero() && !end.After(today) {
+			duePlannedDays += t.Baseline.PlannedDays
+		}
+	}
+	if duePlannedDays <= 0 {
+		return 1.0
+	}
+	velocity := float64(donePlannedDays) / float64(duePlannedDays)
+	if velocity < 0.25 {
+		velocity = 0.25 // floor to prevent absurd projections
+	}
+	if velocity > 10.0 {
+		velocity = 10.0 // cap
+	}
+	return velocity
+}
+
 // recalcProjectedEnds recalculates projected end dates for incomplete tasks
-// based on actual velocity (how fast completed work went vs plan).
+// based on velocity (see scheduleVelocity).
 // Returns the latest projected end date across all tasks.
 func recalcProjectedEnds(tasks []SnapshotTask, today time.Time) time.Time {
 	taskByID := map[string]*SnapshotTask{}
@@ -447,38 +477,7 @@ func recalcProjectedEnds(tasks []SnapshotTask, today time.Time) time.Time {
 		taskByID[tasks[i].TaskID] = &tasks[i]
 	}
 
-	// Calculate velocity ratio: how fast are we going vs plan?
-	// velocity > 1 means faster than planned
-	var completedPlannedDays, completedActualDays int
-	baselineStart := time.Time{}
-	for _, t := range tasks {
-		bs := parseDate(t.Baseline.PlannedStart)
-		if !bs.IsZero() && (baselineStart.IsZero() || bs.Before(baselineStart)) {
-			baselineStart = bs
-		}
-		if t.Status == "complete" {
-			completedPlannedDays += t.Baseline.PlannedDays
-		}
-	}
-
-	// Actual days elapsed since baseline start
-	if !baselineStart.IsZero() && today.After(baselineStart) {
-		completedActualDays = int(today.Sub(baselineStart).Hours()/24) + 1
-	}
-	if completedActualDays <= 0 {
-		completedActualDays = 1
-	}
-
-	velocity := 1.0
-	if completedPlannedDays > 0 && completedActualDays > 0 {
-		velocity = float64(completedPlannedDays) / float64(completedActualDays)
-		if velocity < 0.25 {
-			velocity = 0.25 // floor to prevent absurd projections
-		}
-		if velocity > 10.0 {
-			velocity = 10.0 // cap
-		}
-	}
+	velocity := scheduleVelocity(tasks, today)
 
 	// Use memoization for DAG traversal
 	projectedEndCache := map[string]time.Time{}

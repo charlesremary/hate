@@ -794,11 +794,12 @@
                 fast work has gone so far, only at what's left and who will do it.</li>
               <li><strong>Projected end (velocity)</strong>, the summary card and the task table's
                 <em>Projected End</em> column, asks: <em>at the pace we've actually finished work
-                since the baseline started, when does it end?</em> It compares the planned days of the
-                tasks finished so far with the calendar days elapsed. If that's half the plan's pace,
-                every unfinished task is assumed to take twice its planned days, chained after its
-                predecessors. It knows nothing about people or hours. Until a task finishes, the pace
-                is assumed to be on plan, so early on it simply repeats the baseline.</li>
+                since the baseline started, when does it end?</em> It compares the work finished with
+                the work the baseline said would be finished by today (both in planned days). If only
+                half of what was due is done, every unfinished task is assumed to take twice its
+                planned days, chained after its predecessors. On plan reads the same for one person or
+                ten. It knows nothing about people or hours. Until the first task is due, the pace is
+                assumed to be on plan, so early on it simply repeats the baseline.</li>
             </ul>
             <p><strong>Reading a gap between them.</strong></p>
             <ul>
@@ -936,8 +937,10 @@
               baseline days adjusted by any duration multiplier, and the end date is reached by
               counting <em>business days only</em> (weekends are skipped).</p>
             <p><strong>Projected end dates (in a snapshot).</strong> The engine measures
-              <strong>velocity</strong> — the planned days of completed work divided by the actual
-              calendar days elapsed since the project started (clamped between 0.25× and 10×). Each
+              <strong>velocity</strong> — the planned days of completed tasks divided by the planned
+              days of the tasks the baseline had finishing by today (planned end on or before today),
+              clamped between 0.25× and 10×. On plan is 1.0 for any team size; ahead is above 1,
+              behind below; with nothing due yet it is 1. Each
               unfinished task's planned duration is divided by that velocity, the task is scheduled
               after its predecessors' projected ends, and business days are added. Completed tasks
               use their actual end date. The project's projected end is the latest of them all.</p>
