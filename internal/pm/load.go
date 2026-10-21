@@ -111,7 +111,7 @@ func RenderLoadHTML(rep LoadReport) string {
 	header := `<h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:12px">Load &mdash; remaining work by person</h3>`
 	card := func(inner string) string {
 		return fmt.Sprintf(`
-<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+<div style="margin:0 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
   %s
   %s
 </div>`, header, inner)
@@ -122,12 +122,12 @@ func RenderLoadHTML(rep LoadReport) string {
 		if rep.Unsized > 0 {
 			msg = fmt.Sprintf("No remaining estimated work &mdash; %d open ticket%s %s no estimate.", rep.Unsized, pluralS(rep.Unsized), boolStr(rep.Unsized == 1, "has", "have"))
 		}
-		return card(fmt.Sprintf(`<p style="font-size:13px;color:#999">%s</p>`, msg))
+		return card(fmt.Sprintf(`<p style="font-size:13px;color:#666">%s</p>`, msg))
 	}
 
 	hasTarget := rep.Target != ""
 	th := func(s string) string {
-		return `<th style="text-align:left;padding:6px 10px;font-size:12px;color:#555;border-bottom:2px solid #e5e7eb;white-space:nowrap">` + s + `</th>`
+		return `<th style="text-align:left;padding:6px 10px;font-size:12px;background:#fff;color:#555;border-bottom:2px solid #e5e7eb;white-space:nowrap">` + s + `</th>`
 	}
 	td := `<td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;font-size:13px;white-space:nowrap">`
 	var sb strings.Builder
@@ -144,7 +144,7 @@ func RenderLoadHTML(rep LoadReport) string {
 		}
 		unsized := ""
 		if r.Unsized > 0 {
-			unsized = fmt.Sprintf(` <span style="color:#999;font-size:11px" title="Open tickets with no hour estimate, only an old effort size, or already at their estimate (scheduled at a %gh placeholder, not counted in hours)">+%d unsized</span>`, UnsizedPlaceholderHours, r.Unsized)
+			unsized = fmt.Sprintf(` <span style="color:#666;font-size:11px" title="Open tickets with no hour estimate, only an old effort size, or already at their estimate (scheduled at a %gh placeholder, not counted in hours)">+%d unsized</span>`, UnsizedPlaceholderHours, r.Unsized)
 		}
 		free := "free now"
 		if r.FreeFrom != "" {
@@ -161,7 +161,7 @@ func RenderLoadHTML(rep LoadReport) string {
 			if r.OverBy > 0 {
 				sb.WriteString(fmt.Sprintf(`<td class="load-over" style="padding:6px 10px;border-bottom:1px solid #f1f5f9;font-size:13px;white-space:nowrap;background:#fee2e2;color:#b91c1c;font-weight:600">over by %d day%s</td>`, r.OverBy, pluralS(r.OverBy)))
 			} else {
-				sb.WriteString(td + `<span style="color:#16a34a">on time</span></td>`)
+				sb.WriteString(td + `<span style="color:#15803d">on time</span></td>`)
 			}
 		}
 		sb.WriteString(`</tr>`)
@@ -171,7 +171,7 @@ func RenderLoadHTML(rep LoadReport) string {
 	// Project-level line.
 	var proj string
 	if hasTarget {
-		status := `<span style="color:#16a34a;font-weight:600">on time</span>`
+		status := `<span style="color:#15803d;font-weight:600">on time</span>`
 		if rep.SpareDays > 0 {
 			status += fmt.Sprintf(` (%d working day%s spare)`, rep.SpareDays, pluralS(rep.SpareDays))
 		}
@@ -181,7 +181,7 @@ func RenderLoadHTML(rep LoadReport) string {
 		proj = fmt.Sprintf(`<p style="font-size:13px;color:#333;margin:0 0 10px"><strong>Requested end:</strong> %s &mdash; %d working day%s from today. All remaining work done %s: %s.</p>`,
 			esc(fmtNiceDate(rep.Target)), rep.WorkingDaysToTarget, pluralS(rep.WorkingDaysToTarget), esc(fmtNiceDate(rep.FreeFrom)), status)
 	} else {
-		proj = fmt.Sprintf(`<p style="font-size:13px;color:#333;margin:0 0 10px">All remaining work done <strong>%s</strong> (%.1fh estimated). <span style="color:#999">Set a requested end in Settings to see who is over.</span></p>`,
+		proj = fmt.Sprintf(`<p style="font-size:13px;color:#333;margin:0 0 10px">All remaining work done <strong>%s</strong> (%.1fh estimated). <span style="color:#666">Set a requested end in Settings to see who is over.</span></p>`,
 			esc(fmtNiceDate(rep.FreeFrom)), rep.TotalHours)
 	}
 	unsizedNote := ""
@@ -189,7 +189,7 @@ func RenderLoadHTML(rep LoadReport) string {
 		unsizedNote = fmt.Sprintf(` %d open ticket%s %s no usable estimate (none, only an old effort size, or already used up) and %s not counted in the hours (each is scheduled at a %gh placeholder).`,
 			rep.Unsized, pluralS(rep.Unsized), boolStr(rep.Unsized == 1, "has", "have"), boolStr(rep.Unsized == 1, "is", "are"), UnsizedPlaceholderHours)
 	}
-	foot := `<p style="font-size:12px;color:#999;margin:10px 0 0">Remaining = estimated hours of open tickets (not complete, closed, cancelled or backlog). ` +
+	foot := `<p style="font-size:12px;color:#666;margin:10px 0 0">Remaining = estimated hours of open tickets (not complete, closed, cancelled or backlog). ` +
 		`Days of work = hours &divide; h/day. Free from = the day their last ticket finishes in the capacity-aware schedule from today, which also waits on predecessors, so it can be later than days of work alone. ` +
 		fmt.Sprintf(`Only people consume capacity; unassigned work goes to the only resource when there is one, otherwise to &ldquo;unassigned&rdquo; at %g h/day.`, ticket.DefaultDailyHours) + unsizedNote + `</p>`
 	return card(proj + sb.String() + foot)

@@ -12,18 +12,29 @@ import (
 // HTML generation helpers
 // ---------------------------------------------------------------------------
 
+// The PM dashboard uses one light theme before and after a baseline (it
+// matches GenerateSimpleDashboard), so every text color here is picked to
+// read at 4.5:1 or better on white.
 var statusColors = map[string][2]string{
-	"complete":    {"#22c55e", "#052e16"},
-	"in_progress": {"#3b82f6", "#0c1a2e"},
-	"blocked":     {"#ef4444", "#2d0a0a"},
-	"not_started": {"#6b7280", "#1a1a1a"},
-	"cancelled":   {"#6b7280", "#1a1a1a"},
+	"complete":    {"#15803d", "#dcfce7"},
+	"in_progress": {"#1d4ed8", "#dbeafe"},
+	"blocked":     {"#b91c1c", "#fee2e2"},
+	"not_started": {"#4b5563", "#f3f4f6"},
+	"cancelled":   {"#4b5563", "#f3f4f6"},
 }
 
+// healthColors are for text and bars on the light page.
 var healthColors = map[string]string{
-	"green":  "#22c55e",
-	"yellow": "#eab308",
-	"red":    "#ef4444",
+	"green":  "#15803d",
+	"yellow": "#b45309",
+	"red":    "#dc2626",
+}
+
+// headerHealthColors are for the health label in the dark header bar.
+var headerHealthColors = map[string]string{
+	"green":  "#4ade80",
+	"yellow": "#facc15",
+	"red":    "#f87171",
 }
 
 var healthLabels = map[string]string{
@@ -46,9 +57,9 @@ func slipBadge(days int) string {
 	if days == 0 {
 		return `<span class="slip-zero">&mdash;</span>`
 	}
-	color := "#eab308"
+	color := "#b45309"
 	if days > 14 {
-		color = "#ef4444"
+		color = "#dc2626"
 	}
 	return fmt.Sprintf(`<span class="slip-days" style="color:%s">+%dd</span>`, color, days)
 }
@@ -89,13 +100,13 @@ func renderStatusPanel(snapshot *Snapshot) string {
 		pctDone = completeTasks * 100 / totalTasks
 	}
 
-	unresolvedColor := "#22c55e"
+	unresolvedColor := "#15803d"
 	if snapshot.UnresolvedSlipEvents > 0 {
-		unresolvedColor = "#ef4444"
+		unresolvedColor = "#dc2626"
 	}
-	endDateColor := "#22c55e"
+	endDateColor := "#15803d"
 	if snapshot.ComputedEndDate != snapshot.BaselineEndDate {
-		endDateColor = "#ef4444"
+		endDateColor = "#dc2626"
 	}
 
 	var sb strings.Builder
@@ -112,7 +123,7 @@ func renderStatusPanel(snapshot *Snapshot) string {
         <div class="card-label">%d of %d tasks done</div>
       </div>
       <div class="card">
-        <div class="card-value" style="color:#ef4444">%dd</div>
+        <div class="card-value" style="color:#dc2626">%dd</div>
         <div class="card-label">Total slip days</div>
       </div>
       <div class="card">
@@ -411,11 +422,11 @@ func renderDependencyPanel(snapshot *Snapshot) string {
 		border, text, bg string
 	}
 	statusNodeColors := map[string]nodeColors{
-		"complete":    {"#166534", "#4ade80", "#052e16"},
-		"in_progress": {"#1e40af", "#60a5fa", "#0c1a2e"},
-		"blocked":     {"#991b1b", "#f87171", "#2d0a0a"},
-		"not_started": {"#374151", "#9ca3af", "#111827"},
-		"cancelled":   {"#374151", "#6b7280", "#111827"},
+		"complete":    {"#86efac", "#166534", "#f0fdf4"},
+		"in_progress": {"#93c5fd", "#1e40af", "#eff6ff"},
+		"blocked":     {"#fca5a5", "#991b1b", "#fef2f2"},
+		"not_started": {"#d1d5db", "#374151", "#f9fafb"},
+		"cancelled":   {"#d1d5db", "#6b7280", "#f9fafb"},
 	}
 
 	// Draw nodes
@@ -474,7 +485,7 @@ func renderDependencyPanel(snapshot *Snapshot) string {
 		// Milestone star
 		if isMS {
 			sb.WriteString(fmt.Sprintf(
-				`<text x="%d" y="%d" font-size="11" fill="#eab308">&#9733;</text>`,
+				`<text x="%d" y="%d" font-size="11" fill="#d97706">&#9733;</text>`,
 				nx+nodeW-16, ny+18,
 			))
 		}
@@ -498,7 +509,7 @@ func renderDependencyPanel(snapshot *Snapshot) string {
 		))
 		if slip > 0 {
 			sb.WriteString(fmt.Sprintf(
-				`<text x="%d" y="%d" font-family="monospace" font-size="9" fill="#ef4444" text-anchor="end">+%dd slip</text>`,
+				`<text x="%d" y="%d" font-family="monospace" font-size="9" fill="#dc2626" text-anchor="end">+%dd slip</text>`,
 				nx+nodeW-12, ny+52, slip,
 			))
 		} else if floatDays > 0 {
@@ -527,19 +538,19 @@ func renderDependencyPanel(snapshot *Snapshot) string {
       </span>
       <span class="dep-legend-item">
         <svg width="16" height="16">
-          <rect x="1" y="1" width="14" height="14" rx="3" fill="#0c1a2e" stroke="#1e40af"/>
+          <rect x="1" y="1" width="14" height="14" rx="3" fill="#eff6ff" stroke="#93c5fd"/>
         </svg>
         In progress
       </span>
       <span class="dep-legend-item">
         <svg width="16" height="16">
-          <rect x="1" y="1" width="14" height="14" rx="3" fill="#052e16" stroke="#166534"/>
+          <rect x="1" y="1" width="14" height="14" rx="3" fill="#f0fdf4" stroke="#86efac"/>
         </svg>
         Complete
       </span>
       <span class="dep-legend-item">
         <svg width="16" height="16">
-          <rect x="1" y="1" width="14" height="14" rx="3" fill="#2d0a0a" stroke="#991b1b"/>
+          <rect x="1" y="1" width="14" height="14" rx="3" fill="#fef2f2" stroke="#fca5a5"/>
         </svg>
         Blocked
       </span>
@@ -554,7 +565,7 @@ func renderDependencyPanel(snapshot *Snapshot) string {
 			t := taskMap[tid]
 			slipTxt := ""
 			if t != nil && t.SlipDays > 0 {
-				slipTxt = fmt.Sprintf(` <span style="color:#ef4444">+%dd slip</span>`, t.SlipDays)
+				slipTxt = fmt.Sprintf(` <span style="color:#dc2626">+%dd slip</span>`, t.SlipDays)
 			}
 			title := ""
 			if t != nil {
@@ -586,13 +597,17 @@ func renderDependencyPanel(snapshot *Snapshot) string {
 // ---------------------------------------------------------------------------
 
 const dashboardCSS = `
+  /* One light theme, shared with GenerateSimpleDashboard (dashboard_simple.go):
+     the shared panels (plan.go, forecast.go, load.go, hoursbudget.go, ...)
+     are white cards, so the page around them must be light too. */
   :root {
-    --bg:       #0d0d0f;
-    --surface:  #13131a;
-    --border:   #1f2937;
-    --text:     #e5e7eb;
-    --muted:    #6b7280;
-    --accent:   #e8ff47;
+    --bg:       #f4f5f7;
+    --surface:  #fff;
+    --border:   #e5e7eb;
+    --text:     #1a1a1a;
+    --muted:    #666;
+    --accent:   #1565c0;
+    --header:   #263238;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -603,10 +618,17 @@ const dashboardCSS = `
     min-height: 100vh;
   }
 
+  /* Report tables in the shared panels: same base rules as the pre-baseline
+     page, so they look the same on both. */
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  th { background: var(--header); color: #fff; padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500; }
+  td { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
+  tr:hover td { background: #f5f5f5; }
+
   /* Header */
   .header {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    background: var(--header);
+    color: #fff;
     padding: 18px 32px;
     display: flex;
     align-items: center;
@@ -620,14 +642,14 @@ const dashboardCSS = `
     font-family: monospace;
     font-size: 11px;
     letter-spacing: 0.15em;
-    color: var(--accent);
-    background: rgba(232,255,71,0.08);
-    border: 1px solid rgba(232,255,71,0.2);
+    color: #fff;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.25);
     padding: 3px 10px;
     border-radius: 3px;
   }
-  .project-name { font-size: 18px; font-weight: 700; color: var(--text); }
-  .header-meta { font-size: 12px; color: var(--muted); }
+  .project-name { font-size: 18px; font-weight: 700; color: #fff; }
+  .header-meta { font-size: 12px; color: #b0bec5; }
 
   /* Tabs */
   .tabs {
@@ -667,8 +689,9 @@ const dashboardCSS = `
   }
   .card {
     background: var(--surface);
-    border: 1px solid var(--border);
+    color: var(--text);
     border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
     padding: 16px 20px;
     flex: 1;
     min-width: 140px;
@@ -706,8 +729,10 @@ const dashboardCSS = `
   /* Task table */
   .table-wrap {
     overflow-x: auto;
-    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
     border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
   }
   .task-table {
     width: 100%;
@@ -715,8 +740,7 @@ const dashboardCSS = `
     font-size: 13px;
   }
   .task-table thead tr {
-    background: #0a0a0c;
-    border-bottom: 1px solid var(--border);
+    background: var(--header);
   }
   .task-table th {
     padding: 10px 14px;
@@ -725,16 +749,16 @@ const dashboardCSS = `
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: #fff;
   }
   .task-table tbody tr {
-    border-bottom: 1px solid rgba(31,41,55,0.6);
+    border-bottom: 1px solid #eee;
     transition: background 0.1s;
   }
   .task-table tbody tr:last-child { border-bottom: none; }
-  .task-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+  .task-table tbody tr:hover { background: #f5f5f5; }
   .task-table td { padding: 11px 14px; vertical-align: middle; }
-  .task-row.cp-row td:first-child { border-left: 2px solid #ef444460; }
+  .task-row.cp-row td:first-child { border-left: 2px solid #ef444480; }
 
   .task-id-cell { font-family: monospace; font-size: 12px; color: var(--muted); white-space: nowrap; }
   .task-title-cell { font-weight: 500; }
@@ -743,7 +767,7 @@ const dashboardCSS = `
   .reason-cell { font-size: 11px; color: var(--muted); max-width: 200px; }
   .slip-zero { color: var(--muted); }
   .cp-dot { color: #ef4444; font-size: 10px; margin-left: 4px; }
-  .warn-flag { color: #eab308; }
+  .warn-flag { color: #d97706; }
 
   .badge {
     display: inline-block;
@@ -767,16 +791,16 @@ const dashboardCSS = `
     display: flex; align-items: center; gap: 8px; margin: 12px 0 4px;
   }
   .zoom-controls button {
-    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); border: 1px solid #ccc;
     border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 14px; font-weight: 700;
   }
-  .zoom-controls button:hover { background: #374151; }
+  .zoom-controls button:hover { background: #f3f4f6; }
   .zoom-controls span { font-size: 12px; color: var(--muted); min-width: 40px; text-align: center; }
   .dep-scroll {
     overflow: auto;
     background: var(--surface);
-    border: 1px solid var(--border);
     border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
     padding: 16px;
     margin: 4px 0 16px;
     max-height: 70vh;
@@ -801,8 +825,9 @@ const dashboardCSS = `
   }
 
   .cp-summary {
-    background: rgba(239,68,68,0.05);
-    border: 1px solid rgba(239,68,68,0.2);
+    background: #fef2f2;
+    color: var(--text);
+    border: 1px solid #fecaca;
     border-radius: 8px;
     padding: 20px 24px;
     margin-top: 8px;
@@ -812,7 +837,7 @@ const dashboardCSS = `
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: #ef4444;
+    color: #b91c1c;
     margin-bottom: 12px;
   }
   .cp-summary ol {
@@ -823,7 +848,7 @@ const dashboardCSS = `
   .cp-summary code {
     font-size: 11px;
     color: var(--muted);
-    background: rgba(255,255,255,0.05);
+    background: rgba(0,0,0,0.05);
     padding: 1px 6px;
     border-radius: 3px;
   }
@@ -838,7 +863,7 @@ const dashboardCSS = `
     margin-left: 6px;
     padding: 2px 8px;
     font-size: 11px;
-    background: #ef4444;
+    background: #dc2626;
     color: #fff;
     border: none;
     border-radius: 4px;
@@ -846,7 +871,7 @@ const dashboardCSS = `
     font-weight: 500;
   }
   .resolve-btn:hover {
-    background: #dc2626;
+    background: #b91c1c;
   }
 `
 
@@ -928,7 +953,7 @@ const dashboardJS = `
 // are the project's planning blocks (empty when it doesn't plan in blocks).
 func GenerateDashboard(snapshot *Snapshot, blocks []Block, topHTML, costHTML string) string {
 	health := snapshot.ComputedHealth
-	hcolor := healthColors[health]
+	hcolor := headerHealthColors[health]
 	hlabel := healthLabels[health]
 	snapDate := snapshot.SnapshotDate
 	projID := snapshot.ProjectID
@@ -984,8 +1009,8 @@ func GenerateDashboard(snapshot *Snapshot, blocks []Block, topHTML, costHTML str
 
 <!-- Resolve slip modal -->
 <div id="resolve-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:center;justify-content:center">
-  <div style="background:#fff;border-radius:8px;padding:24px;width:440px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-    <h3 style="margin-bottom:12px;font-size:16px">Resolve Slip Event</h3>
+  <div style="background:#fff;color:#1a1a1a;border-radius:8px;padding:24px;width:440px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <h3 style="margin-bottom:12px;font-size:16px;color:#1a1a1a">Resolve Slip Event</h3>
     <p id="resolve-info" style="font-size:13px;color:#666;margin-bottom:12px"></p>
     <label style="display:block;margin-bottom:10px;font-size:13px;color:#666">Reason Category
       <select id="resolve-category" style="display:block;width:100%%;margin-top:4px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:14px">

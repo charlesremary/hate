@@ -79,21 +79,21 @@ func RenderTestSummaryLineHTML(rows []TestSummaryRow) string {
 	}
 	var inner string
 	if tickets == 0 {
-		inner = `<p style="padding:2px 0;color:#999;font-size:13px">No active tickets have test cases.</p>`
+		inner = `<p style="padding:2px 0;color:#666;font-size:13px">No active tickets have test cases.</p>`
 	} else {
 		plural := ""
 		if tickets != 1 {
 			plural = "s"
 		}
 		inner = fmt.Sprintf(`<div style="font-size:14px;color:#333"><strong>%d</strong> cases across <strong>%d</strong> ticket%s &mdash; `+
-			`<span style="color:#16a34a;font-weight:600">%d pass</span> &middot; `+
+			`<span style="color:#15803d;font-weight:600">%d pass</span> &middot; `+
 			`<span style="color:#dc2626;font-weight:600">%d fail</span> &middot; `+
 			`<span style="color:#b45309;font-weight:600">%d untested</span></div>`+
-			`<p style="font-size:12px;color:#999;margin-top:6px">Full breakdown on the <strong>Test cases</strong> tab.</p>`,
+			`<p style="font-size:12px;color:#666;margin-top:6px">Full breakdown on the <strong>Test cases</strong> tab.</p>`,
 			total, tickets, plural, pass, fail, untested)
 	}
 	return fmt.Sprintf(`
-<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+<div style="margin:0 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
   <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:12px">&#129514; Test cases</h3>
   %s
 </div>`, inner)

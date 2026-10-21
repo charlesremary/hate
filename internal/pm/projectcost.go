@@ -100,19 +100,19 @@ func RenderProjectCostHTML(pc ProjectCost) string {
 	}
 	if pc.UncategorizedHours > 0 {
 		rows.WriteString(fmt.Sprintf(
-			`<tr style="color:#999"><td style="padding:6px 8px">Uncategorized</td><td style="padding:6px 8px;text-align:right">&mdash;</td><td style="padding:6px 8px;text-align:right">%.1f</td><td style="padding:6px 8px;text-align:right">&mdash;</td></tr>`,
+			`<tr style="color:#666"><td style="padding:6px 8px">Uncategorized</td><td style="padding:6px 8px;text-align:right">&mdash;</td><td style="padding:6px 8px;text-align:right">%.1f</td><td style="padding:6px 8px;text-align:right">&mdash;</td></tr>`,
 			pc.UncategorizedHours))
 	}
 	body := rows.String()
 	if body == "" {
-		body = `<tr><td colspan="4" style="padding:10px 8px;color:#999">No hours logged yet.</td></tr>`
+		body = `<tr><td colspan="4" style="padding:10px 8px;color:#666">No hours logged yet.</td></tr>`
 	}
 	hint := ""
 	if len(pc.Types) == 0 {
-		hint = `<p style="font-size:12px;color:#999;margin-top:10px">Tag a deliverable parent <code>type:&lt;name&gt;</code> (e.g. <code>type:kb-article</code>) to see cost per deliverable here — its child tickets roll up automatically.</p>`
+		hint = `<p style="font-size:12px;color:#666;margin-top:10px">Tag a deliverable parent <code>type:&lt;name&gt;</code> (e.g. <code>type:kb-article</code>) to see cost per deliverable here — its child tickets roll up automatically.</p>`
 	}
 	return fmt.Sprintf(`
-<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+<div style="margin:0 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
   <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:12px">Project Cost &mdash; hours by deliverable</h3>
   <table style="width:100%%;border-collapse:collapse;font-size:13px">
     <thead><tr style="text-align:left;color:#666;border-bottom:1px solid #eee">

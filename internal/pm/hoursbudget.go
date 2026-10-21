@@ -104,23 +104,23 @@ func renderPool(label string, p PoolBudget) string {
 			`<div style="flex:1;min-width:110px"><div style="%s">%s</div><div style="font-size:12px;color:#666;margin-top:3px">%s</div></div>`,
 			style, value, sub)
 	}
-	head := fmt.Sprintf(`<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#888;margin:0 0 8px">%s</div>`, label)
+	head := fmt.Sprintf(`<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#666;margin:0 0 8px">%s</div>`, label)
 
 	// No budget for this pool — just report the spend.
 	if p.Budget == nil || *p.Budget <= 0 {
-		return fmt.Sprintf(`<div style="margin-bottom:18px">%s<div style="display:flex;gap:20px;flex-wrap:wrap">%s</div><p style="font-size:12px;color:#999;margin-top:6px">No budget set for this pool.</p></div>`,
+		return fmt.Sprintf(`<div style="margin-bottom:18px">%s<div style="display:flex;gap:20px;flex-wrap:wrap">%s</div><p style="font-size:12px;color:#666;margin-top:6px">No budget set for this pool.</p></div>`,
 			head, stat(fmt.Sprintf("%.1fh", p.Spent), "Spent", "#1976d2"))
 	}
 
-	remColor, remLabel := "#22c55e", "Remaining"
+	remColor, remLabel := "#15803d", "Remaining"
 	if p.Remaining < 0 {
-		remColor, remLabel = "#ef4444", "Over budget"
+		remColor, remLabel = "#dc2626", "Over budget"
 	}
 	spentColor := "#1976d2"
 	if p.PercentUsed >= 100 {
-		spentColor = "#ef4444"
+		spentColor = "#dc2626"
 	} else if p.PercentUsed >= 85 {
-		spentColor = "#eab308"
+		spentColor = "#b45309"
 	}
 	barPct := p.PercentUsed
 	if barPct > 100 {
@@ -144,10 +144,10 @@ func RenderHoursBudgetHTML(b HoursBudget) string {
 	unset := func(p PoolBudget) bool { return p.Budget == nil || *p.Budget <= 0 }
 	hint := ""
 	if unset(b.Work) && unset(b.Admin) && unset(b.QA) {
-		hint = `<p style="font-size:12px;color:#999;margin-top:2px">Set <strong>Work hours</strong>, <strong>Admin / meeting hours</strong>, and <strong>QA hours</strong> in Settings to track burn-down against each pool.</p>`
+		hint = `<p style="font-size:12px;color:#666;margin-top:2px">Set <strong>Work hours</strong>, <strong>Admin / meeting hours</strong>, and <strong>QA hours</strong> in Settings to track burn-down against each pool.</p>`
 	}
 	return fmt.Sprintf(`
-<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+<div style="margin:0 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
   %s
   %s
   %s
@@ -291,7 +291,7 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
 		for _, r := range rows {
 			body.WriteString(fmt.Sprintf(
 				`<tr><td style="padding:6px 8px">%s</td><td style="padding:6px 8px">%s</td>`+
-					`<td style="padding:6px 8px;text-align:center;text-transform:uppercase;color:#999">%s</td>`+
+					`<td style="padding:6px 8px;text-align:center;text-transform:uppercase;color:#666">%s</td>`+
 					`<td style="padding:6px 8px;text-align:right">%.1f</td>`+
 					`<td style="padding:6px 8px;text-align:right">%.1f</td>`+
 					`<td style="padding:6px 8px;text-align:right;color:%s;font-weight:600">%+.1f</td></tr>`,
@@ -319,8 +319,8 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
   </table>`, color, title, body.String(), totalLabel, color, total)
 	}
 
-	overHTML := varianceTable("Wrap tickets: overran the estimate (completed)", "#ef4444", v.Overran, "Total overrun", v.TotalOverrunHours)
-	underHTML := varianceTable("Wrap tickets: underran the estimate (completed)", "#22c55e", v.Underran, "Total underrun", -v.TotalUnderrunHours)
+	overHTML := varianceTable("Wrap tickets: overran the estimate (completed)", "#dc2626", v.Overran, "Total overrun", v.TotalOverrunHours)
+	underHTML := varianceTable("Wrap tickets: underran the estimate (completed)", "#15803d", v.Underran, "Total underrun", -v.TotalUnderrunHours)
 
 	// Early-warning list: in-flight tickets already past their budget.
 	warnHTML := ""
@@ -328,11 +328,11 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
 		var rows strings.Builder
 		for _, r := range v.InProgressOver {
 			rows.WriteString(fmt.Sprintf(
-				`<li style="margin:3px 0">%s &mdash; %s: projected %.1fh, spent %.1fh (<strong style="color:#eab308">%+.1fh</strong>)</li>`,
+				`<li style="margin:3px 0">%s &mdash; %s: projected %.1fh, spent %.1fh (<strong style="color:#b45309">%+.1fh</strong>)</li>`,
 				esc(r.ID), esc(r.Title), r.EstimateHours, r.SpentHours, r.VarianceHours))
 		}
 		warnHTML = fmt.Sprintf(`
-  <h4 style="font-size:12px;text-transform:uppercase;color:#eab308;letter-spacing:.5px;margin:16px 0 8px">&#9888; In progress, already over estimate</h4>
+  <h4 style="font-size:12px;text-transform:uppercase;color:#b45309;letter-spacing:.5px;margin:16px 0 8px">&#9888; In progress, already over estimate</h4>
   <ul style="font-size:13px;color:#444;margin:0 0 4px 18px;padding:0">%s</ul>`, rows.String())
 	}
 
@@ -349,7 +349,7 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
 	}
 	noteHTML := ""
 	if len(notes) > 0 {
-		noteHTML = `<p style="font-size:12px;color:#999;margin-top:12px">` + esc(strings.Join(notes, " ")) + `</p>`
+		noteHTML = `<p style="font-size:12px;color:#666;margin-top:12px">` + esc(strings.Join(notes, " ")) + `</p>`
 	}
 
 	// Per-feature code comparison.
@@ -357,9 +357,9 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
 	if len(v.Features) > 0 {
 		var body strings.Builder
 		for _, f := range v.Features {
-			color := "#22c55e"
+			color := "#15803d"
 			if f.VarianceHours > 0 {
-				color = "#ef4444"
+				color = "#dc2626"
 			}
 			body.WriteString(fmt.Sprintf(
 				`<tr><td style="padding:6px 8px">%s</td><td style="padding:6px 8px">%s</td>`+
@@ -386,11 +386,11 @@ func RenderEstimateVarianceHTML(v EstimateVariance) string {
 
 	inner := overHTML + underHTML + warnHTML + featHTML
 	if inner == "" {
-		inner = `<p style="padding:4px 0;color:#999;font-size:13px">No completed estimated tickets or finished features to compare yet.</p>`
+		inner = `<p style="padding:4px 0;color:#666;font-size:13px">No completed estimated tickets or finished features to compare yet.</p>`
 	}
 
 	return fmt.Sprintf(`
-<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+<div style="margin:0 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
   <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:4px">Estimate Variance &mdash; over/under the estimate</h3>%s%s
 </div>`, inner, noteHTML)
 }
@@ -452,9 +452,9 @@ func RenderHoursAtRiskHTML(rows []HoursAtRiskRow) string {
 	esc := html.EscapeString
 	body := ""
 	for _, r := range rows {
-		color := "#eab308" // approaching (90–100%)
+		color := "#b45309" // approaching (90–100%)
 		if r.PercentUsed >= 100 {
-			color = "#ef4444" // over
+			color = "#dc2626" // over
 		}
 		remaining := r.Allocated - r.Spent
 		assignee := r.Assignee
@@ -477,7 +477,7 @@ func RenderHoursAtRiskHTML(rows []HoursAtRiskRow) string {
 	}
 	inner := ""
 	if body == "" {
-		inner = `<p style="padding:4px 0;color:#999;font-size:13px">No active tickets are near their allocated hours.</p>`
+		inner = `<p style="padding:4px 0;color:#666;font-size:13px">No active tickets are near their allocated hours.</p>`
 	} else {
 		inner = fmt.Sprintf(`<table style="width:100%%;border-collapse:collapse;font-size:13px">
     <thead><tr style="text-align:left;color:#666;border-bottom:1px solid #eee">
@@ -491,7 +491,7 @@ func RenderHoursAtRiskHTML(rows []HoursAtRiskRow) string {
     </tr></thead><tbody>%s</tbody></table>`, body)
 	}
 	return fmt.Sprintf(`
-<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+<div style="margin:0 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
   <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:12px">Hours at risk &mdash; active tickets &ge;90%% of allotment</h3>
   %s
 </div>`, inner)
@@ -570,7 +570,7 @@ func RenderOverridesHTML(rows []OverrideRow) string {
 			label, esc(r.Date), r.Hours, esc(author), esc(r.Reason)))
 	}
 	return fmt.Sprintf(`
-<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+<div style="margin:0 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
   <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:12px">Authorized overrides &mdash; time logged past allotment</h3>
   <table style="width:100%%;border-collapse:collapse;font-size:13px">
     <thead><tr style="text-align:left;color:#666;border-bottom:1px solid #eee">

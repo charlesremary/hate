@@ -229,9 +229,9 @@ func fmtVariance(v int) string {
 	case v > 0:
 		return fmt.Sprintf(`<span style="color:#b91c1c">+%d business day%s late</span>`, v, pluralS(v))
 	case v < 0:
-		return fmt.Sprintf(`<span style="color:#16a34a">%d business day%s early</span>`, -v, pluralS(-v))
+		return fmt.Sprintf(`<span style="color:#15803d">%d business day%s early</span>`, -v, pluralS(-v))
 	}
-	return `<span style="color:#16a34a">on the day</span>`
+	return `<span style="color:#15803d">on the day</span>`
 }
 
 // forecastStatusBadge is the coloured status pill.
@@ -256,28 +256,28 @@ func RenderForecastHTML(rep ForecastReport, history []ForecastHistoryEntry) stri
 	header := `<h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin:0">Schedule vs request</h3>`
 	wrap := func(inner string) string {
 		return fmt.Sprintf(`
-<div class="forecast-card" style="margin:20px 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:16px 22px">
+<div class="forecast-card" style="margin:20px 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:16px 22px">
 %s
 </div>`, inner)
 	}
 	if rep.RequestedEnd == "" {
 		return wrap(`<div style="display:flex;gap:12px;align-items:baseline">` + header +
-			`<span class="forecast-hint" style="font-size:13px;color:#999">Set a requested start and end in ` + settingsLink + ` to see whether the scoped work fits.</span></div>`)
+			`<span class="forecast-hint" style="font-size:13px;color:#666">Set a requested start and end in ` + settingsLink + ` to see whether the scoped work fits.</span></div>`)
 	}
 
 	cell := func(label, value, sub string) string {
 		if sub != "" {
 			sub = `<div style="font-size:12px;margin-top:2px">` + sub + `</div>`
 		}
-		return fmt.Sprintf(`<div style="min-width:150px"><div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.4px">%s</div><div style="font-size:14px;font-weight:600;color:#222;margin-top:2px">%s</div>%s</div>`, label, value, sub)
+		return fmt.Sprintf(`<div style="min-width:150px"><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.4px">%s</div><div style="font-size:14px;font-weight:600;color:#222;margin-top:2px">%s</div>%s</div>`, label, value, sub)
 	}
 
 	// Start.
 	startSub := ""
 	if rep.RequestedStart != "" {
-		startSub = `<span style="color:#888">requested ` + fmtShortDate(rep.RequestedStart) + `</span>`
+		startSub = `<span style="color:#666">requested ` + fmtShortDate(rep.RequestedStart) + `</span>`
 	}
-	actual := `<span style="color:#999;font-weight:400">not started</span>`
+	actual := `<span style="color:#666;font-weight:400">not started</span>`
 	if rep.ActualStart != "" {
 		actual = fmtShortDate(rep.ActualStart)
 		if rep.StartVarianceDays != nil {
@@ -285,7 +285,7 @@ func RenderForecastHTML(rep ForecastReport, history []ForecastHistoryEntry) stri
 		}
 	}
 
-	likely, p85 := `<span style="color:#999;font-weight:400">no open work</span>`, ""
+	likely, p85 := `<span style="color:#666;font-weight:400">no open work</span>`, ""
 	likelySub, p85Sub := "", ""
 	if rep.LikelyFinish != "" {
 		likely = fmtShortDate(rep.LikelyFinish)
@@ -295,7 +295,7 @@ func RenderForecastHTML(rep ForecastReport, history []ForecastHistoryEntry) stri
 	}
 
 	var cells strings.Builder
-	cells.WriteString(cell("Requested end", fmtShortDate(rep.RequestedEnd), fmt.Sprintf(`<span style="color:#888">%d working day%s left from %s</span>`, rep.WorkingDaysLeft, pluralS(rep.WorkingDaysLeft), esc(fmtNiceDate(rep.ScheduleStart)))))
+	cells.WriteString(cell("Requested end", fmtShortDate(rep.RequestedEnd), fmt.Sprintf(`<span style="color:#666">%d working day%s left from %s</span>`, rep.WorkingDaysLeft, pluralS(rep.WorkingDaysLeft), esc(fmtNiceDate(rep.ScheduleStart)))))
 	cells.WriteString(cell("Actual start", actual, startSub))
 	cells.WriteString(cell("Projected finish (likely)", likely, likelySub))
 	if rep.LikelyFinish != "" {
@@ -313,21 +313,21 @@ func RenderForecastHTML(rep ForecastReport, history []ForecastHistoryEntry) stri
 	if rep.HoursToCut > 0 {
 		fit = fmt.Sprintf(` &mdash; <span style="color:#b91c1c;font-weight:600">cut %.1fh</span> (or add capacity) to fit.`, rep.HoursToCut)
 	} else if rep.RemainingHours > 0 {
-		fit = fmt.Sprintf(` &mdash; <span style="color:#16a34a;font-weight:600">%.1fh spare</span>.`, rep.SpareHours)
+		fit = fmt.Sprintf(` &mdash; <span style="color:#15803d;font-weight:600">%.1fh spare</span>.`, rep.SpareHours)
 		if rep.Status == ForecastLate || rep.Status == ForecastAtRisk {
 			fit += ` The hours fit, so the finish is held by predecessors, planned start dates, or one person's load &mdash; see the Load table and Gantt.`
 		}
 	}
 	unsized := ""
 	if rep.Unsized > 0 {
-		unsized = fmt.Sprintf(` <span style="color:#999">+%d unsized ticket%s not counted.</span>`, rep.Unsized, pluralS(rep.Unsized))
+		unsized = fmt.Sprintf(` <span style="color:#666">+%d unsized ticket%s not counted.</span>`, rep.Unsized, pluralS(rep.Unsized))
 	}
 
 	inner := fmt.Sprintf(`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">%s%s</div>
 <div style="display:flex;flex-wrap:wrap;gap:14px 28px">%s</div>
 <p class="forecast-needs" style="font-size:13px;color:#333;margin:12px 0 0">%s%s%s</p>
 %s
-<p style="font-size:12px;color:#999;margin:8px 0 0">Likely = the capacity-aware schedule from %s. P85 = the same schedule with code tickets at the Monte Carlo P85 rate (&times;%.2f). ON TRACK: P85 by the requested end; AT RISK: likely on time, P85 late; LATE: likely late. Business days, flat daily capacity (no holidays).</p>`,
+<p style="font-size:12px;color:#666;margin:8px 0 0">Likely = the capacity-aware schedule from %s. P85 = the same schedule with code tickets at the Monte Carlo P85 rate (&times;%.2f). ON TRACK: P85 by the requested end; AT RISK: likely on time, P85 late; LATE: likely late. Business days, flat daily capacity (no holidays).</p>`,
 		header, forecastStatusBadge(rep.Status), cells.String(), needs, fit, unsized,
 		renderForecastTrend(history), esc(fmtNiceDate(rep.ScheduleStart)), rep.P85Factor)
 	return wrap(inner)
@@ -403,10 +403,10 @@ func renderForecastTrend(history []ForecastHistoryEntry) string {
 		return sb.String()
 	}
 	label := func(x, y float64, anchor, s string) string {
-		return fmt.Sprintf(`<text x="%.1f" y="%.1f" font-size="10" fill="#888" text-anchor="%s">%s</text>`, x, y, anchor, html.EscapeString(s))
+		return fmt.Sprintf(`<text x="%.1f" y="%.1f" font-size="10" fill="#666" text-anchor="%s">%s</text>`, x, y, anchor, html.EscapeString(s))
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, `<div style="margin-top:12px"><div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Finish-date trend</div>`)
+	fmt.Fprintf(&sb, `<div style="margin-top:12px"><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Finish-date trend</div>`)
 	fmt.Fprintf(&sb, `<svg class="forecast-trend" viewBox="0 0 %g %g" width="100%%" style="max-width:%gpx;height:auto" role="img" aria-label="Projected finish over time">`, w, h, w)
 	fmt.Fprintf(&sb, `<line x1="%g" y1="%g" x2="%g" y2="%g" stroke="#e5e7eb"/>`, padL, h-padB, w-padR, h-padB)
 	fmt.Fprintf(&sb, `<line x1="%g" y1="%g" x2="%g" y2="%g" stroke="#e5e7eb"/>`, padL, padT, padL, h-padB)

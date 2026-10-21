@@ -77,20 +77,20 @@ func RenderBlockedHTML(rows []BlockedRow) string {
 		}
 		reason := esc(r.Reason)
 		if r.Reason == "" {
-			reason = `<span style="color:#999">no reason given</span>`
+			reason = `<span style="color:#666">no reason given</span>`
 		}
 		body += fmt.Sprintf(
 			`<tr>`+
 				`<td style="padding:6px 8px;white-space:nowrap">%s</td>`+
 				`<td style="padding:6px 8px">%s</td>`+
 				`<td style="padding:6px 8px">%s</td>`+
-				`<td style="padding:6px 8px;white-space:nowrap;color:#999">%s</td>`+
+				`<td style="padding:6px 8px;white-space:nowrap;color:#666">%s</td>`+
 				`<td style="padding:6px 8px">%s</td></tr>`,
 			esc(r.TicketID), esc(r.Title), esc(assignee), esc(r.Since), reason)
 	}
 	inner := ""
 	if body == "" {
-		inner = `<p style="padding:4px 0;color:#999;font-size:13px">No blocked tickets.</p>`
+		inner = `<p style="padding:4px 0;color:#666;font-size:13px">No blocked tickets.</p>`
 	} else {
 		inner = fmt.Sprintf(`<table style="width:100%%;border-collapse:collapse;font-size:13px">
     <thead><tr style="text-align:left;color:#666;border-bottom:1px solid #eee">
@@ -102,7 +102,7 @@ func RenderBlockedHTML(rows []BlockedRow) string {
     </tr></thead><tbody>%s</tbody></table>`, body)
 	}
 	return fmt.Sprintf(`
-<div style="margin:0 24px 20px;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
+<div style="margin:0 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:18px 22px">
   <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin-bottom:12px">&#9940; Blocked tickets</h3>
   %s
 </div>`, inner)

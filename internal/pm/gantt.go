@@ -318,7 +318,7 @@ func ganttSVG(rows []ganttRow, groups []ganttGroup, blocks []Block, chartStart, 
 	if !today.Before(chartStart) && !today.After(chartEnd) {
 		tx := x(today)
 		sb.WriteString(fmt.Sprintf(`<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 3"/>`, tx, gTopAxis-20, tx, axisBottom))
-		sb.WriteString(fmt.Sprintf(`<text x="%d" y="%d" font-size="10" fill="#f59e0b" font-family="sans-serif">today</text>`, tx+3, axisBottom+12))
+		sb.WriteString(fmt.Sprintf(`<text x="%d" y="%d" font-size="10" fill="#b45309" font-family="sans-serif">today</text>`, tx+3, axisBottom+12))
 	}
 	sb.WriteString(fmt.Sprintf(`<line x1="0" y1="%d" x2="%d" y2="%d" stroke="#d1d5db" stroke-width="1"/>`, gTopAxis-2, svgW, gTopAxis-2))
 	sb.WriteString(fmt.Sprintf(`<line x1="%d" y1="0" x2="%d" y2="%d" stroke="#d1d5db" stroke-width="1"/>`, gGutter, gGutter, axisBottom))
@@ -395,7 +395,7 @@ func ganttSVG(rows []ganttRow, groups []ganttGroup, blocks []Block, chartStart, 
 		if owner != "" {
 			suffix = "  " + owner
 		}
-		sb.WriteString(fmt.Sprintf(`<text x="10" y="%d" font-size="11.5" font-family="sans-serif" fill="%s"><tspan font-weight="600">%s</tspan> %s<tspan fill="#9ca3af"> %s</tspan></text>`,
+		sb.WriteString(fmt.Sprintf(`<text x="10" y="%d" font-size="11.5" font-family="sans-serif" fill="%s"><tspan font-weight="600">%s</tspan> %s<tspan fill="#6b7280"> %s</tspan></text>`,
 			yc+4, labelColor, esc(r.task.TaskID), esc(title), esc(suffix)))
 
 		if r.milestone {
@@ -470,7 +470,7 @@ func criticalOnly(s *Snapshot) *Snapshot {
 func renderGanttPanel(snapshot *Snapshot, blocks []Block, note, exportURL string) string {
 	rows, groups, cs, ce := ganttData(snapshot, blocks)
 	if len(rows) == 0 {
-		return `<div style="padding:24px;color:#9ca3af">No scheduled tasks to chart yet — add estimates (and dependencies) to your tickets.</div>`
+		return `<div style="padding:24px;color:#6b7280">No scheduled tasks to chart yet — add estimates (and dependencies) to your tickets.</div>`
 	}
 	full := ganttSVG(rows, groups, blocks, cs, ce, snapshot.SnapshotDate)
 	cpRows, cpGroups, ccs, cce := ganttData(criticalOnly(snapshot), blocks)
@@ -480,7 +480,7 @@ func renderGanttPanel(snapshot *Snapshot, blocks []Block, note, exportURL string
 		grouping = `<span><span style="display:inline-block;width:22px;height:8px;background:#7c3aed;opacity:.15;border-radius:2px;vertical-align:middle"></span> planning block (rows grouped by the block they start in)</span>`
 	}
 	if cp == "" {
-		cp = `<div style="padding:24px;color:#9ca3af">No critical path identified for this schedule.</div>`
+		cp = `<div style="padding:24px;color:#6b7280">No critical path identified for this schedule.</div>`
 	}
 	legend := `<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#6b7280;margin:10px 0 0">
       <span><span style="display:inline-block;width:22px;height:8px;background:#e5e7eb;border-radius:2px;vertical-align:middle"></span> planned</span>
@@ -493,7 +493,7 @@ func renderGanttPanel(snapshot *Snapshot, blocks []Block, note, exportURL string
 	legend = fmt.Sprintf(legend, grouping)
 	const btn = `border:none;padding:6px 13px;font-size:13px;cursor:pointer;`
 	return fmt.Sprintf(`
-<div style="padding:16px 24px 8px">
+<div style="padding:16px 24px 8px;color:#1a1a1a">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px;flex-wrap:wrap">
     <div style="font-size:13px;color:#6b7280">%s</div>
     <div style="display:flex;gap:8px;align-items:center">

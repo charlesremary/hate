@@ -507,7 +507,7 @@ func RenderPlanStripHTML(projectID string, ps PlanStatus) string {
 		return fmt.Sprintf(`<button class="plan-btn" onclick="%s(this)" title="%s" style="padding:5px 12px;border-radius:6px;border:1px solid #ccc;background:#fff;color:#333;cursor:pointer;font-size:12px;font-weight:500">%s</button>`,
 			onclick, esc(title), esc(label))
 	}
-	muted := func(s string) string { return `<span style="color:#888">` + s + `</span>` }
+	muted := func(s string) string { return `<span style="color:#666">` + s + `</span>` }
 	var parts []string
 	if !ps.HasBaseline {
 		parts = append(parts,
@@ -530,7 +530,7 @@ func RenderPlanStripHTML(projectID string, ps PlanStatus) string {
 		}
 		parts = append(parts, `<span class="plan-snapshot">`+snap+`</span> `+
 			btn("planSnapshot", "Take snapshot", "Compare the tickets against the baseline now (also runs automatically once a day)"))
-		slipColor := "#16a34a"
+		slipColor := "#15803d"
 		if ps.UnresolvedSlips > 0 {
 			slipColor = "#dc2626"
 		}
@@ -543,7 +543,7 @@ func RenderPlanStripHTML(projectID string, ps PlanStatus) string {
 		parts = append(parts, rb)
 	}
 	return fmt.Sprintf(`
-<div id="plan-strip" class="plan-strip" data-project="%s" style="margin:20px 24px 0;background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:12px 22px;display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;font-size:13px;color:#222">
+<div id="plan-strip" class="plan-strip" data-project="%s" style="margin:20px 24px 0;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:12px 22px;display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;font-size:13px;color:#1a1a1a">
 <h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin:0">Plan</h3>
 %s
 </div>
