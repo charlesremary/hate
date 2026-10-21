@@ -6,7 +6,7 @@ package ticket
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"log"
 	"path/filepath"
 
 	"hate/internal/fsutil"
@@ -92,38 +92,39 @@ func IndexPath(repoRoot string) string {
 	return filepath.Join(repoRoot, "index.json")
 }
 
-// RegenerateIndex rebuilds index.json from all ticket files. index.json is
-// derived and not tracked in git (see UntrackIndex); it is rewritten
-// atomically, so it is safe to call without the project lock.
-func RegenerateIndex(repoRoot string) error {
+// CurrentIndex builds the index from the ticket files and refreshes
+// index.json as a side effect. Nothing in hate reads index.json back to show
+// data: it is a convenience file for outside tools, so a failed write (on
+// Windows, a rename refused while Defender or a sync client holds the file
+// open) is logged and never hides tickets. It errors only when the ticket
+// files can't be read. The atomic write makes it safe without the project lock.
+func CurrentIndex(repoRoot string) (*Index, error) {
 	tickets, err := ReadAllTickets(repoRoot)
 	if err != nil {
-		return fmt.Errorf("failed to read tickets: %w", err)
+		return nil, fmt.Errorf("failed to read tickets: %w", err)
 	}
 	idx := buildIndex(tickets)
-	data, err := json.MarshalIndent(idx, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal index: %w", err)
-	}
-	data = append(data, '\n')
-	path := IndexPath(repoRoot)
-	return fsutil.WriteFileAtomic(path, data, 0644)
+	writeIndex(repoRoot, idx)
+	return idx, nil
 }
 
-// ReadIndex reads the current index. Returns empty index if file is missing.
-func ReadIndex(repoRoot string) (*Index, error) {
+// RegenerateIndex refreshes index.json after a write. Like CurrentIndex, a
+// failed index.json write is logged, not returned, so it can't fail a request
+// (or skip its commit) after the ticket itself was saved.
+func RegenerateIndex(repoRoot string) error {
+	_, err := CurrentIndex(repoRoot)
+	return err
+}
+
+// writeIndex writes index.json atomically, logging any failure.
+func writeIndex(repoRoot string, idx *Index) {
 	path := IndexPath(repoRoot)
-	data, err := os.ReadFile(path)
+	data, err := json.MarshalIndent(idx, "", "  ")
+	if err == nil {
+		data = append(data, '\n')
+		err = fsutil.WriteFileAtomic(path, data, 0644)
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			idx := buildIndex([]*Ticket{})
-			return idx, nil
-		}
-		return nil, err
+		log.Printf("index.json write failed (%s): %v", path, err)
 	}
-	var idx Index
-	if err := json.Unmarshal(data, &idx); err != nil {
-		return nil, fmt.Errorf("failed to parse index: %w", err)
-	}
-	return &idx, nil
 }

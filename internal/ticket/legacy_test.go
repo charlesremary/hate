@@ -143,7 +143,7 @@ func TestNormalizeOpenStatusOnRead(t *testing.T) {
 	if err := RegenerateIndex(root); err != nil {
 		t.Fatal(err)
 	}
-	idx, _ := ReadIndex(root)
+	idx, _ := CurrentIndex(root)
 	for _, s := range idx.Tickets {
 		if s.Type == "feature" || s.Type == "defect" || s.Status == "open" {
 			t.Errorf("index lists %s as %s/%s", s.ID, s.Type, s.Status)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -104,10 +105,12 @@ func ReadAllTickets(repoRoot string) ([]*Ticket, error) {
 		path := filepath.Join(tdir, fname)
 		data, err := os.ReadFile(path)
 		if err != nil {
+			log.Printf("skipping ticket file %s: %v", path, err)
 			continue
 		}
 		var t Ticket
 		if err := json.Unmarshal(data, &t); err != nil {
+			log.Printf("skipping ticket file %s: invalid JSON: %v", path, err)
 			continue
 		}
 		if t.Tags == nil {

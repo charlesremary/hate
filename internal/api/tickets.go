@@ -214,11 +214,11 @@ func handleListTickets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Regenerate index to ensure it includes all current fields (under the
-	// lock, so a list can't overwrite the index a concurrent edit just wrote).
+	// Built from the ticket files, never read back from index.json, so a
+	// failed index write can't empty the list (under the lock, so a list can't
+	// overwrite the index a concurrent edit just wrote).
 	unlock := ticket.LockProject(root)
-	_ = ticket.RegenerateIndex(root)
-	idx, err := ticket.ReadIndex(root)
+	idx, err := ticket.CurrentIndex(root)
 	unlock()
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -411,7 +411,7 @@ func handleGetBilling(w http.ResponseWriter, r *http.Request) {
 	start := r.URL.Query().Get("start")
 	end := r.URL.Query().Get("end")
 
-	idx, err := ticket.ReadIndex(root)
+	idx, err := ticket.CurrentIndex(root)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

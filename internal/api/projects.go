@@ -149,15 +149,10 @@ func projectSummary(project map[string]interface{}) map[string]interface{} {
 		return result
 	}
 
-	// Ticket count from index.json
-	idxPath := filepath.Join(path, "index.json")
-	if data, err := os.ReadFile(idxPath); err == nil {
-		var idx map[string]interface{}
-		if json.Unmarshal(data, &idx) == nil {
-			if tc, ok := idx["ticket_count"].(float64); ok {
-				result["ticket_count"] = tc
-			}
-		}
+	// Ticket count from the ticket files (not index.json, which a fresh clone
+	// doesn't have and a failed write may never create).
+	if tickets, err := ticket.ReadAllTickets(path); err == nil {
+		result["ticket_count"] = float64(len(tickets))
 	}
 
 	// Health from latest snapshot

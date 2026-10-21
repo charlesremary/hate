@@ -77,8 +77,13 @@ A project is an ordinary Git repository. HATE owns a few paths inside it:
 - **`tickets/<id>.json`** is the canonical record for a ticket. Everything else is
   derived from it.
 - **`index.json`** is a regenerated rollup (id, type, status, title, assignee,
-  dates, etc.) used for fast listing. Never hand-edit it — it is rebuilt from the
-  ticket files by `RegenerateIndex`.
+  dates, etc.) for outside tools. Never hand-edit it — it is rebuilt from the
+  ticket files on every list and write. hate itself never reads it back: lists,
+  billing and project counts come from the ticket files, so a missing or
+  unwritable `index.json` (a fresh clone, or Windows refusing the write while
+  another program holds the file) can't hide tickets. A failed write is logged
+  as `index.json write failed (…)`, and an unreadable ticket file as
+  `skipping ticket file …`.
 - **`.tkt/config.json`** holds the project config (`ProjectConfig`): client,
   project name/id, ticket-ID `prefix`, team `resources`, linked `repos`,
   hour budget pools, estimate inputs, the legacy `effort_to_days` mapping,
