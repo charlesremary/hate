@@ -240,6 +240,17 @@ every dashboard view:
   (`internal/pm/stages.go`: longest chain of open predecessors) orders the
   capacity schedule, the Tickets tab's Work order view, and
   `GET …/ready` (`ready`, `next`, `stages`) for agents.
+- **Excel export.** `GET /api/projects/{projectId}/export.xlsx` (the Tickets
+  tab's Export to Excel button) downloads `<projectId>-<YYYY-MM-DD>.xlsx` with
+  two sheets: **Tickets** (every ticket, closed and backlog included: status,
+  type, assignee, phase, parent, class, CFP, estimated and logged hours, planned
+  start and due as real dates, predecessors, tags; bold frozen header with an
+  autofilter) and **Gantt** (a colored cell grid, one column per working day, or
+  per week past 130 days, rows grouped like the dashboard Gantt, critical path
+  marked `!`, with a legend). The Gantt uses the baseline if there is one, else
+  the projected schedule from `?start=` (default today), the same as the
+  draw.io export. The workbook is hand-written OOXML (`internal/pm/xlsx.go`), no
+  extra dependency.
 
 Known simplifications: a flat daily capacity (no holidays, PTO, or per-day
 variation), remaining = estimate − logged (a ticket past its estimate but still
