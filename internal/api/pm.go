@@ -53,6 +53,8 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Post("/snapshot", createSnapshot)
 	r.Get("/dashboard", getDashboard)
 	r.Get("/gantt.drawio", getGanttDrawio)
+	r.Get("/export.xlsx", getExportXLSX)
+	r.Head("/export.xlsx", getExportXLSX) // curl -I; net/http drops the body
 	r.Post("/baseline", createBaseline)
 	r.Post("/baseline-now", baselineFromTickets)
 	r.Post("/rebaseline", rebaseline)
@@ -201,6 +203,35 @@ func getGanttDrawio(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-gantt.drawio"`, projectID))
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(pm.RenderGanttDrawio(snapshot, blocks)))
+}
+
+// getExportXLSX handles GET /api/projects/{projectId}/export.xlsx — the
+// project as an Excel workbook (download): a Tickets sheet with every ticket.
+func getExportXLSX(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	tickets, err := ticket.ReadAllTickets(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cfg, cerr := ticket.ReadConfig(root)
+	if cerr != nil {
+		cfg = nil
+	}
+	estCtx := pm.ProjectEstimateContext(root, tickets, cfg)
+	data, err := pm.ProjectWorkbook(tickets, estCtx)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.xlsx"`, projectID, time.Now().Format("2006-01-02")))
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
 }
 
 // ganttStart resolves the projection start date from ?start=YYYY-MM-DD,
