@@ -792,7 +792,7 @@ Conventions:
 | `GET …/tickets` | List all tickets. | — |
 | `POST …/tickets` | Create a ticket (see §1 for the full body). A non-empty `effort` → 400. | see §1 |
 | `GET …/tickets/billing` | Billing rollup (logged hours × rates). | — |
-| `GET …/tickets/{ticketId}` | Full ticket JSON. | — |
+| `GET …/tickets/{ticketId}` | Full ticket JSON, plus a computed (never stored) `workflow`: `{promote_to, demote_to, path}`. `promote_to` / `demote_to` are the statuses Promote / Demote would move it to now (`_previous` resolved for `blocked`; `null` when there is no transition); `path` is the type's main line from `not_started`. Read `promote_to` before promoting to know the next status. No `workflow` key for meeting / administration. Ticket write responses (promote, demote, block, edit…) carry the updated `workflow` too. | — |
 | `PATCH …/tickets/{ticketId}` | Edit one field (title, description, priority, `estimate_hours`, tags, dates, …). Setting `effort` → 400; clearing it to `null` is allowed. | `{field, value, author?}` |
 
 ### Ticket actions

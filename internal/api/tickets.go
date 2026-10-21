@@ -61,12 +61,14 @@ func commitTicket(repoRoot, ticketID, action string) string {
 }
 
 // respondTicket writes the ticket as JSON plus "commit_warning" when the
-// auto-commit failed (the change itself is saved either way).
+// auto-commit failed (the change itself is saved either way), and the computed
+// "workflow" so the panel's Promote / Demote labels follow every change.
 func respondTicket(w http.ResponseWriter, tk *ticket.Ticket, commitWarning string) {
 	respondJSON(w, http.StatusOK, struct {
 		*ticket.Ticket
-		CommitWarning string `json:"commit_warning,omitempty"`
-	}{tk, commitWarning})
+		Workflow      *ticket.WorkflowView `json:"workflow,omitempty"`
+		CommitWarning string               `json:"commit_warning,omitempty"`
+	}{tk, ticket.TicketWorkflow(tk), commitWarning})
 }
 
 // decodeJSON decodes a JSON request body into dst. Returns false and writes
@@ -541,11 +543,13 @@ func handleGetTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e := ticketEstimates(root)(ticketID)
+	// "workflow" is computed on read (never stored); types with no workflow omit it.
 	respondJSON(w, http.StatusOK, struct {
 		*ticket.Ticket
-		EstimatedHours float64 `json:"estimated_hours"`
-		EstimateSource string  `json:"estimate_source"`
-	}{tk, e.hours, e.source})
+		EstimatedHours float64              `json:"estimated_hours"`
+		EstimateSource string               `json:"estimate_source"`
+		Workflow       *ticket.WorkflowView `json:"workflow,omitempty"`
+	}{tk, e.hours, e.source, ticket.TicketWorkflow(tk)})
 }
 
 type ticketEstimate struct {

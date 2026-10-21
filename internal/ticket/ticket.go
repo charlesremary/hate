@@ -439,13 +439,9 @@ func Promote(repoRoot, ticketID, author string) (*Ticket, error) {
 		return nil, ErrNeedsTimeLog
 	}
 
-	nextStatus, ok := wf.Promote[current]
+	nextStatus, ok := promoteTarget(wf, t)
 	if !ok {
 		return nil, fmt.Errorf("Cannot promote a %s from '%s' -- no promote transition defined", t.Type, current)
-	}
-
-	if nextStatus == "_previous" {
-		nextStatus = resolvePrevious(t)
 	}
 
 	if nextStatus == "qa_testing" {
@@ -486,13 +482,9 @@ func Demote(repoRoot, ticketID, author string) (*Ticket, error) {
 	}
 
 	current := t.Status
-	prevStatus, ok := wf.Demote[current]
+	prevStatus, ok := demoteTarget(wf, t)
 	if !ok {
 		return nil, fmt.Errorf("Cannot demote a %s from '%s' -- no demote transition defined", t.Type, current)
-	}
-
-	if prevStatus == "_previous" {
-		prevStatus = resolvePrevious(t)
 	}
 
 	t.Status = prevStatus

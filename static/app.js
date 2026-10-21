@@ -263,11 +263,18 @@ let currentUser = null;
 let showBilling = false; // Billing tab is hidden unless enabled in Settings.
 
 // ── Status / priority helpers ────────────────────────
+// Labels only: the transitions live on the server (each ticket's `workflow`).
 const STATUS_LABELS = {
-  not_started: 'Not Started', in_progress: 'In Progress',
-  dev_complete: 'Dev Complete', qa_testing: 'QA Testing',
-  submitted_for_review: 'Submitted for Review', approved: 'Approved',
-  complete: 'Complete', closed: 'Closed', rework: 'Rework', blocked: 'Blocked',
+  not_started: 'Not Started',
+  in_progress: 'In Progress',
+  dev_complete: 'Dev Complete',
+  qa_testing: 'QA Testing',
+  submitted_for_review: 'Submitted for Review',
+  approved: 'Approved',
+  complete: 'Complete',
+  closed: 'Closed',
+  rework: 'Rework',
+  blocked: 'Blocked',
 };
 const STATUS_VALUES = Object.keys(STATUS_LABELS);
 const TYPE_LABELS = {
@@ -1326,6 +1333,43 @@ function gutterMarks(t) {
   return marks.join('&nbsp;');
 }
 
+// ── Promote / demote targets ─────────────────────────
+// Both come from the ticket's server-computed `workflow` ({promote_to,
+// demote_to, path}); the UI never copies the transition maps.
+const statusLabel = s => STATUS_LABELS[s] || s;
+
+// The type's main path as pills: done steps muted, the current one in its
+// status color. Off the path (Rework, Blocked), the current status follows
+// the strip with where Promote goes from there.
+function workflowStrip(t) {
+  const wf = t.workflow;
+  if (!wf || !(wf.path || []).length) return '';
+  const at = wf.path.indexOf(t.status);
+  const pills = wf.path.map((s, i) =>
+    i === at ? statusBadge(s) : `<span class="wf-pill${i < at ? ' wf-done' : ''}">${statusLabel(s)}</span>`);
+  let html = pills.join('<span class="wf-sep">&gt;</span>');
+  if (at < 0) {
+    const next = wf.promote_to ? `<span class="wf-sep">&gt;</span><span class="wf-pill">${statusLabel(wf.promote_to)}</span>` : '';
+    html += `<span class="wf-off">${statusBadge(t.status)}${next}</span>`;
+  }
+  return `<div class="wf-strip" title="${escapeHtml(TYPE_LABELS[t.type] || t.type)} workflow">${html}</div>`;
+}
+
+// Promote / Demote buttons named for where they go. Blocked: Promote reads
+// "Unblock to …" and Demote is hidden (both return to the same status). No
+// target: the button is disabled and its tooltip says why.
+function workflowButtons(t) {
+  const wf = t.workflow, cur = statusLabel(t.status), path = wf.path || [];
+  const promote = wf.promote_to
+    ? `<button class="btn-primary" onclick="promoteTicket('${t.id}')">▲ ${t.status === 'blocked' ? 'Unblock' : 'Promote'} to ${statusLabel(wf.promote_to)}</button>`
+    : `<button class="btn-primary" disabled title="${path[path.length - 1] === t.status ? `${cur} is the last status` : `Can't promote from ${cur}`}">▲ Promote</button>`;
+  if (t.status === 'blocked') return promote;
+  const demote = wf.demote_to
+    ? `<button class="btn-secondary" onclick="demoteTicket('${t.id}')">▼ Demote to ${statusLabel(wf.demote_to)}</button>`
+    : `<button class="btn-secondary" disabled title="${path[0] === t.status ? `${cur} is the first status` : `Can't demote from ${cur}`}">▼ Demote</button>`;
+  return `${promote}\n      ${demote}`;
+}
+
 function renderTicketPanel(t) {
   panelTicket = t;
   const content = document.getElementById('panel-content');
@@ -1454,10 +1498,10 @@ function renderTicketPanel(t) {
     </div>
     </div>
     <aside class="panel-side">
+    ${workflowStrip(t)}
     <div class="panel-actions">
-      ${WORKFLOW_TYPES.includes(t.type) ? `
-      <button class="btn-primary" onclick="promoteTicket('${t.id}')">▲ Promote</button>
-      <button class="btn-secondary" onclick="demoteTicket('${t.id}')">▼ Demote</button>
+      ${t.workflow ? `
+      ${workflowButtons(t)}
       ${t.status !== 'blocked' ? `<button class="btn-secondary" onclick="blockTicket('${t.id}','${(t.title||'').replace(/'/g, "\\'")}')">⛔ Block</button>` : ''}` : ''}
       ${t.status !== 'closed' ? `<button class="btn-secondary" onclick="forceCloseTicket('${t.id}','${(t.title||'').replace(/'/g, "\\'")}')" title="Skip the workflow and close this ticket with a reason">⏩ Force close</button>` : ''}
       <button class="btn-secondary" onclick="showCommentBox('${t.id}')">💬 Comment</button>

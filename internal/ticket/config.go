@@ -288,6 +288,70 @@ func GetWorkflowForType(ticketType string) (TypeWorkflow, bool) {
 	return wf, ok
 }
 
+// WorkflowPath returns a workflow's main line: not_started, then each Promote
+// target in turn until there is no next status. Side states (blocked, rework)
+// are never reached from not_started, so they stay off the path.
+func WorkflowPath(wf TypeWorkflow) []string {
+	path := []string{"not_started"}
+	seen := map[string]bool{"not_started": true}
+	for cur := "not_started"; ; {
+		next, ok := wf.Promote[cur]
+		if !ok || next == "_previous" || seen[next] {
+			return path
+		}
+		path = append(path, next)
+		seen[next] = true
+		cur = next
+	}
+}
+
+// promoteTarget / demoteTarget are where Promote / Demote move a ticket from its
+// current status, with "_previous" resolved from the activity log. ok is false
+// when the workflow has no transition from that status.
+func promoteTarget(wf TypeWorkflow, t *Ticket) (string, bool) {
+	return resolveTarget(wf.Promote, t)
+}
+
+func demoteTarget(wf TypeWorkflow, t *Ticket) (string, bool) {
+	return resolveTarget(wf.Demote, t)
+}
+
+func resolveTarget(transitions map[string]string, t *Ticket) (string, bool) {
+	next, ok := transitions[t.Status]
+	if !ok {
+		return "", false
+	}
+	if next == "_previous" {
+		next = resolvePrevious(t)
+	}
+	return next, true
+}
+
+// WorkflowView is the computed "workflow" object on a ticket read: where
+// Promote and Demote would move it now, and the type's main path. Never stored.
+type WorkflowView struct {
+	PromoteTo *string  `json:"promote_to"`
+	DemoteTo  *string  `json:"demote_to"`
+	Path      []string `json:"path"`
+}
+
+// TicketWorkflow returns the ticket's WorkflowView, or nil for types with no
+// workflow (meeting, administration).
+func TicketWorkflow(t *Ticket) *WorkflowView {
+	wf, ok := GetWorkflowForType(t.Type)
+	if !ok {
+		return nil
+	}
+	v := &WorkflowView{Path: WorkflowPath(wf)}
+	if next, ok := promoteTarget(wf, t); ok {
+		v.PromoteTo = &next
+	}
+	if prev, ok := demoteTarget(wf, t); ok {
+		v.DemoteTo = &prev
+	}
+	return v
+}
+
 // DefaultConfig returns a new default project config matching Python's default_config().
 func DefaultConfig(client, projectName, projectID, prefix string) *ProjectConfig {
 	if prefix == "" {
