@@ -404,7 +404,7 @@ func TestHeaderAndHelp(t *testing.T) {
 			t.Errorf("Help does not mention %q", want)
 		}
 	}
-	if config.AppVersion != "1.0.11" { // HATE-cwuo: the blocks build is v1.0.11
+	if config.AppVersion != "1.0.12" { // HATE-90vq: the Excel export / ticket modal build is v1.0.12
 		t.Errorf("AppVersion = %s", config.AppVersion)
 	}
 }
