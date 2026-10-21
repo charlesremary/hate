@@ -33,7 +33,7 @@ func exportFixture() []*ticket.Ticket {
 func TestTicketsSheet(t *testing.T) {
 	tickets := exportFixture()
 	ctx := NewEstimateContext(tickets, 1, nil)
-	b, err := ProjectWorkbook(tickets, ctx)
+	b, err := ProjectWorkbook(tickets, ctx, nil, nil, "Projected from 2026-11-02, not baselined")
 	if err != nil {
 		t.Fatal(err)
 	}

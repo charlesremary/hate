@@ -12,7 +12,8 @@ import (
 )
 
 // The Excel export (GET /api/projects/{id}/export.xlsx): one workbook with a
-// Tickets sheet (every ticket and its current state) for PMs who report to
+// Tickets sheet (every ticket and its current state) and a Gantt sheet (the
+// schedule as a colored cell grid, export_gantt.go), for PMs who report to
 // clients in Excel. Written by the package's own xlsx writer (xlsx.go).
 
 // statusLabels and typeLabels mirror STATUS_LABELS / TYPE_LABELS in
@@ -51,10 +52,14 @@ var ticketsSheetHeaders = []string{
 // ticketsSheetWidths are the column widths in characters (Title ~60).
 var ticketsSheetWidths = []float64{12, 60, 14, 20, 10, 24, 22, 12, 14, 6, 11, 10, 13, 12, 22, 9, 40}
 
-// ProjectWorkbook builds the project's Excel export as .xlsx bytes.
-func ProjectWorkbook(tickets []*ticket.Ticket, ctx EstimateContext) ([]byte, error) {
+// ProjectWorkbook builds the project's Excel export as .xlsx bytes. snapshot
+// is the schedule the Gantt sheet charts (the one the draw.io export uses),
+// blocks the project's planning blocks (may be empty), and scheduleNote the
+// line above the grid saying which schedule it is.
+func ProjectWorkbook(tickets []*ticket.Ticket, ctx EstimateContext, snapshot *Snapshot, blocks []Block, scheduleNote string) ([]byte, error) {
 	wb := newXLSXWorkbook()
 	addTicketsSheet(wb, tickets, ctx)
+	addGanttSheet(wb, snapshot, blocks, scheduleNote)
 	return wb.bytes()
 }
 

@@ -180,6 +180,20 @@ func getGanttDrawio(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	snapshot, blocks, _ := ganttSchedule(r, projectID, root, tickets)
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-gantt.drawio"`, projectID))
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(pm.RenderGanttDrawio(snapshot, blocks)))
+}
+
+// ganttSchedule returns the schedule the Gantt exports chart (draw.io and the
+// Excel Gantt sheet): the latest baselined snapshot if there is one,
+// otherwise the floating projected schedule from ?start= (default today), so
+// export works pre-baseline too. Also the planning blocks and a note naming
+// the schedule ("Baseline of <date>" / "Projected from <start>, not
+// baselined").
+func ganttSchedule(r *http.Request, projectID, root string, tickets []*ticket.Ticket) (*pm.Snapshot, []pm.Block, string) {
 	projectName := projectID
 	cfg, cerr := ticket.ReadConfig(root)
 	var resources []ticket.Resource
@@ -193,20 +207,25 @@ func getGanttDrawio(w http.ResponseWriter, r *http.Request) {
 	}
 	estCtx := pm.ProjectEstimateContext(root, tickets, cfg)
 	blocks := pm.BlocksForProject(cfg, tickets, estCtx, time.Now())
-	// Baselined snapshot if there is one; otherwise the floating projected
-	// schedule from ?start= (default today), so export works pre-baseline too.
 	snapshot, err := pm.LoadLatestSnapshot(root)
-	if err != nil || snapshot == nil {
-		snapshot, _ = pm.ProjectSchedule(projectID, projectName, tickets, resources, estCtx, ganttStart(r))
+	if err == nil && snapshot != nil {
+		date := pm.ReadPlanStatus(root).BaselineDate
+		if date == "" {
+			date = snapshot.SnapshotDate
+		}
+		if len(date) > 10 {
+			date = date[:10]
+		}
+		return snapshot, blocks, "Baseline of " + date
 	}
-	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-gantt.drawio"`, projectID))
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(pm.RenderGanttDrawio(snapshot, blocks)))
+	start := ganttStart(r)
+	snapshot, _ = pm.ProjectSchedule(projectID, projectName, tickets, resources, estCtx, start)
+	return snapshot, blocks, "Projected from " + start.Format("2006-01-02") + ", not baselined"
 }
 
 // getExportXLSX handles GET /api/projects/{projectId}/export.xlsx — the
-// project as an Excel workbook (download): a Tickets sheet with every ticket.
+// project as an Excel workbook (download): a Tickets sheet with every ticket
+// and a Gantt sheet charting the same schedule as gantt.drawio.
 func getExportXLSX(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
@@ -223,7 +242,8 @@ func getExportXLSX(w http.ResponseWriter, r *http.Request) {
 		cfg = nil
 	}
 	estCtx := pm.ProjectEstimateContext(root, tickets, cfg)
-	data, err := pm.ProjectWorkbook(tickets, estCtx)
+	snapshot, blocks, note := ganttSchedule(r, projectID, root, tickets)
+	data, err := pm.ProjectWorkbook(tickets, estCtx, snapshot, blocks, note)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
