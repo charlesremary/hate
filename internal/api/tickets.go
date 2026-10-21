@@ -607,6 +607,22 @@ func handleEditTicket(w http.ResponseWriter, r *http.Request) {
 	respondTicket(w, tk, commitTicket(root, ticketID, req.Field+" updated"))
 }
 
+// statusAuthor returns the author for a status change: the JSON body's
+// "author" when present and non-empty, else ?author=. A missing, empty or
+// non-JSON body is tolerated, so callers using either convention are recorded.
+func statusAuthor(r *http.Request) string {
+	var req struct {
+		Author string `json:"author"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if req.Author != "" {
+		return req.Author
+	}
+	return r.URL.Query().Get("author")
+}
+
 // handlePromoteTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/promote
 func handlePromoteTicket(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
@@ -617,7 +633,7 @@ func handlePromoteTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ticket.LockProject(root)()
 
-	author := r.URL.Query().Get("author")
+	author := statusAuthor(r)
 	tk, err := ticket.Promote(root, ticketID, author)
 	if err != nil {
 		if errors.Is(err, ticket.ErrNeedsTimeLog) {
@@ -658,7 +674,7 @@ func handleDemoteTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ticket.LockProject(root)()
 
-	author := r.URL.Query().Get("author")
+	author := statusAuthor(r)
 	tk, err := ticket.Demote(root, ticketID, author)
 	if err != nil {
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
@@ -838,6 +854,9 @@ func handleForceCloseTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	if !decodeJSON(w, r, &req) {
 		return
+	}
+	if req.Author == "" {
+		req.Author = r.URL.Query().Get("author")
 	}
 	tk, err := ticket.ForceClose(root, ticketID, req.Reason, req.Author)
 	if err != nil {

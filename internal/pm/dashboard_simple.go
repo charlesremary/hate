@@ -169,7 +169,7 @@ tr:hover td { background: #f5f5f5; }
         %s
     </div>
     <div class="card">
-        <div class="card-value" style="color:#66bb6a">%d%%</div>
+        <div class="card-value" style="color:#15803d">%d%%</div>
         <div class="card-label">Complete</div>
     </div>
     <div class="card">

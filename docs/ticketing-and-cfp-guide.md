@@ -799,10 +799,10 @@ Conventions:
 
 | Method & path | What it does | Body / params |
 |---|---|---|
-| `POST …/tickets/{ticketId}/promote` | Advance status along the type's workflow. Gated on logged time in work statuses. The first promote out of `not_started` runs the class/estimate checks in §3 (422 on failure). | `?author=` optional |
-| `POST …/tickets/{ticketId}/demote` | Move status back one step. | `?author=` optional |
-| `POST …/tickets/{ticketId}/block` | Set status to `blocked`. | `?author=` optional |
-| `POST …/tickets/{ticketId}/force-close` | Skip the workflow to `closed`, recording a reason (marks it descoped/cancelled). | `{reason, author?}` |
+| `POST …/tickets/{ticketId}/promote` | Advance status along the type's workflow. Gated on logged time in work statuses. The first promote out of `not_started` runs the class/estimate checks in §3 (422 on failure). | optional `?author=` or `{author}` (body wins) |
+| `POST …/tickets/{ticketId}/demote` | Move status back one step. | optional `?author=` or `{author}` (body wins) |
+| `POST …/tickets/{ticketId}/block` | Set status to `blocked`. | optional `{reason, author}`; `?author=` also accepted (body wins) |
+| `POST …/tickets/{ticketId}/force-close` | Skip the workflow to `closed`, recording a reason (marks it descoped/cancelled). | `{reason, author?}`; `?author=` also accepted |
 | `POST …/tickets/{ticketId}/comment` | Add a comment to the activity log. | `{message, author?}` |
 | `POST …/tickets/{ticketId}/time` | Log a time entry (hours round to 0.25). | `{date, hours, description, author?}` |
 | `DELETE …/tickets/{ticketId}/time/{entryId}` | Delete a time entry. | — |
