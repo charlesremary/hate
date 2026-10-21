@@ -162,6 +162,15 @@ Other rules:
   workflow, for dropped/duplicate/out-of-scope work. It requires a reason
   (≥5 chars), which is stored in `cancellation_reason`.
 
+`GET /api/projects/{projectId}/tickets/{ticketId}` (and every ticket write
+response) returns a computed `workflow` object, never stored:
+`{"promote_to": "qa_testing", "demote_to": "in_progress", "path": ["not_started", …, "closed"]}`.
+`promote_to` / `demote_to` are where Promote / Demote would move the ticket now
+(`_previous` already resolved, `null` when there is no transition); `path` is the
+type's main line. Agents can read the next status before promoting. Meeting and
+administration tickets have no `workflow` key. The ticket panel uses it to name
+the buttons ("▲ Promote to QA Testing") and draw the status path strip.
+
 ## Operations
 
 All mutations go through `internal/ticket` and are recorded in the ticket's
