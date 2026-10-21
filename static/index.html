@@ -323,6 +323,7 @@
             <a href="#help-time">4. Logging time &amp; billing</a>
             <a href="#help-predecessors">5. Predecessors</a>
             <a href="#help-pm">6. For Project Managers</a>
+            <a href="#help-finish-dates">6a. Two finish dates</a>
             <a href="#help-cosmic">7. Sizing &amp; estimating (COSMIC)</a>
             <a href="#help-team">8. Team &amp; Identity</a>
             <a href="#help-blocks">9. Planning in blocks</a>
@@ -779,6 +780,67 @@
               finish dates over time against a dashed requested-end line. A line climbing toward or
               past the requested end is the early warning. Business days throughout; flat daily
               capacity (no holidays).</p>
+
+            <h3 id="help-finish-dates">Two finish dates: why they differ</h3>
+            <p>A baselined project's PM Dashboard shows two finish dates, and they often disagree.
+              They aren't two answers to one question; they answer two different questions.</p>
+            <ul>
+              <li><strong>Projected finish (likely)</strong> and <strong>(P85)</strong>, on
+                <em>Schedule vs request</em>, ask: <em>given who is on the team and how much work is
+                left, when does it end?</em> hate takes the estimated hours still open on every
+                ticket, hands each person their tickets in dependency order at their daily hours,
+                and finds the day the last one ends. It knows about people and capacity: two people
+                with 40 hours each finish sooner than one person with 80. It does not look at how
+                fast work has gone so far, only at what's left and who will do it.</li>
+              <li><strong>Projected end (velocity)</strong>, the summary card and the task table's
+                <em>Projected End</em> column, asks: <em>at the pace we've actually finished work
+                since the baseline started, when does it end?</em> It compares the planned days of the
+                tasks finished so far with the calendar days elapsed. If that's half the plan's pace,
+                every unfinished task is assumed to take twice its planned days, chained after its
+                predecessors. It knows nothing about people or hours. Until a task finishes, the pace
+                is assumed to be on plan, so early on it simply repeats the baseline.</li>
+            </ul>
+            <p><strong>Reading a gap between them.</strong></p>
+            <ul>
+              <li><strong>Velocity date later than the likely finish:</strong> work has been finishing
+                more slowly than planned, or finished work hasn't been promoted to complete yet. Check
+                for stale tickets first; if the pace is real, the remaining estimates are probably
+                too low too.</li>
+              <li><strong>Likely finish later than the velocity date:</strong> the pace so far looks
+                fine, but the hours left don't fit the people available (one person overloaded, or
+                more work than the plan had). The Load table shows who.</li>
+              <li><strong>Which to use:</strong> commit to a client on the <strong>P85</strong>
+                finish. Use the velocity date as the reality check on the plan's pace. When the two
+                are far apart, that's the conversation to have before the client asks.</li>
+            </ul>
+            <p><strong>Monte Carlo in plain language.</strong> Any single estimate is a guess. Instead
+              of one guess, hate plays the project out <strong>10,000 times</strong> on paper. In each
+              run, every feature's code hours are its size (CFP) &times; a rate picked at random from
+              how fast comparable finished features really went, so some runs are lucky, some are
+              unlucky, and most land in between, just like real projects. The platform wrap (config
+              and non-functional tickets) is added as estimated. Then the 10,000 totals are lined up
+              from smallest to largest:</p>
+            <ul>
+              <li><strong>P50</strong>: half the runs needed fewer hours, half needed more. A coin
+                flip: commit to it and you're late about half the time.</li>
+              <li><strong>P85</strong>: 85 of every 100 runs finished within it. Roughly an
+                <strong>85% chance of finishing on or before it</strong>, and about a 1-in-7 chance of
+                running over.</li>
+              <li><strong>P95</strong>: 95 of every 100 runs finished within it; about a 1-in-20
+                chance of running over. Use it when being late is expensive.</li>
+            </ul>
+            <p><strong>How P85 becomes a date.</strong> The card takes the ratio of code P85 to code
+              P50 (shown in its footnote, e.g. &times;1.38), scales the code tickets' hours by it, and
+              runs the same people-and-capacity schedule again. So <em>"P85 finish: Mar 3"</em> reads
+              as <em>"about an 85% chance we finish by Mar 3, if the team, the scope and the wrap
+              estimates hold."</em> <strong>ON TRACK</strong> means that date is on or before the
+              requested end.</p>
+            <p><strong>What it doesn't know.</strong> The simulation is only as good as the
+              reference features it learns from (see <em>The estimate &mdash; Monte Carlo</em> in
+              section 7). It doesn't vary the wrap estimates, and it doesn't model holidays, sick days,
+              people joining or leaving, or scope added later: add the tickets and the dates update.
+              The numbers use a fixed random seed, so they don't jump around on reload; they change
+              only when the tickets, hours or references do.</p>
 
             <h3>Closing a project</h3>
             <p>When a project is finished — or paused indefinitely — open

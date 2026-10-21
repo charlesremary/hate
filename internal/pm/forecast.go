@@ -327,7 +327,7 @@ func RenderForecastHTML(rep ForecastReport, history []ForecastHistoryEntry) stri
 <div style="display:flex;flex-wrap:wrap;gap:14px 28px">%s</div>
 <p class="forecast-needs" style="font-size:13px;color:#333;margin:12px 0 0">%s%s%s</p>
 %s
-<p style="font-size:12px;color:#666;margin:8px 0 0">Likely = the capacity-aware schedule from %s. P85 = the same schedule with code tickets at the Monte Carlo P85 rate (&times;%.2f). ON TRACK: P85 by the requested end; AT RISK: likely on time, P85 late; LATE: likely late. Business days, flat daily capacity (no holidays).</p>`,
+<p style="font-size:12px;color:#666;margin:8px 0 0">Likely = the capacity-aware schedule from %s. P85 = the same schedule with code tickets at the Monte Carlo P85 rate (&times;%.2f). ON TRACK: P85 by the requested end; AT RISK: likely on time, P85 late; LATE: likely late. Business days, flat daily capacity (no holidays). On a baselined project, the Projected end (velocity) further down uses a different method; see Help &rsaquo; Two finish dates.</p>`,
 		header, forecastStatusBadge(rep.Status), cells.String(), needs, fit, unsized,
 		renderForecastTrend(history), esc(fmtNiceDate(rep.ScheduleStart)), rep.P85Factor)
 	return wrap(inner)

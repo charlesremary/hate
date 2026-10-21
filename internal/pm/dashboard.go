@@ -136,7 +136,7 @@ func renderStatusPanel(snapshot *Snapshot) string {
       </div>
       <div class="card">
         <div class="card-value" style="color:%s">%s</div>
-        <div class="card-label">Projected end</div>
+        <div class="card-label">Projected end (velocity)</div>
       </div>
     </div>`,
 		hcolor, hlabel,
