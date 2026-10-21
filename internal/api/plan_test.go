@@ -404,7 +404,7 @@ func TestHeaderAndHelp(t *testing.T) {
 			t.Errorf("Help does not mention %q", want)
 		}
 	}
-	if config.AppVersion != "1.0.13" { // HATE-7jf1/5h48: the author + contrast follow-up build is v1.0.13
+	if config.AppVersion != "1.0.14" { // HATE-3j7k: the filter pick-list fix build is v1.0.14
 		t.Errorf("AppVersion = %s", config.AppVersion)
 	}
 }

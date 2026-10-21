@@ -682,15 +682,20 @@ async function loadTickets() {
     if (phase) params.push(`phase=${encodeURIComponent(phase)}`);
     if (params.length) url += '?' + params.join('&');
 
-    const [tickets, wo] = await Promise.all([
+    // The pick lists come from the unfiltered list, so picking a phase (or
+    // status/type) doesn't shrink them to what's showing (HATE-3j7k).
+    const allUrl = `/api/projects/${currentProject.id}/tickets`;
+    const [tickets, wo, unfiltered] = await Promise.all([
       API.get(url),
       API.get(`/api/projects/${currentProject.id}/ready`).catch(() => null),
+      params.length ? API.get(allUrl) : null,
     ]);
     allTickets = tickets;
     workOrder = wo;
-    populatePhaseFilter(allTickets);
-    populateTagFilter(allTickets);
-    populateAssigneeFilter(allTickets);
+    const pickFrom = unfiltered || tickets;
+    populatePhaseFilter(pickFrom);
+    populateTagFilter(pickFrom);
+    populateAssigneeFilter(pickFrom);
     renderMigrationBanner();
     renderTickets();
   } catch (e) {
