@@ -290,10 +290,6 @@ function statusBadge(s) {
   return `<span class="badge s-${s}">${STATUS_LABELS[s] || s}</span>`;
 }
 
-function priorityCell(p) {
-  return `<span class="p-${p}">${p || '—'}</span>`;
-}
-
 function resolveResourceName(emailOrName) {
   if (!emailOrName) return '—';
   const r = projectResources.find(r => r.email === emailOrName);
@@ -312,7 +308,7 @@ async function loadProjects() {
         ? 'All projects are closed. Toggle "Show closed projects" above to see them.'
         : 'No projects found.<br>Create one or check Settings.';
       nav.innerHTML = `<div class="loading">${hint}</div>`;
-      return;
+      return all;
     }
     // Group projects by client
     const grouped = {};
@@ -339,6 +335,7 @@ async function loadProjects() {
     nav.querySelectorAll('.project-item').forEach(el => {
       el.addEventListener('click', () => selectProject(el.dataset.id, el.dataset.path, projects.find(p => p.id === el.dataset.id)));
     });
+    return all;
   } catch (e) {
     nav.innerHTML = `<div class="loading">Error: ${e.message}</div>`;
   }
@@ -1058,13 +1055,21 @@ document.getElementById('filter-sort').addEventListener('change', (e) => {
   renderTickets();
 });
 
-// ── Ticket detail panel ──────────────────────────────
+// ── Ticket detail modal ──────────────────────────────
+// A large in-page modal: content on the left, actions + fields on the right.
+// Opening sets #ticket/<ID> so the URL is a deep link (and "open in new tab").
+const TICKET_HASH_PREFIX = '#ticket/';
+
 async function openTicketPanel(ticketId) {
   pendingPromoteAfterLog = null; // scope any gated-promote intent to one panel session
-  const panel = document.getElementById('ticket-panel');
-  panel.classList.remove('hidden');
+  document.getElementById('ticket-modal-overlay').classList.remove('hidden');
   document.getElementById('panel-ticket-id').textContent = ticketId;
-  document.getElementById('panel-content').innerHTML = '<p style="color:#999;padding:16px">Loading…</p>';
+  document.getElementById('panel-ticket-title').textContent = '';
+  const content = document.getElementById('panel-content');
+  content.innerHTML = '<p style="color:#999;padding:16px">Loading…</p>';
+  content.scrollTop = 0;
+  // replaceState, not location.hash: no history entry per ticket, no hashchange loop.
+  history.replaceState(null, '', TICKET_HASH_PREFIX + ticketId);
 
   try {
     const t = await API.get(`/api/projects/${currentProject.id}/tickets/${ticketId}`);
@@ -1073,6 +1078,83 @@ async function openTicketPanel(ticketId) {
     document.getElementById('panel-content').innerHTML = `<p style="color:red">${e.message}</p>`;
   }
 }
+
+function isTicketPanelOpen() {
+  return !document.getElementById('ticket-modal-overlay').classList.contains('hidden');
+}
+
+function closeTicketPanel() {
+  pendingPromoteAfterLog = null;
+  document.getElementById('ticket-modal-overlay').classList.add('hidden');
+  if (location.hash.startsWith(TICKET_HASH_PREFIX)) {
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+}
+
+// The ticket ids in the list's current filter and sort order, read from the
+// rendered rows so Up/Down always match what's on screen.
+function visibleTicketOrder() {
+  const sel = ticketView === 'plan' ? '#ticket-plan .wo-row' : '#ticket-tbody tr[data-id]';
+  return [...document.querySelectorAll(sel)].map(el => el.dataset.id);
+}
+
+// Up/Down: open the previous/next ticket in the list without closing the modal.
+// Returns false when there's nowhere to go (not in the list, or at an end).
+function stepTicketPanel(delta) {
+  if (!panelTicket) return false;
+  const ids = visibleTicketOrder();
+  const i = ids.indexOf(panelTicket.id);
+  const next = i < 0 ? null : ids[i + delta];
+  if (!next) return false;
+  openTicketPanel(next);
+  return true;
+}
+
+// Another modal (block, force close, time extension…) is open on top.
+function otherModalOpen() {
+  return [...document.querySelectorAll('[id$="-overlay"]')]
+    .some(el => el.id !== 'ticket-modal-overlay' && !el.classList.contains('hidden'));
+}
+
+document.getElementById('btn-close-panel').addEventListener('click', closeTicketPanel);
+document.getElementById('ticket-modal-overlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('ticket-modal-overlay')) closeTicketPanel();
+});
+document.addEventListener('keydown', (e) => {
+  if (!isTicketPanelOpen() || otherModalOpen()) return;
+  if (e.key === 'Escape') { closeTicketPanel(); return; }
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+  if (stepTicketPanel(e.key === 'ArrowDown' ? 1 : -1)) e.preventDefault();
+});
+
+// Deep link: #ticket/<ID> opens that ticket's project, then the ticket. The
+// prefix isn't unique across projects, so try each project with that prefix
+// (the current one first) until the ticket is found.
+async function openTicketFromHash(projects) {
+  if (!location.hash.startsWith(TICKET_HASH_PREFIX)) return;
+  const id = decodeURIComponent(location.hash.slice(TICKET_HASH_PREFIX.length)).trim();
+  const cut = id.lastIndexOf('-');
+  if (cut <= 0) return;
+  const prefix = id.slice(0, cut);
+  const candidates = (projects || [])
+    .filter(p => p.prefix === prefix || p.id === prefix)
+    .sort((a, b) => (currentProject && b.id === currentProject.id) - (currentProject && a.id === currentProject.id)
+      || (b.id === prefix) - (a.id === prefix));
+  for (const p of candidates) {
+    try { await API.get(`/api/projects/${p.id}/tickets/${id}`); } catch { continue; }
+    if (!currentProject || currentProject.id !== p.id) await selectProject(p.id, p.path, p);
+    openTicketPanel(id);
+    return;
+  }
+  showToast(`Ticket ${id} not found`, 'error');
+}
+window.addEventListener('hashchange', async () => {
+  if (!location.hash.startsWith(TICKET_HASH_PREFIX)) return;
+  try { openTicketFromHash(await API.get('/api/projects')); } catch { /* sidebar shows the error */ }
+});
 
 // ── Estimation: class + estimate_hours ───────────────
 // Class tags stay functional / config / nonfunc; the UI labels them Code /
@@ -1249,10 +1331,12 @@ function renderTicketPanel(t) {
   const content = document.getElementById('panel-content');
   const typeOptions = TYPE_VALUES.map(v =>
     `<option value="${v}" ${t.type===v?'selected':''}>${TYPE_LABELS[v]}</option>`).join('');
+  const priorityOptions = Object.keys(PRIORITY_ORDER).map(v =>
+    `<option value="${v}" ${t.priority===v?'selected':''}>${v}</option>`).join('');
   const fields = [
     ['Type', `<select class="inline-edit" onchange="editField('${t.id}','type',this.value)">${typeOptions}</select>`],
     ['Status', statusBadge(t.status)],
-    ['Priority', priorityCell(t.priority)],
+    ['Priority', `<select class="inline-edit p-${t.priority}" onchange="editField('${t.id}','priority',this.value)">${priorityOptions}</select>`],
     ['Class', classEditor(t)], ['Estimate', estimateEditor(t)],
     ['Assignee', resolveResourceName(t.assignee)], ['Creator', resolveResourceName(t.creator)],
     ['Due date', t.due_date || '—'], ['Planned start', t.planned_start_date || '—'],
@@ -1340,18 +1424,36 @@ function renderTicketPanel(t) {
       </details>
     </div>`;
 
+  document.getElementById('panel-ticket-title').textContent = t.title || '';
+  // Left: what the ticket is (description, children, test cases, time, history).
+  // Right (sticky): what you can do to it, then its fields.
   content.innerHTML = `
+    <div class="panel-cols">
+    <div class="panel-main">
     <div class="panel-section">
       <h4>${t.title} <span class="time-badge">${totalHours.toFixed(2)}h</span></h4>
       ${cancelBanner}
       ${t.description ? `<div class="md" style="margin-top:8px">${renderMarkdown(t.description)}</div>` : ''}
     </div>
-    <div class="panel-section">
-      <div id="panel-estimate-alert"></div>
-      ${fields.map(([l, v]) => `<div class="field-row"><span class="field-label">${l}</span><span class="field-value">${v}</span></div>`).join('')}
-    </div>
     ${childrenSection}
     ${testCasesSection}
+    <div class="panel-section" style="margin-top:20px">
+      <h4>Time Entries</h4>
+      <table class="time-table">
+        <thead><tr><th>Date</th><th>Hours</th><th>Description</th><th></th></tr></thead>
+        <tbody>${timeRows}</tbody>
+      </table>
+    </div>
+    <div class="panel-section" style="margin-top:20px">
+      <h4>Attachments <span style="font-size:12px;color:#999;font-weight:normal">(max 25 MB each)</span></h4>
+      ${renderAttachments(t)}
+    </div>
+    <div class="panel-section" style="margin-top:20px">
+      <h4>Activity</h4>
+      <ul class="activity-list">${activity || '<li class="activity-item">No activity yet.</li>'}</ul>
+    </div>
+    </div>
+    <aside class="panel-side">
     <div class="panel-actions">
       ${WORKFLOW_TYPES.includes(t.type) ? `
       <button class="btn-primary" onclick="promoteTicket('${t.id}')">▲ Promote</button>
@@ -1379,20 +1481,11 @@ function renderTicketPanel(t) {
         <button class="btn-primary" style="margin-top:8px" onclick="submitTimeEntry('${t.id}')">Log Time</button>
       </div>
     </div>
-    <div class="panel-section" style="margin-top:20px">
-      <h4>Time Entries</h4>
-      <table class="time-table">
-        <thead><tr><th>Date</th><th>Hours</th><th>Description</th><th></th></tr></thead>
-        <tbody>${timeRows}</tbody>
-      </table>
+    <div class="panel-section" style="margin-top:16px">
+      <div id="panel-estimate-alert"></div>
+      ${fields.map(([l, v]) => `<div class="field-row"><span class="field-label">${l}</span><span class="field-value">${v}</span></div>`).join('')}
     </div>
-    <div class="panel-section" style="margin-top:20px">
-      <h4>Attachments <span style="font-size:12px;color:#999;font-weight:normal">(max 25 MB each)</span></h4>
-      ${renderAttachments(t)}
-    </div>
-    <div class="panel-section" style="margin-top:20px">
-      <h4>Activity</h4>
-      <ul class="activity-list">${activity || '<li class="activity-item">No activity yet.</li>'}</ul>
+    </aside>
     </div>`;
   // After innerHTML is replaced, wire the drop-zone events for this ticket.
   wireAttachmentDropZone(t.id);
@@ -1729,10 +1822,6 @@ async function deleteTimeEntry(ticketId, entryId) {
     renderTicketPanel(t);
   } catch (e) { showToast(e.message, 'error'); }
 }
-
-document.getElementById('btn-close-panel').addEventListener('click', () => {
-  document.getElementById('ticket-panel').classList.add('hidden');
-});
 
 // ── Dashboard ─────────────────────────────────────────
 function loadDashboard() {
@@ -3153,7 +3242,8 @@ async function initTabVisibility() {
   applyBillingVisibility();
 }
 
-loadProjects();
+// A #ticket/<ID> deep link opens once the project list is in.
+loadProjects().then(openTicketFromHash);
 initTabVisibility();
 
 // ── Git account (Settings) ───────────────────────────

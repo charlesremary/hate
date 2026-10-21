@@ -1128,13 +1128,16 @@
       </div>
     </main>
 
-    <!-- Ticket detail / edit panel -->
-    <div id="ticket-panel" class="side-panel hidden">
-      <div class="panel-header">
-        <h3 id="panel-ticket-id"></h3>
-        <button class="icon-btn" id="btn-close-panel">✕</button>
+    <!-- Ticket detail / edit modal (two columns; deep link #ticket/<ID>) -->
+    <div id="ticket-modal-overlay" class="hidden">
+      <div id="ticket-panel" role="dialog" aria-modal="true" aria-labelledby="panel-ticket-id">
+        <div class="panel-header">
+          <h3><span id="panel-ticket-id"></span> <span id="panel-ticket-title"></span></h3>
+          <span class="panel-nav-hint" title="Up / Down open the previous / next ticket in the list">↑ ↓ prev / next · Esc close</span>
+          <button class="icon-btn" id="btn-close-panel" title="Close (Esc)">✕</button>
+        </div>
+        <div id="panel-content"></div>
       </div>
-      <div id="panel-content"></div>
     </div>
 
     <!-- Phase rollup modal -->
