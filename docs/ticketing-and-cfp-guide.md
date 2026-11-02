@@ -1039,3 +1039,67 @@ per ticket), promote each as it finishes (§3 still applies: log time, test
 cases), then pull `/ready` again: the `next` tickets are now ready. Repeat
 until `ready` is empty. Blocked tickets never show as ready; unblock them
 first.
+
+## 15. Using hate from an MCP client
+
+The running hate app serves an MCP server (protocol 2026-07-28, older
+revisions accepted) at `http://127.0.0.1:<port>/mcp`, port 8000 by default.
+Through it an agent gets typed tools instead of hand-written curl calls, with
+exactly the REST API's behavior: the same project lock, promote gates, strict
+time, closed-project block and auto-commit.
+
+Register it once in Claude Code (any directory; `--scope user` makes it
+available in every project):
+
+```
+claude mcp add --transport http --scope user hate http://127.0.0.1:8000/mcp
+claude mcp list        # hate: http://127.0.0.1:8000/mcp (HTTP) - Connected
+```
+
+Other clients: add an MCP server of type "http" / "streamable HTTP" with that
+URL. Clients that only speak stdio aren't supported yet.
+
+Rules of the road:
+
+- **hate must be running.** The MCP server lives inside the app (so it shares
+  the project lock with the UI); when hate isn't running the client shows the
+  server as failed. Start hate and reconnect (`/mcp` in Claude Code).
+- **Local only.** Requests from other machines get 403, even with
+  `-listen 0.0.0.0`. No token. Start with `-no-mcp` (or `HATE_NO_MCP=1`) to
+  turn the endpoint off.
+- **Author** defaults to the project's git identity; pass `author` to record
+  someone else.
+- **`project`** takes an id, folder name or ticket prefix (`HATE`). Ticket tools
+  can leave it out: it's taken from the ticket id.
+- **Errors** an agent can act on come back as tool errors whose text is JSON
+  with an `error` code and, where useful, a `next` hint: `needs_time_log`
+  (log time, then retry), `estimate_invalid` (§3), `needs_time_extension` (ask
+  the user, retry with `extend_authorized` + `extend_reason`), `project_closed`,
+  `not_found`, `ambiguous_project` (with `candidates`), `invalid_input`.
+
+Tools (all named `hate_*`):
+
+| Tool | Does |
+|---|---|
+| `hate_list_projects` | Projects with id, prefix, folder, closed flag, ticket count. |
+| `hate_get_project` | Gates (strict time, enforce-QA), `block_weeks`, team. |
+| `hate_search_tickets` | Search every project by ticket id or title. |
+| `hate_list_tickets` | A project's tickets; filters incl. `parent` (a feature's children). |
+| `hate_get_ticket` | One ticket in full, with `workflow.promote_to`. |
+| `hate_get_ready` | The work order: ready / next / stages. |
+| `hate_create_tickets` | 1-50 tickets in one commit, with `ref` / `parent_ref` / `predecessor_refs` and inline test cases. |
+| `hate_update_ticket` | Several fields + `add_tags` / `remove_tags`, all-or-nothing. |
+| `hate_promote_ticket` · `hate_demote_ticket` | Next / previous status (gates apply). |
+| `hate_block_ticket` | Mark blocked with a reason. |
+| `hate_force_close_ticket` | Descope a ticket (destructive; not how work is finished). |
+| `hate_log_time` | Log hours with a description (date defaults to today). |
+| `hate_add_comment` · `hate_edit_comment` | Comment; fix a comment (old text kept). |
+| `hate_add_test_cases` · `hate_update_test_case` | Add cases; record pass / fail. |
+| `hate_link_tickets` | Add / remove predecessors. |
+
+Resources: `hate://guide` (this guide; `hate://guide?section=3` for one
+section) and `hate://projects/{project}/overview`.
+
+Not exposed on purpose (do them in the UI): deleting time entries or test
+cases, attachments, project create / close, settings, baselines, slips, sync,
+the Git account.

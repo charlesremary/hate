@@ -404,7 +404,7 @@ func TestHeaderAndHelp(t *testing.T) {
 			t.Errorf("Help does not mention %q", want)
 		}
 	}
-	if config.AppVersion != "1.0.18" { // HATE-z44n: the ticket-search build is v1.0.18
+	if config.AppVersion != "1.0.19" { // HATE-ry6s: the MCP server build is v1.0.19
 		t.Errorf("AppVersion = %s", config.AppVersion)
 	}
 }

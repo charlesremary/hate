@@ -196,6 +196,19 @@ All mutations go through `internal/ticket` and are recorded in the ticket's
 Every write runs `ValidateTicket` before hitting disk, and `index.json` is
 regenerated from the ticket files so listings stay in sync.
 
+## Agents: the MCP server
+
+The running app also serves an MCP server at `http://127.0.0.1:8000/mcp`
+(local connections only; `-no-mcp` turns it off), so Claude Code and other MCP
+clients work tickets with typed tools that follow the same rules as the API:
+
+```
+claude mcp add --transport http --scope user hate http://127.0.0.1:8000/mcp
+```
+
+hate has to be running for the client to connect. Tools, errors and rules:
+[agent guide §15](docs/ticketing-and-cfp-guide.md#15-using-hate-from-an-mcp-client).
+
 ## Capacity and load
 
 Nothing writes ticket dates automatically. Capacity is answered by two read-only
