@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hate/internal/pm"
+	"hate/internal/service"
 	"hate/internal/ticket"
 )
 
@@ -119,14 +120,10 @@ func getReady(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tickets, err := ticket.ReadAllTickets(root)
+	rep, err := service.Ready(root)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	cfg, err := ticket.ReadConfig(root)
-	if err != nil {
-		cfg = nil
-	}
-	respondJSON(w, http.StatusOK, pm.ComputeReady(tickets, pm.ProjectEstimateContext(root, tickets, cfg)))
+	respondJSON(w, http.StatusOK, rep)
 }

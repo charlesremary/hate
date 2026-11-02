@@ -33,6 +33,9 @@ func NewServer() *mcp.Server {
 			Resources: &mcp.ResourceCapabilities{},
 		},
 	})
+	registerReadTools(s)
+	registerWriteTools(s)
+	registerResources(s)
 	return s
 }
 
