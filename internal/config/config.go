@@ -350,12 +350,23 @@ func GetProjectPath(projectID string) (string, error) {
 		}
 	}
 
-	// Fallback: try folder name directly
+	// Fallback: a folder in the projects root with exactly this name. Matched
+	// against the directory listing, not by stat: on a case-insensitive disk
+	// (macOS, Windows) stat would accept "EST" for folder "est" and hand back
+	// a differently spelled path for the same project, which then gets its
+	// own project lock (ticket.LockProject keys on the path) and races the
+	// writers that used the real spelling. It also keeps "../x" out.
 	root := GetProjectsRoot()
-	direct := filepath.Join(root, projectID)
-	tktConfig := filepath.Join(direct, ".tkt", "config.json")
-	if _, err := os.Stat(tktConfig); err == nil {
-		return direct, nil
+	if entries, err := os.ReadDir(root); err == nil {
+		for _, e := range entries {
+			if e.Name() != projectID {
+				continue
+			}
+			direct := filepath.Join(root, e.Name())
+			if _, err := os.Stat(filepath.Join(direct, ".tkt", "config.json")); err == nil {
+				return direct, nil
+			}
+		}
 	}
 
 	// Last resort: the ticket prefix (case-insensitive), so "HATE" or "hate"
