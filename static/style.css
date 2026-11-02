@@ -296,6 +296,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 .activity-item { padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: 12px; }
 .activity-item .act-time { color: var(--text-muted); font-size: 11px; }
 .activity-item .act-detail { margin-top: 2px; }
+.activity-item .act-edited { font-style: italic; }
+.activity-item .act-edit { margin-left: 6px; font-size: 11px; color: var(--text-muted); }
+.activity-item .act-edit:hover { text-decoration: underline; }
 
 .panel-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
 .panel-actions button:disabled { opacity: .45; cursor: not-allowed; }

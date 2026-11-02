@@ -338,6 +338,18 @@ func AddComment(root, ticketID, message, author string) (*Result, error) {
 	})
 }
 
+// EditComment replaces a comment's text (keeping the old text in a
+// comment_edited activity entry). Only comment entries can be edited.
+func EditComment(root, ticketID, commentID, message, author string) (*Result, error) {
+	return mutate(root, ticketID, true, func() (*ticket.Ticket, string, error) {
+		tk, err := ticket.EditComment(root, ticketID, commentID, message, author)
+		if err != nil {
+			return nil, "", classify(err)
+		}
+		return tk, "comment " + commentID + " edited", nil
+	})
+}
+
 // LogTimeParams is one time entry to log.
 type LogTimeParams struct {
 	Date        string

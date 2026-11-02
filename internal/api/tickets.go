@@ -225,6 +225,7 @@ func RegisterTicketRoutes(r chi.Router) {
 		r.Post("/{ticketId}/block", handleBlockTicket)
 		r.Post("/{ticketId}/force-close", handleForceCloseTicket)
 		r.Post("/{ticketId}/comment", handleAddComment)
+		r.Patch("/{ticketId}/comments/{commentId}", handleEditComment)
 		r.Post("/{ticketId}/time", handleAddTimeEntry)
 		r.Delete("/{ticketId}/time/{entryId}", handleDeleteTimeEntry)
 		r.Post("/{ticketId}/test-cases", handleAddTestCase)
@@ -769,6 +770,32 @@ func handleAddComment(w http.ResponseWriter, r *http.Request) {
 	res, err := service.AddComment(root, ticketID, req.Message, strVal(req.Author))
 	if err != nil {
 		respondTicketNotFound(w, err, ticketID)
+		return
+	}
+	respondResult(w, res)
+}
+
+// handleEditComment handles PATCH /api/projects/{projectId}/tickets/{ticketId}/comments/{commentId}:
+// {message, author?}. Unknown ticket or comment id -> 404; empty message or a
+// non-comment entry -> 422.
+func handleEditComment(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	ticketID := chi.URLParam(r, "ticketId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	var req CommentRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := service.EditComment(root, ticketID, chi.URLParam(r, "commentId"), req.Message, strVal(req.Author))
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			respondError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
 	respondResult(w, res)

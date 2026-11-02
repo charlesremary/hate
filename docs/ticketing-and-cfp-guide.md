@@ -807,7 +807,8 @@ Conventions:
 | `POST …/tickets/{ticketId}/demote` | Move status back one step. | optional `?author=` or `{author}` (body wins) |
 | `POST …/tickets/{ticketId}/block` | Set status to `blocked`. | optional `{reason, author}`; `?author=` also accepted (body wins) |
 | `POST …/tickets/{ticketId}/force-close` | Skip the workflow to `closed`, recording a reason (marks it descoped/cancelled). | `{reason, author?}`; `?author=` also accepted |
-| `POST …/tickets/{ticketId}/comment` | Add a comment to the activity log. | `{message, author?}` |
+| `POST …/tickets/{ticketId}/comment` | Add a comment to the activity log. Each comment gets an `id` (`c1`, `c2`, … per ticket). | `{message, author?}` |
+| `PATCH …/tickets/{ticketId}/comments/{commentId}` | Edit a comment's text (fixing a typo or a wrong statement). Sets `edited_at` on the comment and appends a `comment_edited` entry holding the comment id and the previous text, so history is kept. Only comments can be edited (other entries → 422); empty message → 422; unknown id → 404. Comments can't be deleted. | `{message, author?}` |
 | `POST …/tickets/{ticketId}/time` | Log a time entry (hours round to 0.25). | `{date, hours, description, author?}` |
 | `DELETE …/tickets/{ticketId}/time/{entryId}` | Delete a time entry. | — |
 | `POST …/tickets/{ticketId}/test-cases` | Add one test case. | `{step, expected, author?}` |

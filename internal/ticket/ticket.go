@@ -78,6 +78,7 @@ func ReadTicket(repoRoot, ticketID string) (*Ticket, error) {
 		t.Attachments = []Attachment{}
 	}
 	NormalizeLegacy(&t)
+	normalizeCommentIDs(&t)
 	return &t, nil
 }
 
@@ -528,7 +529,8 @@ func AddComment(repoRoot, ticketID, message, author string) (*Ticket, error) {
 	if err != nil {
 		return nil, err
 	}
-	addActivity(t, author, "comment", message)
+	addActivity(t, author, ActionComment, message)
+	t.Activity[len(t.Activity)-1].ID = nextCommentID(t)
 	if err := WriteTicket(repoRoot, t); err != nil {
 		return nil, err
 	}

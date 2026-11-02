@@ -88,10 +88,15 @@ var dateRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // Activity represents a single activity log entry on a ticket.
 type Activity struct {
+	// ID is set on comments only ("c1", "c2", ... per ticket) so they can be
+	// edited; system entries have none.
+	ID        string `json:"id,omitempty"`
 	Timestamp string `json:"timestamp"`
 	Author    string `json:"author"`
 	Action    string `json:"action"`
 	Detail    string `json:"detail"`
+	// EditedAt is when a comment's text was last edited ("" if never).
+	EditedAt string `json:"edited_at,omitempty"`
 }
 
 // TimeEntry represents a logged time entry on a ticket.

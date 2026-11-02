@@ -1492,13 +1492,18 @@ function renderTicketPanel(t) {
 
   const activity = [...(t.activity || [])].reverse().slice(0, 20).map(a => {
     // Comments can be full markdown; system events are short single-line strings.
+    const isComment = a.action === 'comment';
     const detail = !a.detail ? ''
-      : a.action === 'comment'
+      : isComment
         ? `<div class="md act-md">${renderMarkdown(a.detail)}</div>`
         : ': ' + escapeAndLinkify(a.detail);
+    // Comments (which carry an id) can be edited in place; the old text is
+    // kept in a comment_edited activity entry.
+    const edited = isComment && a.edited_at ? ' <span class="act-edited" title="edited ' + escapeHtml(a.edited_at.replace('T',' ').replace('Z','')) + '">(edited)</span>' : '';
+    const editLink = isComment && a.id ? ` <a href="#" class="act-edit" onclick="startEditComment(event,'${t.id}','${a.id}')">Edit</a>` : '';
     return `
-    <li class="activity-item">
-      <div class="act-time">${a.timestamp.replace('T',' ').replace('Z','')} ${a.author ? '· ' + a.author.split('@')[0] : ''}</div>
+    <li class="activity-item"${isComment && a.id ? ` id="act-${t.id}-${a.id}"` : ''}>
+      <div class="act-time">${a.timestamp.replace('T',' ').replace('Z','')} ${a.author ? '· ' + a.author.split('@')[0] : ''}${edited}${editLink}</div>
       <div class="act-detail"><strong>${a.action}</strong>${detail}</div>
     </li>`;
   }).join('');
@@ -1872,6 +1877,34 @@ async function submitComment(id) {
   try {
     const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/comment`, { message: text, author: currentUser?.email || '' });
     showToast('Comment added');
+    renderTicketPanel(t);
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+// Swap a comment's rendered text for an editor (Save / Cancel).
+function startEditComment(ev, ticketId, commentId) {
+  ev.preventDefault();
+  const li = document.getElementById(`act-${ticketId}-${commentId}`);
+  const a = (panelTicket?.activity || []).find(x => x.id === commentId);
+  if (!li || !a) return;
+  const body = li.querySelector('.act-detail');
+  body.innerHTML = `
+    <textarea id="cmt-edit-${commentId}" rows="3" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:13px">${escapeHtml(a.detail)}</textarea>
+    <div style="margin-top:6px;display:flex;gap:6px">
+      <button class="btn-primary" onclick="saveEditComment('${ticketId}','${commentId}')">Save</button>
+      <button class="btn-secondary" onclick="renderTicketPanel(panelTicket)">Cancel</button>
+    </div>`;
+  const ta = document.getElementById(`cmt-edit-${commentId}`);
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+
+async function saveEditComment(ticketId, commentId) {
+  const text = document.getElementById(`cmt-edit-${commentId}`)?.value?.trim();
+  if (!text) { showToast("A comment can't be empty", 'error'); return; }
+  try {
+    const t = await API.patch(`/api/projects/${currentProject.id}/tickets/${ticketId}/comments/${commentId}`, { message: text, author: currentUser?.email || '' });
+    showToast('Comment updated');
     renderTicketPanel(t);
   } catch (e) { showToast(e.message, 'error'); }
 }
