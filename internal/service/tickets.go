@@ -10,7 +10,9 @@
 package service
 
 import (
+	"errors"
 	"math"
+	"sort"
 	"strings"
 
 	"hate/internal/config"
@@ -25,13 +27,32 @@ type Result struct {
 	CommitWarning string
 }
 
-// ResolveProject finds a project's root folder by project id or folder name.
+// ResolveProject finds a project's root folder by project id, folder name or
+// ticket prefix (case-insensitive). A prefix shared by two projects fails
+// with ErrAmbiguousProject (cause *config.AmbiguousProjectError).
 func ResolveProject(ref string) (string, error) {
 	path, err := config.GetProjectPath(ref)
 	if err != nil {
+		var amb *config.AmbiguousProjectError
+		if errors.As(err, &amb) {
+			return "", &Error{Kind: ErrAmbiguousProject, Msg: err.Error(), Cause: err}
+		}
 		return "", &Error{Kind: ErrNotFound, Msg: "Project not found: " + ref, Cause: err}
 	}
 	return path, nil
+}
+
+// ResolveTicketProject finds the project for a ticket: projectRef when given,
+// else the prefix of ticketID (HATE-1a3s -> HATE).
+func ResolveTicketProject(projectRef, ticketID string) (string, error) {
+	if projectRef != "" {
+		return ResolveProject(projectRef)
+	}
+	i := strings.LastIndex(ticketID, "-")
+	if i <= 0 {
+		return "", &Error{Kind: ErrInvalidInput, Msg: "can't tell the project from ticket id " + ticketID + "; pass project"}
+	}
+	return ResolveProject(ticketID[:i])
 }
 
 // checkOpen refuses writes to a closed project. The caller holds the lock.
@@ -82,6 +103,8 @@ type ListFilter struct {
 	Assignee string
 	Tag      string
 	Phase    string
+	// Parent matches tickets tagged parent:<Parent> (the children of a feature).
+	Parent string
 }
 
 // ListItem is one row of ListTickets: the index summary plus the hours-at-risk
@@ -120,6 +143,9 @@ func ListTickets(root string, f ListFilter) ([]ListItem, error) {
 			continue
 		}
 		if f.Phase != "" && strVal(t.Phase) != f.Phase {
+			continue
+		}
+		if f.Parent != "" && !ticket.Contains(t.Tags, "parent:"+f.Parent) {
 			continue
 		}
 		filtered = append(filtered, t)
@@ -229,6 +255,29 @@ func EditField(root, ticketID, field string, value interface{}, author string) (
 			return nil, "", classify(err)
 		}
 		return tk, field + " updated", nil
+	})
+}
+
+// EditFields applies several field changes plus tag additions/removals in one
+// write, one activity entry per field, one commit. All-or-nothing.
+func EditFields(root, ticketID string, fields map[string]interface{}, addTags, removeTags []string, author string) (*Result, error) {
+	return mutate(root, ticketID, true, func() (*ticket.Ticket, string, error) {
+		if v, ok := fields["effort"]; ok && v != nil && v != "" {
+			return nil, "", wrap(ErrInvalidInput, ticket.ErrEffortRetired)
+		}
+		tk, err := ticket.EditFields(root, ticketID, fields, addTags, removeTags, author)
+		if err != nil {
+			return nil, "", classify(err)
+		}
+		names := make([]string, 0, len(fields)+1)
+		for f := range fields {
+			names = append(names, f)
+		}
+		sort.Strings(names)
+		if len(addTags) > 0 || len(removeTags) > 0 {
+			names = append(names, "tags")
+		}
+		return tk, strings.Join(names, ", ") + " updated", nil
 	})
 }
 

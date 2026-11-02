@@ -25,12 +25,19 @@ import (
 	"hate/internal/config"
 	"hate/internal/gitacct"
 	"hate/internal/mcpserver"
+	"hate/internal/service"
 	"hate/internal/teamsync"
 	"hate/internal/ticket"
 )
 
 //go:embed static/*
 var staticFiles embed.FS
+
+// agentGuide is the agent contract for tags, estimates and the API, served at
+// GET /api/guide and as the MCP resource hate://guide.
+//
+//go:embed docs/ticketing-and-cfp-guide.md
+var agentGuide string
 
 func main() {
 	// git runs this same binary as its GIT_ASKPASS helper (see
@@ -55,6 +62,8 @@ func main() {
 	api.RegisterPMRoutes(r)
 	api.RegisterGitRoutes(r)
 	api.RegisterSearchRoutes(r)
+	service.SetGuide(agentGuide)
+	api.RegisterGuideRoutes(r)
 
 	// Serve embedded static files
 	staticFS, err := fs.Sub(staticFiles, "static")

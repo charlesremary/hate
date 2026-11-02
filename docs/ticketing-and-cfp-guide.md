@@ -716,8 +716,9 @@ The full HTTP API. The server listens on `http://localhost:8000` (see
 `main.go`). No authentication. All request/response bodies are JSON unless noted
 (`Content-Type: application/json`), except attachment upload (multipart), the
 dashboard (HTML), and the Gantt export (draw.io XML). `{projectId}` is the
-project's folder name / id; `{ticketId}` is the full ticket id (e.g.
-`AMPL-7k3x`).
+project's id, folder name, or ticket prefix (case-insensitive: `HATE` or
+`hate`; a prefix two projects share → 409 with `candidates`, use the id);
+`{ticketId}` is the full ticket id (e.g. `AMPL-7k3x`).
 
 Conventions:
 - Optional `author` (in body or `?author=` query) attributes the action in the
@@ -737,6 +738,7 @@ Conventions:
 | Method & path | What it does | Body |
 |---|---|---|
 | `GET /api/version` | The build version of the running binary (shown in Settings). | — |
+| `GET /api/guide?section=` | This guide as `text/markdown`, embedded in the binary. `?section=3` returns only `## 3.` (404 for an unknown section). | — |
 | `GET /api/search?q=&limit=` | Search tickets across every non-hidden project (closed included) by ID or title, ignoring case. Ranked: exact ID, ID prefix (`HATE-84`), ID contains (`8414`), title contains; open tickets first within a rank. `limit` defaults to 20, max 50; an empty `q` returns `[]`. Each hit: `project_id, project_name, project_path, prefix, ticket_id, title, status, type, closed_project`. | — |
 | `GET /api/git/check` | Is git installed (`installed`, `version`, `install_url`). | — |
 | `GET /api/git-account` | The app-level GitHub account: `configured`, name/login/email, `expires_at`, `expiring_soon` (≤ 14 days), `storage`, `git`. Never returns the token. | — |
@@ -790,11 +792,12 @@ Conventions:
 
 | Method & path | What it does | Body |
 |---|---|---|
-| `GET …/tickets` | List all tickets. | — |
+| `GET …/tickets` | List all tickets. Filters (all optional, exact match): `?status=`, `type=`, `assignee=`, `tag=`, `phase=`, `parent=<id>` (the children of a feature: tickets tagged `parent:<id>`). | — |
 | `POST …/tickets` | Create a ticket (see §1 for the full body). A non-empty `effort` → 400. | see §1 |
+| `POST …/tickets/bulk` | Create up to 50 tickets in one write and one commit (the easy path for a whole feature). Each ticket takes the §1 fields plus `ref` (a handle for this batch), `parent_ref` (an earlier ticket's ref; adds `parent:<id>`) or `parent_id`, `predecessor_refs` (earlier refs) and/or `predecessors` (existing ids), and `test_cases:[{step, expected}]`. Every ticket is validated before any is written (422 / 404 and nothing created). Returns `{created:[{ref, id}], tickets:[…], commit_warning}`. | `{tickets:[…], author?}` |
 | `GET …/tickets/billing` | Billing rollup (logged hours × rates). | — |
 | `GET …/tickets/{ticketId}` | Full ticket JSON, plus a computed (never stored) `workflow`: `{promote_to, demote_to, path}`. `promote_to` / `demote_to` are the statuses Promote / Demote would move it to now (`_previous` resolved for `blocked`; `null` when there is no transition); `path` is the type's main line from `not_started`. Read `promote_to` before promoting to know the next status. No `workflow` key for meeting / administration. Ticket write responses (promote, demote, block, edit…) carry the updated `workflow` too. | — |
-| `PATCH …/tickets/{ticketId}` | Edit one field (title, description, priority, `estimate_hours`, tags, dates, …). Setting `effort` → 400; clearing it to `null` is allowed. | `{field, value, author?}` |
+| `PATCH …/tickets/{ticketId}` | Edit one field (title, description, priority, `estimate_hours`, tags, dates, …). Setting `effort` → 400; clearing it to `null` is allowed. Or edit several at once: `fields` (any of title, description, priority, `estimate_hours`, assignee, phase, `planned_start_date`, `due_date`) plus `add_tags` / `remove_tags`, applied all-or-nothing (one bad value → 422 and nothing changes), one activity entry per field, one commit. Don't send both shapes. | `{field, value, author?}` or `{fields:{…}, add_tags?:[…], remove_tags?:[…], author?}` |
 
 ### Ticket actions
 

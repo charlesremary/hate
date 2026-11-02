@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"hate/internal/fsutil"
 )
@@ -357,5 +358,36 @@ func GetProjectPath(projectID string) (string, error) {
 		return direct, nil
 	}
 
-	return "", fmt.Errorf("Project not found: %s", projectID)
+	// Last resort: the ticket prefix (case-insensitive), so "HATE" or "hate"
+	// finds the project whose tickets are HATE-xxxx. Two projects sharing a
+	// prefix is ambiguous rather than a silent pick.
+	var matches []ProjectInfo
+	for _, project := range ListProjects() {
+		if projectID != "" && strings.EqualFold(project.Prefix, projectID) {
+			matches = append(matches, project)
+		}
+	}
+	switch len(matches) {
+	case 1:
+		return matches[0].Path, nil
+	case 0:
+		return "", fmt.Errorf("Project not found: %s", projectID)
+	}
+	amb := &AmbiguousProjectError{Ref: projectID}
+	for _, m := range matches {
+		amb.Candidates = append(amb.Candidates, m.ID)
+	}
+	return "", amb
+}
+
+// AmbiguousProjectError: a project reference matched more than one project's
+// prefix. Candidates are the matching project ids.
+type AmbiguousProjectError struct {
+	Ref        string
+	Candidates []string
+}
+
+func (e *AmbiguousProjectError) Error() string {
+	return fmt.Sprintf("Prefix %s matches more than one project (%s); use the project id",
+		e.Ref, strings.Join(e.Candidates, ", "))
 }

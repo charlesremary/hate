@@ -20,6 +20,9 @@ var (
 	ErrProjectClosed = errors.New("Project is closed — reopen it to make changes.")
 	// ErrInvalidInput: the request broke a rule (bad value, gate, workflow).
 	ErrInvalidInput = errors.New("invalid input")
+	// ErrAmbiguousProject: a project reference (prefix) matched more than one
+	// project; the cause is a *config.AmbiguousProjectError with candidates.
+	ErrAmbiguousProject = errors.New("ambiguous project")
 	// ErrInternal: the change could not be completed for a reason the caller
 	// can't fix (disk, index regeneration).
 	ErrInternal = errors.New("internal error")

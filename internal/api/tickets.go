@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"hate/internal/config"
 	"hate/internal/pm"
 	"hate/internal/service"
 	"hate/internal/ticket"
@@ -46,6 +47,14 @@ func respondError(w http.ResponseWriter, status int, message string) {
 func getProjectRoot(w http.ResponseWriter, projectID string) (string, bool) {
 	path, err := service.ResolveProject(projectID)
 	if err != nil {
+		var amb *config.AmbiguousProjectError
+		if errors.As(err, &amb) {
+			respondJSON(w, http.StatusConflict, map[string]interface{}{
+				"detail":     err.Error(),
+				"candidates": amb.Candidates,
+			})
+			return "", false
+		}
 		respondError(w, http.StatusNotFound, err.Error())
 		return "", false
 	}
@@ -150,11 +159,16 @@ type CreateTicketRequest struct {
 	Attendees        *string  `json:"attendees"`
 }
 
-// EditTicketRequest matches the Python EditTicketRequest model.
+// EditTicketRequest is a PATCH body: either one {field, value} (the original
+// Python EditTicketRequest shape) or a multi-field edit {fields, add_tags,
+// remove_tags} applied all-or-nothing in one commit.
 type EditTicketRequest struct {
-	Field  string      `json:"field"`
-	Value  interface{} `json:"value"`
-	Author *string     `json:"author"`
+	Field      string                 `json:"field"`
+	Value      interface{}            `json:"value"`
+	Fields     map[string]interface{} `json:"fields"`
+	AddTags    []string               `json:"add_tags"`
+	RemoveTags []string               `json:"remove_tags"`
+	Author     *string                `json:"author"`
 }
 
 // CommentRequest matches the Python CommentRequest model.
@@ -202,6 +216,7 @@ func RegisterTicketRoutes(r chi.Router) {
 		r.Use(blockWritesWhenProjectClosed)
 		r.Get("/", handleListTickets)
 		r.Post("/", handleCreateTicket)
+		r.Post("/bulk", handleCreateTicketsBulk)
 		r.Get("/billing", handleGetBilling) // MUST be before /{ticketId}
 		r.Get("/{ticketId}", handleGetTicket)
 		r.Patch("/{ticketId}", handleEditTicket)
@@ -261,7 +276,7 @@ func handleListTickets(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	items, err := service.ListTickets(root, service.ListFilter{
 		Status: q.Get("status"), Type: q.Get("type"), Assignee: q.Get("assignee"),
-		Tag: q.Get("tag"), Phase: q.Get("phase"),
+		Tag: q.Get("tag"), Phase: q.Get("phase"), Parent: q.Get("parent"),
 	})
 	if err != nil {
 		respondServiceError(w, err, http.StatusInternalServerError)
@@ -318,6 +333,39 @@ func handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondResult(w, res)
+}
+
+// handleCreateTicketsBulk handles POST /api/projects/{projectId}/tickets/bulk:
+// {"tickets": [...], "author": "..."} (max 50). Tickets may reference earlier
+// ones in the batch by "ref" (parent_ref, predecessor_refs) and carry inline
+// test_cases. All are validated before any is written; one commit.
+func handleCreateTicketsBulk(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	var req struct {
+		Tickets []service.BulkTicket `json:"tickets"`
+		Author  string               `json:"author"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	res, err := service.CreateTickets(root, req.Tickets, req.Author)
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			respondError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"created":        res.Created,
+		"tickets":        res.Tickets,
+		"commit_warning": res.CommitWarning,
+	})
 }
 
 // handleGetBilling handles GET /api/projects/{projectId}/tickets/billing
@@ -477,7 +525,17 @@ func handleEditTicket(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	res, err := service.EditField(root, ticketID, req.Field, req.Value, strVal(req.Author))
+	var res *service.Result
+	var err error
+	if req.Fields != nil || req.AddTags != nil || req.RemoveTags != nil {
+		if req.Field != "" {
+			respondError(w, http.StatusUnprocessableEntity, "give either field/value or fields/add_tags/remove_tags, not both")
+			return
+		}
+		res, err = service.EditFields(root, ticketID, req.Fields, req.AddTags, req.RemoveTags, strVal(req.Author))
+	} else {
+		res, err = service.EditField(root, ticketID, req.Field, req.Value, strVal(req.Author))
+	}
 	if err != nil {
 		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
