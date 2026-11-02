@@ -24,6 +24,7 @@ import (
 	"hate/internal/api"
 	"hate/internal/config"
 	"hate/internal/gitacct"
+	"hate/internal/mcpserver"
 	"hate/internal/teamsync"
 	"hate/internal/ticket"
 )
@@ -41,6 +42,7 @@ func main() {
 	portFlag := flag.Int("port", 0, "HTTP port to listen on (default 8000, or $PORT)")
 	listenFlag := flag.String("listen", "", "interface address to listen on (default 127.0.0.1, or $HATE_LISTEN); 0.0.0.0 exposes the API to the network")
 	noBrowser := flag.Bool("no-browser", false, "don't open the web browser on start (also $HATE_NO_BROWSER=1)")
+	noMCP := flag.Bool("no-mcp", false, "don't serve the MCP endpoint at /mcp (also $HATE_NO_MCP=1)")
 	flag.Parse()
 
 	r := chi.NewRouter()
@@ -90,6 +92,12 @@ func main() {
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 
+	// MCP endpoint (loopback clients only, whatever -listen says).
+	mcpOn := envOn(*noMCP, os.Getenv("HATE_NO_MCP"))
+	if mcpOn {
+		r.Handle(mcpserver.Path, mcpserver.Handler(port))
+	}
+
 	if c := gitacct.CheckGit(); !c.Installed {
 		log.Printf("Git isn't installed (or not on the PATH). Projects can't be shared until it is: %s "+
 			"(Settings shows the steps).", c.InstallURL)
@@ -106,6 +114,9 @@ func main() {
 	}
 	appURL := fmt.Sprintf("http://localhost:%d/", port)
 	fmt.Printf("hate v%s running on %s (listening on %s)\n", config.AppVersion, appURL, addr)
+	if mcpOn {
+		fmt.Printf("MCP endpoint: http://127.0.0.1:%d%s\n", port, mcpserver.Path)
+	}
 	if shouldOpenBrowser(*noBrowser, os.Getenv("HATE_NO_BROWSER")) {
 		go func() {
 			time.Sleep(300 * time.Millisecond)
@@ -131,7 +142,11 @@ func askpassMode(args []string, env string) (code int, ok bool) {
 }
 
 // shouldOpenBrowser: on unless -no-browser or HATE_NO_BROWSER is set.
-func shouldOpenBrowser(flagOff bool, env string) bool {
+func shouldOpenBrowser(flagOff bool, env string) bool { return envOn(flagOff, env) }
+
+// envOn: a feature is on unless its -no-X flag is set or its $HATE_NO_X env
+// var is set to anything but "", "0", "false" or "no".
+func envOn(flagOff bool, env string) bool {
 	if flagOff {
 		return false
 	}
