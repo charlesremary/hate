@@ -18,10 +18,12 @@ import (
 // THE RULE (the lock is not re-entrant, a second Lock in the same call chain
 // deadlocks):
 //
-//   - The lock is taken exactly once, by the outermost entry point: an HTTP
-//     handler, one of the pm entry points that document "takes the project
-//     lock" (BaselineNow, TakeSnapshot, AutoSnapshot, Rebaseline,
-//     RecordForecastHistory), or the background sync.
+//   - The lock is taken exactly once, by the outermost entry point: an
+//     internal/service ticket operation (what the REST ticket handlers and the
+//     MCP tools call), one of the HTTP handlers that still mutate directly
+//     (attachments, project config), one of the pm entry points that document
+//     "takes the project lock" (BaselineNow, TakeSnapshot, AutoSnapshot,
+//     Rebaseline, RecordForecastHistory), or the background sync.
 //   - Everything below an entry point (ReadTicket/WriteTicket, Promote and the
 //     other ticket mutators, WriteConfig, RegenerateIndex, CommitFiles,
 //     GitCommit, the pm *Locked helpers, the merge package) never takes it and

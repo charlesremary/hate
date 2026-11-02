@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -19,8 +18,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hate/internal/config"
 	"hate/internal/pm"
+	"hate/internal/service"
 	"hate/internal/ticket"
 )
 
@@ -45,19 +44,12 @@ func respondError(w http.ResponseWriter, status int, message string) {
 // getProjectRoot resolves a project path from projectID. Returns the path and true,
 // or writes a 404 error response and returns ("", false).
 func getProjectRoot(w http.ResponseWriter, projectID string) (string, bool) {
-	path, err := config.GetProjectPath(projectID)
+	path, err := service.ResolveProject(projectID)
 	if err != nil {
-		respondError(w, http.StatusNotFound, "Project not found: "+projectID)
+		respondError(w, http.StatusNotFound, err.Error())
 		return "", false
 	}
 	return path, true
-}
-
-// commitTicket commits the ticket file after a mutation (index.json is
-// derived and never committed). Returns the commit warning ("" on success).
-// The caller holds the project lock.
-func commitTicket(repoRoot, ticketID, action string) string {
-	return ticket.CommitWarning(ticket.CommitFiles(repoRoot, []string{ticket.TicketPath(repoRoot, ticketID)}, ticketID+": "+action))
 }
 
 // respondTicket writes the ticket as JSON plus "commit_warning" when the
@@ -69,6 +61,59 @@ func respondTicket(w http.ResponseWriter, tk *ticket.Ticket, commitWarning strin
 		Workflow      *ticket.WorkflowView `json:"workflow,omitempty"`
 		CommitWarning string               `json:"commit_warning,omitempty"`
 	}{tk, ticket.TicketWorkflow(tk), commitWarning})
+}
+
+// respondResult writes a service mutation result (see respondTicket).
+func respondResult(w http.ResponseWriter, res *service.Result) {
+	respondTicket(w, res.Ticket, res.CommitWarning)
+}
+
+// respondServiceError maps a service error to the REST status and body the
+// API has always used. fallback is the status for a plain rule failure or a
+// missing ticket (most write handlers have answered 422 for both).
+func respondServiceError(w http.ResponseWriter, err error, fallback int) {
+	var estErr *ticket.EstimateValidationError
+	var extErr *service.TimeExtensionError
+	switch {
+	case errors.Is(err, service.ErrProjectClosed):
+		respondError(w, http.StatusLocked, err.Error())
+	case errors.Is(err, ticket.ErrNeedsTimeLog):
+		// Distinct signal so the UI pops the log-time form instead of just erroring.
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+			"detail":         err.Error(),
+			"needs_time_log": true,
+		})
+	case errors.As(err, &estErr):
+		// Estimation rule failed at first promote (class / estimate_hours / cfp:).
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+			"detail":           err.Error(),
+			"estimate_invalid": true,
+		})
+	case errors.As(err, &extErr):
+		respondJSON(w, http.StatusConflict, map[string]interface{}{
+			"detail":               err.Error(),
+			"needs_time_extension": true,
+			"allotted_hours":       extErr.AllottedHours,
+			"spent_hours":          extErr.SpentHours,
+			"would_be_hours":       extErr.WouldBeHours,
+		})
+	case errors.Is(err, ticket.ErrEffortRetired):
+		respondError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrInternal):
+		respondError(w, http.StatusInternalServerError, err.Error())
+	default:
+		respondError(w, fallback, err.Error())
+	}
+}
+
+// respondTicketNotFound answers 404 "Ticket not found" for any failure but a
+// closed project (comment and predecessor removal have always done this).
+func respondTicketNotFound(w http.ResponseWriter, err error, ticketID string) {
+	if errors.Is(err, service.ErrProjectClosed) {
+		respondError(w, http.StatusLocked, err.Error())
+		return
+	}
+	respondError(w, http.StatusNotFound, "Ticket not found: "+ticketID)
 }
 
 // decodeJSON decodes a JSON request body into dst. Returns false and writes
@@ -213,104 +258,14 @@ func handleListTickets(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-
-	// Built from the ticket files, never read back from index.json, so a
-	// failed index write can't empty the list (under the lock, so a list can't
-	// overwrite the index a concurrent edit just wrote).
-	unlock := ticket.LockProject(root)
-	idx, err := ticket.CurrentIndex(root)
-	unlock()
+	q := r.URL.Query()
+	items, err := service.ListTickets(root, service.ListFilter{
+		Status: q.Get("status"), Type: q.Get("type"), Assignee: q.Get("assignee"),
+		Tag: q.Get("tag"), Phase: q.Get("phase"),
+	})
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondServiceError(w, err, http.StatusInternalServerError)
 		return
-	}
-
-	// Apply filters from query params
-	status := r.URL.Query().Get("status")
-	ticketType := r.URL.Query().Get("type")
-	assignee := r.URL.Query().Get("assignee")
-	tag := r.URL.Query().Get("tag")
-	phase := r.URL.Query().Get("phase")
-
-	var filtered []ticket.IndexSummary
-	for _, t := range idx.Tickets {
-		if status != "" && t.Status != status {
-			continue
-		}
-		if ticketType != "" && t.Type != ticketType {
-			continue
-		}
-		if assignee != "" {
-			a := ""
-			if t.Assignee != nil {
-				a = *t.Assignee
-			}
-			if a != assignee {
-				continue
-			}
-		}
-		if tag != "" {
-			found := false
-			for _, tg := range t.Tags {
-				if tg == tag {
-					found = true
-					break
-				}
-			}
-			if !found {
-				continue
-			}
-		}
-		if phase != "" {
-			p := ""
-			if t.Phase != nil {
-				p = *t.Phase
-			}
-			if p != phase {
-				continue
-			}
-		}
-		filtered = append(filtered, t)
-	}
-
-	if filtered == nil {
-		filtered = []ticket.IndexSummary{}
-	}
-
-	// Flag wrap tickets whose logged hours are ≥90% of their allotment, using
-	// the same rule as the PM dashboard's hours-at-risk watchlist, so the ticket
-	// gutter and the watchlist always agree. Wrap allotments don't depend on the
-	// reference rate, so the context skips computing it.
-	var effortToDays map[string]float64
-	if cfg, cErr := ticket.ReadConfig(root); cErr == nil && cfg != nil {
-		effortToDays = cfg.EffortToDays
-	}
-	var full []*ticket.Ticket
-	for _, s := range filtered {
-		if tk, rErr := ticket.ReadTicket(root, s.ID); rErr == nil {
-			full = append(full, tk)
-		}
-	}
-	atRisk := make(map[string]bool)
-	for _, row := range pm.ComputeHoursAtRisk(full, pm.NewEstimateContext(full, 0, effortToDays)) {
-		atRisk[row.TicketID] = true
-	}
-
-	// Each ticket's computed estimate (wrap estimate, converted legacy effort,
-	// or a code ticket's share of its feature), from the whole project so a
-	// filtered list still finds parents and siblings.
-	est := ticketEstimates(root)
-
-	type listItem struct {
-		ticket.IndexSummary
-		AtRisk         bool    `json:"at_risk"`
-		EstimatedHours float64 `json:"estimated_hours"`
-		EstimateSource string  `json:"estimate_source"`
-	}
-	items := make([]listItem, len(filtered))
-	for i, s := range filtered {
-		e := est(s.ID)
-		items[i] = listItem{IndexSummary: s, AtRisk: atRisk[s.ID], EstimatedHours: e.hours, EstimateSource: e.source}
 	}
 	respondJSON(w, http.StatusOK, items)
 }
@@ -322,82 +277,47 @@ func handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
 
 	var req CreateTicketRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 
-	creator := strVal(req.Creator)
-
 	params := ticket.CreateTicketParams{
-		Type:    req.Type,
-		Title:   req.Title,
-		Creator: creator,
-	}
-	if req.Priority != nil {
-		params.Priority = *req.Priority
-	}
-	if req.Effort != nil && strings.TrimSpace(*req.Effort) != "" {
-		respondError(w, http.StatusBadRequest, ticket.ErrEffortRetired.Error())
-		return
-	}
-	if req.EstimateHours != nil {
-		if err := ticket.ValidateEstimateHours(req.EstimateHours); err != nil {
-			respondError(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-		params.EstimateHours = req.EstimateHours
-	}
-	if req.Assignee != nil {
-		params.Assignee = *req.Assignee
-	}
-	if req.Description != nil {
-		params.Description = *req.Description
+		Type:             req.Type,
+		Title:            req.Title,
+		Creator:          strVal(req.Creator),
+		Priority:         strVal(req.Priority),
+		Effort:           strVal(req.Effort),
+		EstimateHours:    req.EstimateHours,
+		Assignee:         strVal(req.Assignee),
+		Description:      strVal(req.Description),
+		Phase:            strVal(req.Phase),
+		PlannedStartDate: strVal(req.PlannedStartDate),
+		DueDate:          strVal(req.DueDate),
+		Severity:         strVal(req.Severity),
+		Attendees:        strVal(req.Attendees),
 	}
 	if len(req.Tags) > 0 {
 		params.Tags = req.Tags
 	}
-	if req.Phase != nil {
-		params.Phase = *req.Phase
-	}
 	if len(req.Predecessors) > 0 {
 		params.Predecessors = req.Predecessors
-	}
-	if req.PlannedStartDate != nil {
-		params.PlannedStartDate = *req.PlannedStartDate
-	}
-	if req.DueDate != nil {
-		params.DueDate = *req.DueDate
-	}
-	if req.Severity != nil {
-		params.Severity = *req.Severity
 	}
 	if req.Hours != nil {
 		params.Hours = *req.Hours
 	}
-	if req.Attendees != nil {
-		params.Attendees = *req.Attendees
-	}
 
-	tk, err := ticket.CreateTicket(root, params)
+	res, err := service.CreateTicket(root, params)
 	if err != nil {
-		if errors.Is(err, ticket.ErrEffortRetired) {
-			respondError(w, http.StatusBadRequest, err.Error())
-		} else if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, service.ErrNotFound) {
 			respondError(w, http.StatusNotFound, err.Error())
-		} else {
-			respondError(w, http.StatusUnprocessableEntity, err.Error())
+			return
 		}
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, tk.ID, "created"))
+	respondResult(w, res)
 }
 
 // handleGetBilling handles GET /api/projects/{projectId}/tickets/billing
@@ -536,42 +456,12 @@ func handleGetTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-
-	tk, err := ticket.ReadTicket(root, ticketID)
+	d, err := service.GetTicket(root, ticketID)
 	if err != nil {
-		respondError(w, http.StatusNotFound, "Ticket not found: "+ticketID)
+		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	e := ticketEstimates(root)(ticketID)
-	// "workflow" is computed on read (never stored); types with no workflow omit it.
-	respondJSON(w, http.StatusOK, struct {
-		*ticket.Ticket
-		EstimatedHours float64              `json:"estimated_hours"`
-		EstimateSource string               `json:"estimate_source"`
-		Workflow       *ticket.WorkflowView `json:"workflow,omitempty"`
-	}{tk, e.hours, e.source, ticket.TicketWorkflow(tk)})
-}
-
-type ticketEstimate struct {
-	hours  float64
-	source string
-}
-
-// ticketEstimates returns a lookup of each ticket's computed estimate
-// (pm.EstimatedHours) across the whole project. Unknown ids give a zero value.
-func ticketEstimates(root string) func(id string) ticketEstimate {
-	all, err := ticket.ReadAllTickets(root)
-	cfg, cErr := ticket.ReadConfig(root)
-	if err != nil || cErr != nil {
-		return func(string) ticketEstimate { return ticketEstimate{} }
-	}
-	ctx := pm.ProjectEstimateContext(root, all, cfg)
-	byID := make(map[string]ticketEstimate, len(all))
-	for _, t := range all {
-		h, src := pm.EstimatedHours(t, ctx)
-		byID[t.ID] = ticketEstimate{hours: math.Round(h*100) / 100, source: src}
-	}
-	return func(id string) ticketEstimate { return byID[id] }
+	respondJSON(w, http.StatusOK, d)
 }
 
 // handleEditTicket handles PATCH /api/projects/{projectId}/tickets/{ticketId}
@@ -582,29 +472,17 @@ func handleEditTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
 
 	var req EditTicketRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-
-	author := strVal(req.Author)
-	tk, err := ticket.EditField(root, ticketID, req.Field, req.Value, author)
+	res, err := service.EditField(root, ticketID, req.Field, req.Value, strVal(req.Author))
 	if err != nil {
-		if errors.Is(err, ticket.ErrEffortRetired) {
-			respondError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, ticketID, req.Field+" updated"))
+	respondResult(w, res)
 }
 
 // statusAuthor returns the author for a status change: the JSON body's
@@ -631,37 +509,12 @@ func handlePromoteTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
-
-	author := statusAuthor(r)
-	tk, err := ticket.Promote(root, ticketID, author)
+	res, err := service.Promote(root, ticketID, statusAuthor(r))
 	if err != nil {
-		if errors.Is(err, ticket.ErrNeedsTimeLog) {
-			// Distinct signal so the UI pops the log-time form instead of just erroring.
-			respondJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
-				"detail":         err.Error(),
-				"needs_time_log": true,
-			})
-			return
-		}
-		var estErr *ticket.EstimateValidationError
-		if errors.As(err, &estErr) {
-			// Estimation rule failed at first promote (class / estimate_hours / cfp:).
-			respondJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
-				"detail":           err.Error(),
-				"estimate_invalid": true,
-			})
-			return
-		}
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "status \u2192 "+tk.Status))
+	respondResult(w, res)
 }
 
 // handleDemoteTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/demote
@@ -672,20 +525,12 @@ func handleDemoteTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
-
-	author := statusAuthor(r)
-	tk, err := ticket.Demote(root, ticketID, author)
+	res, err := service.Demote(root, ticketID, statusAuthor(r))
 	if err != nil {
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "status \u2192 "+tk.Status))
+	respondResult(w, res)
 }
 
 // handleBlockTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/block.
@@ -699,7 +544,6 @@ func handleBlockTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
 
 	author := r.URL.Query().Get("author")
 	// Optional {reason, author} body — the reason is captured on the ticket and
@@ -714,17 +558,12 @@ func handleBlockTicket(w http.ResponseWriter, r *http.Request) {
 	if req.Author != "" {
 		author = req.Author
 	}
-	tk, err := ticket.BlockTicket(root, ticketID, req.Reason, author)
+	res, err := service.Block(root, ticketID, req.Reason, author)
 	if err != nil {
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "status → blocked"))
+	respondResult(w, res)
 }
 
 // handleAddTestCase handles POST /api/projects/{projectId}/tickets/{ticketId}/test-cases
@@ -735,7 +574,6 @@ func handleAddTestCase(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
 	var req struct {
 		Step     string `json:"step"`
 		Expected string `json:"expected"`
@@ -744,12 +582,12 @@ func handleAddTestCase(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	tk, err := ticket.AddTestCase(root, ticketID, req.Step, req.Expected, req.Author)
+	res, err := service.AddTestCase(root, ticketID, req.Step, req.Expected, req.Author)
 	if err != nil {
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "add test case"))
+	respondResult(w, res)
 }
 
 // handleAddTestCasesBulk handles POST /api/projects/{projectId}/tickets/{ticketId}/test-cases/bulk
@@ -762,7 +600,6 @@ func handleAddTestCasesBulk(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
 	var req struct {
 		Cases []struct {
 			Step     string `json:"step"`
@@ -777,24 +614,23 @@ func handleAddTestCasesBulk(w http.ResponseWriter, r *http.Request) {
 	for i, c := range req.Cases {
 		cases[i] = ticket.TestCase{Step: c.Step, Expected: c.Expected}
 	}
-	tk, err := ticket.AddTestCases(root, ticketID, cases, req.Author)
+	res, err := service.AddTestCases(root, ticketID, cases, req.Author)
 	if err != nil {
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "add test cases (bulk)"))
+	respondResult(w, res)
 }
 
 // handleUpdateTestCase handles PATCH /api/projects/{projectId}/tickets/{ticketId}/test-cases/{caseId}
 func handleUpdateTestCase(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	ticketID := chi.URLParam(r, "ticketId")
-	caseID := chi.URLParam(r, "caseId")
 	root, ok := getProjectRoot(w, projectID)
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
+	caseID := chi.URLParam(r, "caseId")
 	var req struct {
 		Step     *string `json:"step"`
 		Expected *string `json:"expected"`
@@ -805,37 +641,31 @@ func handleUpdateTestCase(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	author := ""
-	if req.Author != nil {
-		author = *req.Author
-	}
-	tk, err := ticket.UpdateTestCase(root, ticketID, caseID, ticket.TestCaseUpdate{
+	res, err := service.UpdateTestCase(root, ticketID, caseID, ticket.TestCaseUpdate{
 		Step: req.Step, Expected: req.Expected, Status: req.Status, Comment: req.Comment,
-	}, author)
+	}, strVal(req.Author))
 	if err != nil {
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "update test case"))
+	respondResult(w, res)
 }
 
 // handleDeleteTestCase handles DELETE /api/projects/{projectId}/tickets/{ticketId}/test-cases/{caseId}
 func handleDeleteTestCase(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	ticketID := chi.URLParam(r, "ticketId")
-	caseID := chi.URLParam(r, "caseId")
 	root, ok := getProjectRoot(w, projectID)
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
-	author := r.URL.Query().Get("author")
-	tk, err := ticket.DeleteTestCase(root, ticketID, caseID, author)
+	caseID := chi.URLParam(r, "caseId")
+	res, err := service.DeleteTestCase(root, ticketID, caseID, r.URL.Query().Get("author"))
 	if err != nil {
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "delete test case"))
+	respondResult(w, res)
 }
 
 // handleForceCloseTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/force-close.
@@ -847,7 +677,6 @@ func handleForceCloseTicket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
 	var req struct {
 		Reason string `json:"reason"`
 		Author string `json:"author"`
@@ -858,16 +687,12 @@ func handleForceCloseTicket(w http.ResponseWriter, r *http.Request) {
 	if req.Author == "" {
 		req.Author = r.URL.Query().Get("author")
 	}
-	tk, err := ticket.ForceClose(root, ticketID, req.Reason, req.Author)
+	res, err := service.ForceClose(root, ticketID, req.Reason, req.Author)
 	if err != nil {
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "force-closed: "+req.Reason))
+	respondResult(w, res)
 }
 
 // handleAddComment handles POST /api/projects/{projectId}/tickets/{ticketId}/comment
@@ -878,25 +703,17 @@ func handleAddComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
 
 	var req CommentRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-
-	author := strVal(req.Author)
-	tk, err := ticket.AddComment(root, ticketID, req.Message, author)
+	res, err := service.AddComment(root, ticketID, req.Message, strVal(req.Author))
 	if err != nil {
-		respondError(w, http.StatusNotFound, "Ticket not found: "+ticketID)
+		respondTicketNotFound(w, err, ticketID)
 		return
 	}
-
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "comment added"))
+	respondResult(w, res)
 }
 
 // handleAddTimeEntry handles POST /api/projects/{projectId}/tickets/{ticketId}/time
@@ -907,83 +724,37 @@ func handleAddTimeEntry(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
 
 	var req TimeEntryRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-
-	author := strVal(req.Author)
-	extendReason := ""
-
-	// Strict time enforcement: block a log that would push a wrap ticket past
-	// its hours allotment unless the logger confirms authorization + a reason.
-	// Functional and unclassed tickets are never gated (code is estimated per
-	// feature, not per ticket).
-	if cfg, err := ticket.ReadConfig(root); err == nil && cfg.StrictTimeEnforcement {
-		if tk, err := ticket.ReadTicket(root, ticketID); err == nil {
-			allot, _ := pm.WrapAllotment(tk, pm.NewEstimateContext(nil, 0, cfg.EffortToDays))
-			if allot > 0 { // non-wrap or unestimated tickets have no allotment to enforce
-				var spent float64
-				for _, te := range tk.TimeEntries {
-					spent += te.Hours
-				}
-				if spent+req.Hours > allot {
-					reason := strings.TrimSpace(req.ExtendReason)
-					if !req.ExtendAuthorized || reason == "" {
-						respondJSON(w, http.StatusConflict, map[string]interface{}{
-							"detail": fmt.Sprintf("This log brings %s to %gh, past its %gh allotment. Authorization required to extend.",
-								ticketID, spent+req.Hours, allot),
-							"needs_time_extension": true,
-							"allotted_hours":       allot,
-							"spent_hours":          spent,
-							"would_be_hours":       spent + req.Hours,
-						})
-						return
-					}
-					extendReason = reason
-				}
-			}
-		}
-	}
-
-	tk, err := ticket.AddTimeEntry(root, ticketID, req.Date, req.Hours, req.Description, author, extendReason)
+	res, err := service.LogTime(root, ticketID, service.LogTimeParams{
+		Date: req.Date, Hours: req.Hours, Description: req.Description, Author: strVal(req.Author),
+		ExtendAuthorized: req.ExtendAuthorized, ExtendReason: req.ExtendReason,
+	})
 	if err != nil {
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "time logged"))
+	respondResult(w, res)
 }
 
 // handleDeleteTimeEntry handles DELETE /api/projects/{projectId}/tickets/{ticketId}/time/{entryId}
 func handleDeleteTimeEntry(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	ticketID := chi.URLParam(r, "ticketId")
-	entryID := chi.URLParam(r, "entryId")
 	root, ok := getProjectRoot(w, projectID)
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
-
-	author := r.URL.Query().Get("author")
-	tk, err := ticket.DeleteTimeEntry(root, ticketID, entryID, author)
+	entryID := chi.URLParam(r, "entryId")
+	res, err := service.DeleteTimeEntry(root, ticketID, entryID, r.URL.Query().Get("author"))
 	if err != nil {
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "time entry deleted"))
+	respondResult(w, res)
 }
 
 // handleAddPredecessor handles POST /api/projects/{projectId}/tickets/{ticketId}/predecessors
@@ -994,50 +765,34 @@ func handleAddPredecessor(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
 
 	var req PredecessorRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-
-	author := strVal(req.Author)
-	tk, err := ticket.AddPredecessor(root, ticketID, req.PredecessorID, author)
+	res, err := service.AddPredecessor(root, ticketID, req.PredecessorID, strVal(req.Author))
 	if err != nil {
-		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "predecessor added: "+req.PredecessorID))
+	respondResult(w, res)
 }
 
 // handleRemovePredecessor handles DELETE /api/projects/{projectId}/tickets/{ticketId}/predecessors/{predecessorId}
 func handleRemovePredecessor(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	ticketID := chi.URLParam(r, "ticketId")
-	predecessorID := chi.URLParam(r, "predecessorId")
 	root, ok := getProjectRoot(w, projectID)
 	if !ok {
 		return
 	}
-	defer ticket.LockProject(root)()
-
-	author := r.URL.Query().Get("author")
-	tk, err := ticket.RemovePredecessor(root, ticketID, predecessorID, author)
+	predecessorID := chi.URLParam(r, "predecessorId")
+	res, err := service.RemovePredecessor(root, ticketID, predecessorID, r.URL.Query().Get("author"))
 	if err != nil {
-		respondError(w, http.StatusNotFound, "Ticket not found: "+ticketID)
+		respondTicketNotFound(w, err, ticketID)
 		return
 	}
-
-	if err := ticket.RegenerateIndex(root); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondTicket(w, tk, commitTicket(root, ticketID, "predecessor removed: "+predecessorID))
+	respondResult(w, res)
 }
 
 // commitAttachment commits a ticket JSON change plus an attachment file with a
