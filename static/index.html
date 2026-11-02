@@ -16,6 +16,10 @@
           <button class="icon-btn" id="btn-settings" title="Settings">⚙</button>
         </span>
       </div>
+      <div class="ticket-search">
+        <input type="search" id="ticket-search-input" placeholder="Search tickets (e.g. HATE-84)" autocomplete="off" spellcheck="false" aria-label="Search tickets across all projects" aria-controls="ticket-search-results" aria-expanded="false">
+        <div id="ticket-search-results" class="ticket-search-results hidden" role="listbox"></div>
+      </div>
       <div class="sidebar-actions">
         <button class="btn-secondary" id="btn-new-project">+ New Project</button>
         <button class="btn-secondary" id="btn-open-project">Open Existing…</button>
@@ -394,6 +398,10 @@
                 address. It goes into your projects folder (an existing folder is never
                 overwritten) and opens. Needs a Git account in Settings.</li>
               <li>Projects in the sidebar are grouped by <em>client</em>.</li>
+              <li><strong>Search tickets</strong> (the box at the top of the sidebar, or press
+                <kbd>/</kbd>) finds a ticket in any project as you type: part of the ID
+                (<code>HATE-84</code>, or just <code>8414</code>) or a word from the title. Use the
+                arrow keys and Enter, or click, to open it; its project opens with it.</li>
             </ul>
             <p>Each project has three tabs: <strong>Tickets</strong> (the work),
               <strong>PM Dashboard</strong> (the schedule &amp; health view), and

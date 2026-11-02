@@ -52,6 +52,7 @@ func main() {
 	api.RegisterTicketRoutes(r)
 	api.RegisterPMRoutes(r)
 	api.RegisterGitRoutes(r)
+	api.RegisterSearchRoutes(r)
 
 	// Serve embedded static files
 	staticFS, err := fs.Sub(staticFiles, "static")

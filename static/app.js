@@ -1168,6 +1168,100 @@ window.addEventListener('hashchange', async () => {
   try { openTicketFromHash(await API.get('/api/projects')); } catch { /* sidebar shows the error */ }
 });
 
+// ── Ticket search (sidebar) ──────────────────────────
+// Search-as-you-type across every project by ticket ID or title
+// (GET /api/search). A sequence number drops responses that arrive after a
+// newer query was sent, so a slow "HATE" can't overwrite "H".
+const searchInput = document.getElementById('ticket-search-input');
+const searchBox = document.getElementById('ticket-search-results');
+let searchTimer = null;
+let searchSeq = 0;
+let searchResults = [];
+let searchActive = -1;
+
+function hideSearchResults() {
+  searchBox.classList.add('hidden');
+  searchInput.setAttribute('aria-expanded', 'false');
+  searchActive = -1;
+}
+
+function renderSearchResults(q) {
+  searchBox.innerHTML = searchResults.length
+    ? searchResults.map((r, i) => `
+      <div class="ts-item${i === searchActive ? ' active' : ''}${DONE_STATUSES.has(r.status) ? ' done' : ''}" role="option" data-i="${i}">
+        <span class="ts-id">${escapeHtml(r.ticket_id)}</span>
+        <span class="ts-title">${escapeHtml(r.title)}</span>
+        ${statusBadge(r.status)}
+        <span class="ts-proj">${escapeHtml(r.project_name)}${r.closed_project ? ' · closed' : ''}</span>
+      </div>`).join('')
+    : `<div class="ts-empty">No tickets match "${escapeHtml(q)}"</div>`;
+  searchBox.classList.remove('hidden');
+  searchInput.setAttribute('aria-expanded', 'true');
+  searchBox.querySelector('.ts-item.active')?.scrollIntoView({ block: 'nearest' });
+}
+
+async function runTicketSearch() {
+  const q = searchInput.value.trim();
+  const seq = ++searchSeq;
+  if (!q) { searchResults = []; hideSearchResults(); return; }
+  let results;
+  try { results = await API.get(`/api/search?q=${encodeURIComponent(q)}`); } catch { return; }
+  if (seq !== searchSeq) return;
+  searchResults = results;
+  searchActive = results.length ? 0 : -1;
+  renderSearchResults(q);
+}
+
+async function openSearchResult(i) {
+  const r = searchResults[i];
+  if (!r) return;
+  hideSearchResults();
+  searchInput.blur();
+  if (!currentProject || currentProject.id !== r.project_id) {
+    let p = null;
+    try { p = (await API.get('/api/projects')).find(x => x.id === r.project_id && x.path === r.project_path); } catch { /* fall back below */ }
+    await selectProject(r.project_id, r.project_path, p || { name: r.project_name, prefix: r.prefix });
+  }
+  openTicketPanel(r.ticket_id);
+}
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runTicketSearch, 150);
+});
+searchInput.addEventListener('focus', () => { if (searchInput.value.trim() && searchBox.innerHTML) renderSearchResults(searchInput.value.trim()); });
+searchInput.addEventListener('keydown', (e) => {
+  // preventDefault: a type=search box would otherwise clear its text on Escape.
+  if (e.key === 'Escape') { hideSearchResults(); e.preventDefault(); e.stopPropagation(); return; }
+  if (searchBox.classList.contains('hidden') || !searchResults.length) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = searchResults.length;
+    searchActive = (searchActive + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+    renderSearchResults(searchInput.value.trim());
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    openSearchResult(searchActive < 0 ? 0 : searchActive);
+  }
+});
+// mousedown, not click: fires before the input's blur hides the list.
+searchBox.addEventListener('mousedown', (e) => {
+  const item = e.target.closest('.ts-item');
+  if (!item) return;
+  e.preventDefault();
+  openSearchResult(Number(item.dataset.i));
+});
+searchInput.addEventListener('blur', () => setTimeout(hideSearchResults, 100));
+// "/" jumps to search unless you're already typing somewhere.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== '/' || e.altKey || e.ctrlKey || e.metaKey) return;
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+  e.preventDefault();
+  searchInput.focus();
+  searchInput.select();
+});
+
 // ── Estimation: class + estimate_hours ───────────────
 // Class tags stay functional / config / nonfunc; the UI labels them Code /
 // Config / Non-functional. Wrap tickets (config / nonfunc) carry estimate_hours;

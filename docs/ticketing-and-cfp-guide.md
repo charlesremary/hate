@@ -737,6 +737,7 @@ Conventions:
 | Method & path | What it does | Body |
 |---|---|---|
 | `GET /api/version` | The build version of the running binary (shown in Settings). | — |
+| `GET /api/search?q=&limit=` | Search tickets across every non-hidden project (closed included) by ID or title, ignoring case. Ranked: exact ID, ID prefix (`HATE-84`), ID contains (`8414`), title contains; open tickets first within a rank. `limit` defaults to 20, max 50; an empty `q` returns `[]`. Each hit: `project_id, project_name, project_path, prefix, ticket_id, title, status, type, closed_project`. | — |
 | `GET /api/git/check` | Is git installed (`installed`, `version`, `install_url`). | — |
 | `GET /api/git-account` | The app-level GitHub account: `configured`, name/login/email, `expires_at`, `expiring_soon` (≤ 14 days), `storage`, `git`. Never returns the token. | — |
 | `POST /api/git-account` | Test a token against GitHub and, only if valid, save it in the OS credential store. | `{token}` |

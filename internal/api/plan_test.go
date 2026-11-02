@@ -404,7 +404,7 @@ func TestHeaderAndHelp(t *testing.T) {
 			t.Errorf("Help does not mention %q", want)
 		}
 	}
-	if config.AppVersion != "1.0.17" { // HATE-12zw: the plan-relative velocity build is v1.0.17
+	if config.AppVersion != "1.0.18" { // HATE-z44n: the ticket-search build is v1.0.18
 		t.Errorf("AppVersion = %s", config.AppVersion)
 	}
 }
