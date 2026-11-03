@@ -49,6 +49,8 @@ func mapError(err error) error {
 		return toolError{"error": "needs_time_extension", "detail": err.Error(),
 			"allotted_hours": ext.AllottedHours, "spent_hours": ext.SpentHours, "would_be_hours": ext.WouldBeHours,
 			"next": "ask the user to authorize, then retry with extend_authorized: true and an extend_reason"}
+	case errors.Is(err, service.ErrConflict):
+		return toolError{"error": "conflict", "detail": err.Error()}
 	case errors.Is(err, service.ErrNotFound):
 		return toolError{"error": "not_found", "detail": err.Error()}
 	case errors.Is(err, ticket.ErrEffortRetired), errors.Is(err, service.ErrInvalidInput):

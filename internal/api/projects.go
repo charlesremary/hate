@@ -17,6 +17,7 @@ import (
 
 	"hate/internal/config"
 	"hate/internal/pm"
+	"hate/internal/service"
 	"hate/internal/ticket"
 )
 
@@ -199,57 +200,27 @@ func listProjects(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-// createProject handles POST /api/projects
+// createProject handles POST /api/projects (rules and git init: service.CreateProject).
 func createProject(w http.ResponseWriter, r *http.Request) {
 	var req CreateProjectRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-
-	if req.Prefix == "" {
-		req.Prefix = "TKT"
-	}
-
-	root := config.GetProjectsRoot()
-	projectDir := filepath.Join(root, req.FolderName)
-
-	if _, err := os.Stat(projectDir); err == nil {
-		respondError(w, http.StatusConflict, "Directory already exists: "+req.FolderName)
+	p, err := service.CreateProject(service.NewProject(req))
+	if err != nil {
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-
-	// Create structure
-	tktDir := filepath.Join(projectDir, ".tkt")
-	ticketsDir := filepath.Join(projectDir, "tickets")
-	if err := os.MkdirAll(tktDir, 0o755); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := os.MkdirAll(ticketsDir, 0o755); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Write config
-	cfg := ticket.DefaultConfig(req.Client, req.ProjectName, req.ProjectID, req.Prefix)
-	if err := ticket.WriteConfig(projectDir, cfg); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Empty index
-	if err := ticket.RegenerateIndex(projectDir); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"id":           req.ProjectID,
-		"name":         req.ProjectName,
-		"prefix":       req.Prefix,
-		"path":         projectDir,
-		"ticket_count": float64(0),
-		"health":       nil,
+		"id":             p.ID,
+		"name":           p.Name,
+		"client":         p.Client,
+		"prefix":         p.Prefix,
+		"path":           p.Path,
+		"ticket_count":   float64(0),
+		"health":         nil,
+		"git":            p.Git,
+		"commit_warning": p.CommitWarning,
 	})
 }
 

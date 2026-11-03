@@ -75,6 +75,14 @@ type newTicketIn struct {
 	TestCases        []testCaseIn `json:"test_cases,omitempty" jsonschema:"acceptance tests for the ticket"`
 }
 
+type createProjectIn struct {
+	ProjectName string `json:"project_name" jsonschema:"display name, e.g. Billing Portal"`
+	ProjectID   string `json:"project_id" jsonschema:"short unique id: 1-32 letters, digits, - or _, e.g. billing"`
+	Prefix      string `json:"prefix,omitempty" jsonschema:"ticket id prefix, 1-8 letters/digits starting with a letter, e.g. BILL (default: the project id upper-cased)"`
+	Client      string `json:"client,omitempty" jsonschema:"client the project is for; the sidebar groups projects by client"`
+	FolderName  string `json:"folder_name,omitempty" jsonschema:"folder under the projects root (default: tkt-<project id lower-cased>)"`
+}
+
 type createTicketsIn struct {
 	Project string        `json:"project" jsonschema:"project id, folder name or ticket prefix"`
 	Tickets []newTicketIn `json:"tickets" jsonschema:"1 to 50 tickets, created in order"`
@@ -215,6 +223,19 @@ func ticketTool[In interface{ ref() writeTicketIn }, Out any](s *mcp.Server, t *
 func (w writeTicketIn) ref() writeTicketIn { return w }
 
 func registerWriteTools(s *mcp.Server) {
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "hate_create_project",
+		Description: "Create a new, empty hate project in the projects folder: its config, a tickets folder and (when git is installed) a git repo with an initial commit. " +
+			"The project id and ticket prefix must be unused on this machine; an existing folder is never written into. Check hate_list_projects first so you don't make a duplicate. " +
+			"Then add tickets with hate_create_tickets. To push it to GitHub, add a remote from a terminal or the UI.",
+		Annotations: write("Create project", false, false),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in createProjectIn) (*mcp.CallToolResult, *service.CreatedProject, error) {
+		p, err := service.CreateProject(service.NewProject{
+			FolderName: in.FolderName, Client: in.Client, ProjectName: in.ProjectName, ProjectID: in.ProjectID, Prefix: in.Prefix,
+		})
+		return nil, p, mapError(err)
+	})
+
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "hate_create_tickets",
 		Description: "Create 1-50 tickets in one write and one commit, e.g. a feature parent and its children. Give each a ref; children point at the parent with parent_ref " +

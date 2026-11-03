@@ -200,7 +200,7 @@ regenerated from the ticket files so listings stay in sync.
 
 The running app also serves an MCP server at `http://127.0.0.1:8000/mcp`
 (local connections only; `-no-mcp` turns it off), so Claude Code and other MCP
-clients work tickets with typed tools that follow the same rules as the API:
+clients create projects and work tickets with typed tools that follow the same rules as the API:
 
 ```
 claude mcp add --transport http --scope user hate http://127.0.0.1:8000/mcp

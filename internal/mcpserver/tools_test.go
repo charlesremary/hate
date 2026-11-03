@@ -132,8 +132,8 @@ func TestToolsList(t *testing.T) {
 		return res.Tools
 	}
 	a, b := list(), list()
-	if len(a) != 18 {
-		t.Errorf("%d tools, want 18", len(a))
+	if len(a) != 19 {
+		t.Errorf("%d tools, want 19", len(a))
 	}
 	ro := map[string]bool{}
 	for _, n := range readTools {

@@ -108,6 +108,8 @@ func respondServiceError(w http.ResponseWriter, err error, fallback int) {
 		})
 	case errors.Is(err, ticket.ErrEffortRetired):
 		respondError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrConflict):
+		respondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrInternal):
 		respondError(w, http.StatusInternalServerError, err.Error())
 	default:

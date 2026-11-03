@@ -26,6 +26,9 @@ var (
 	// ErrInternal: the change could not be completed for a reason the caller
 	// can't fix (disk, index regeneration).
 	ErrInternal = errors.New("internal error")
+	// ErrConflict: the thing to create already exists (folder, project id,
+	// ticket prefix).
+	ErrConflict = errors.New("conflict")
 )
 
 // Error is a service error: Kind is one of the Err* sentinels above, Msg is

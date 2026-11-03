@@ -753,7 +753,7 @@ Conventions:
 | Method & path | What it does | Body |
 |---|---|---|
 | `GET /api/projects` | List all discovered projects. | — |
-| `POST /api/projects` | Create a new project on disk. | `{folder_name, client, project_name, project_id, prefix}` |
+| `POST /api/projects` | Create a new project in the projects folder, as a git repo with an initial commit. `project_name` and `project_id` are required; `prefix` defaults to the id upper-cased (1-8 letters/digits), `folder_name` to `tkt-<id>`. 409 if the folder, id or prefix is taken; 422 for a bad value. | `{folder_name?, client?, project_name, project_id, prefix?}` |
 | `GET /api/projects/settings` | Global app settings (projects root, tab toggles, scheduler). | — |
 | `PUT /api/projects/settings` | Update global settings. `show_cosmic` is legacy: the COSMIC tab is now always shown. | `{projects_root?, scheduler?, show_billing?, show_cosmic?}` |
 | `POST /api/projects/open` | Register an existing project folder by path. | `{path}` |
@@ -1075,13 +1075,15 @@ Rules of the road:
   with an `error` code and, where useful, a `next` hint: `needs_time_log`
   (log time, then retry), `estimate_invalid` (§3), `needs_time_extension` (ask
   the user, retry with `extend_authorized` + `extend_reason`), `project_closed`,
-  `not_found`, `ambiguous_project` (with `candidates`), `invalid_input`.
+  `not_found`, `ambiguous_project` (with `candidates`), `invalid_input`,
+  `conflict` (the folder, project id or prefix already exists).
 
 Tools (all named `hate_*`):
 
 | Tool | Does |
 |---|---|
 | `hate_list_projects` | Projects with id, prefix, folder, closed flag, ticket count. |
+| `hate_create_project` | New empty project (git repo + initial commit); id and prefix must be unused. |
 | `hate_get_project` | Gates (strict time, enforce-QA), `block_weeks`, team. |
 | `hate_search_tickets` | Search every project by ticket id or title. |
 | `hate_list_tickets` | A project's tickets; filters incl. `parent` (a feature's children). |
