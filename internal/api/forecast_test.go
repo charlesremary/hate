@@ -174,8 +174,8 @@ func TestForecastAPIAndPlacement(t *testing.T) {
 	}
 
 	html := getHTML(t, h, "/api/projects/est/dashboard")
-	if i, j := strings.Index(html, "Schedule vs request"), strings.Index(html, `<div class="cards">`); i < 0 || j < 0 || i > j {
-		t.Errorf("pre-baseline card not at the top (card %d, cards %d)", i, j)
+	if i, j := strings.Index(html, "Schedule vs request"), strings.Index(html, `<div class="st-grid">`); i < 0 || j < 0 || i > j {
+		t.Errorf("pre-baseline card not above the stats (card %d, stats %d)", i, j)
 	}
 	if code, body := do(t, h, "POST", "/api/projects/est/baseline-now", nil); code != http.StatusOK {
 		t.Fatalf("baseline-now: %d %v", code, body)

@@ -118,7 +118,7 @@ func newTicket(t *testing.T, root string, p ticket.CreateTicketParams) string {
 	return res.Ticket.ID
 }
 
-var readTools = []string{"hate_get_project", "hate_get_ready", "hate_get_ticket", "hate_list_projects", "hate_list_tickets", "hate_search_tickets"}
+var readTools = []string{"hate_get_project", "hate_get_ready", "hate_get_stats", "hate_get_ticket", "hate_list_projects", "hate_list_tickets", "hate_search_tickets"}
 
 // HATE-28gd tc3 (+ HATE-t546 annotations): stable order, hints as specified.
 func TestToolsList(t *testing.T) {
@@ -132,8 +132,8 @@ func TestToolsList(t *testing.T) {
 		return res.Tools
 	}
 	a, b := list(), list()
-	if len(a) != 20 {
-		t.Errorf("%d tools, want 20", len(a))
+	if len(a) != 21 {
+		t.Errorf("%d tools, want 21", len(a))
 	}
 	ro := map[string]bool{}
 	for _, n := range readTools {

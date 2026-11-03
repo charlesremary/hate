@@ -169,8 +169,8 @@ func TestRoundTripLegacyProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Tools) != 20 {
-		t.Errorf("%d tools over 2025-11-25, want 20", len(res.Tools))
+	if len(res.Tools) != 21 {
+		t.Errorf("%d tools over 2025-11-25, want 21", len(res.Tools))
 	}
 	mustOK(t, cs, "hate_list_projects", nil)
 }

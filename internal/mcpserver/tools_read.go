@@ -96,6 +96,24 @@ func registerReadTools(s *mcp.Server) {
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "hate_get_stats",
+		Description: "The PM Dashboard's live project numbers, each with the value a week (or a block) earlier: % complete (hours-weighted), remaining hours, " +
+			"estimate accuracy (actual / estimate; wrap per ticket, code per finished feature, with sample size), tickets finished this period, " +
+			"cycle time (days start to done), blocked now, scope added since the baseline, and the test pass rate. Use it for a status summary.",
+		Annotations: readOnly("Get project stats"),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in projectIn) (*mcp.CallToolResult, *pm.ProjectStats, error) {
+		root, err := service.ResolveProject(in.Project)
+		if err != nil {
+			return nil, nil, mapError(err)
+		}
+		st, err := service.Stats(root)
+		if err != nil {
+			return nil, nil, mapError(err)
+		}
+		return nil, &st, nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "hate_search_tickets",
 		Description: "Search tickets across every project by id or title (case-insensitive). Ranked: exact id, id prefix, id contains, title contains; open tickets first. " +
 			"Use it to find a ticket when you know part of its id or title but not its project.",

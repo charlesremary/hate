@@ -786,6 +786,25 @@
               plus a project-level line. Fix an overrun by moving work to someone with room, raising
               daily hours, cutting scope, or agreeing a new date.</p>
 
+            <h3>Project stats</h3>
+            <p>Under the Schedule card, the PM Dashboard shows the project's live numbers. Each is
+              recomputed every time you open the dashboard, with an arrow comparing it to the period
+              before: last week, or the previous block on a project planned in blocks.</p>
+            <ul>
+              <li><strong>Complete</strong>: done estimated hours &divide; all estimated hours (and the
+                ticket count). <strong>Remaining</strong>: estimated hours not done yet.</li>
+              <li><strong>Accuracy</strong>: hours actually logged &divide; hours estimated, on finished
+                work. <em>Wrap</em> is per ticket; <em>code</em> is per finished feature (its CFP
+                &times; rate vs the hours its code tickets took). 1.0x is on estimate, above 1 took
+                longer. The sample size is shown, so you can tell a trend from two tickets.</li>
+              <li><strong>Finished</strong>: tickets finished this week (or block).
+                <strong>Cycle time</strong>: average days from starting a ticket to finishing it, over
+                the last 28 days.</li>
+              <li><strong>Blocked now</strong> (and the longest-blocked ticket), <strong>Scope
+                added</strong> since the baseline (or this week without one), and <strong>Tests
+                passing</strong>.</li>
+            </ul>
+            <p>Force-closed (descoped) and backlog tickets are left out of every number.</p>
             <h3>Schedule vs request</h3>
             <p>A client asks for a project by a date; you scope the tickets and need to know &mdash;
               before day 1 and every day after &mdash; whether it fits, and by how much. Set the

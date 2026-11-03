@@ -256,7 +256,7 @@ func RenderForecastHTML(rep ForecastReport, history []ForecastHistoryEntry) stri
 	header := `<h3 style="font-size:13px;text-transform:uppercase;color:#666;letter-spacing:.5px;margin:0">Schedule vs request</h3>`
 	wrap := func(inner string) string {
 		return fmt.Sprintf(`
-<div class="forecast-card" style="margin:20px 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:16px 22px">
+<div class="forecast-card" id="schedule-vs-request" style="margin:20px 24px 20px;background:#fff;color:#1a1a1a;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:16px 22px">
 %s
 </div>`, inner)
 	}

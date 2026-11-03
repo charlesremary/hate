@@ -68,6 +68,7 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Put("/target-date", updateTargetDate)
 	r.Get("/forecast", getForecast)
 	r.Get("/rollup", getRollup)
+	r.Get("/stats", getStats)
 	r.Get("/block-weeks", getBlockWeeks)
 	r.Put("/block-weeks", updateBlockWeeks)
 	r.Get("/blocks", getBlocks)
@@ -328,7 +329,8 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 			pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(tickets, estCtx)) +
 			pm.RenderOverridesHTML(pm.ComputeOverrides(tickets)) +
 			pm.RenderProjectCostHTML(pm.ComputeProjectCost(tickets))
-		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, stripHTML+forecastCardHTML(projectID, root, tickets, cfg), reportsHTML)
+		statsHTML := pm.RenderStatsHTML(projectStats(root, tickets, cfg, estCtx, blocks), "#schedule-vs-request")
+		html := pm.GenerateSimpleDashboard(tickets, projectID, projectName, stripHTML+forecastCardHTML(projectID, root, tickets, cfg), statsHTML, reportsHTML)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(html))
@@ -371,7 +373,9 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		pm.RenderEstimateVarianceHTML(pm.ComputeEstimateVariance(costTickets, estCtx)) +
 		pm.RenderOverridesHTML(pm.ComputeOverrides(costTickets)) +
 		pm.RenderProjectCostHTML(pm.ComputeProjectCost(costTickets))
-	html := pm.GenerateDashboard(snapshot, pm.BlocksForProject(cfg, costTickets, estCtx, time.Now()), stripHTML+forecastCardHTML(projectID, root, costTickets, cfg), reportsHTML)
+	dashBlocks := pm.BlocksForProject(cfg, costTickets, estCtx, time.Now())
+	statsHTML := pm.RenderStatsHTML(projectStats(root, costTickets, cfg, estCtx, dashBlocks), "#schedule-vs-request")
+	html := pm.GenerateDashboard(snapshot, dashBlocks, stripHTML+forecastCardHTML(projectID, root, costTickets, cfg)+statsHTML, reportsHTML)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(html))
@@ -635,4 +639,33 @@ func listBaselines(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, list)
+}
+
+// projectStats computes the stats panel for a project (blocks may be nil:
+// they're computed here).
+func projectStats(root string, tickets []*ticket.Ticket, cfg *ticket.ProjectConfig, estCtx pm.EstimateContext, blocks []pm.Block) pm.ProjectStats {
+	if blocks == nil {
+		blocks = pm.BlocksForProject(cfg, tickets, estCtx, time.Now())
+	}
+	return pm.ComputeStats(tickets, estCtx, blocks, pm.ReadPlanStatus(root).BaselineDate, time.Now())
+}
+
+// getStats handles GET /api/projects/{projectId}/stats: the PM Dashboard's
+// live numbers (delivery, estimate accuracy, flow, tests, scope added) with
+// trends. Read-only.
+func getStats(w http.ResponseWriter, r *http.Request) {
+	root, ok := getProjectRoot(w, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	tickets, err := ticket.ReadAllTickets(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		cfg = nil
+	}
+	respondJSON(w, http.StatusOK, projectStats(root, tickets, cfg, pm.ProjectEstimateContext(root, tickets, cfg), nil))
 }

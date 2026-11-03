@@ -6,6 +6,7 @@ package service
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"hate/internal/config"
 	"hate/internal/pm"
@@ -262,4 +263,18 @@ func ApplyMigration(root string, opts ticket.MigrateOptions, author string) (*ti
 		return nil, wrap(ErrInvalidInput, err)
 	}
 	return p, nil
+}
+
+// Stats is the PM Dashboard's live numbers (pm.ComputeStats).
+func Stats(root string) (pm.ProjectStats, error) {
+	tickets, err := ticket.ReadAllTickets(root)
+	if err != nil {
+		return pm.ProjectStats{}, wrap(ErrInternal, err)
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		cfg = nil
+	}
+	ctx := pm.ProjectEstimateContext(root, tickets, cfg)
+	return pm.ComputeStats(tickets, ctx, pm.BlocksForProject(cfg, tickets, ctx, time.Now()), pm.ReadPlanStatus(root).BaselineDate, time.Now()), nil
 }

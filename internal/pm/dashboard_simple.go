@@ -14,7 +14,9 @@ import (
 // GenerateSimpleDashboard returns a self-contained HTML dashboard for pre-baseline view.
 // topHTML (the Plan strip, then the Schedule vs request card) sits right under
 // the header; costHTML holds the report sections.
-func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName, topHTML, costHTML string) string {
+// statsHTML is the live stats panel (RenderStatsHTML); it replaced the old
+// tickets / complete / hours / types tiles.
+func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName, topHTML, statsHTML, costHTML string) string {
 	// Backlog-tagged tickets are out of committed scope — exclude them from every
 	// rollup (count, completion, status mix, table). Surface how many were hidden.
 	backlogCount := 0
@@ -30,19 +32,7 @@ func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName, t
 
 	backlogNote := ""
 	if backlogCount > 0 {
-		backlogNote = fmt.Sprintf(`<div style="font-size:11px;color:#999;margin-top:4px">+%d backlog (excluded)</div>`, backlogCount)
-	}
-
-	total := len(tickets)
-	completionPct := 0
-	if total > 0 {
-		done := 0
-		for _, t := range tickets {
-			if t.Status == "complete" || t.Status == "closed" {
-				done++
-			}
-		}
-		completionPct = done * 100 / total
+		backlogNote = fmt.Sprintf(`<div style="font-size:11px;color:#999;margin:0 24px 8px">+%d backlog tickets (excluded from these numbers)</div>`, backlogCount)
 	}
 
 	// Status counts
@@ -53,24 +43,6 @@ func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName, t
 			s = "unknown"
 		}
 		statusCounts[s]++
-	}
-
-	// Total hours logged
-	totalHours := 0.0
-	for _, t := range tickets {
-		for _, te := range t.TimeEntries {
-			totalHours += te.Hours
-		}
-	}
-
-	// Type counts
-	typeCounts := map[string]int{}
-	for _, t := range tickets {
-		tp := t.Type
-		if tp == "" {
-			tp = "unknown"
-		}
-		typeCounts[tp]++
 	}
 
 	// Status bar segments
@@ -85,6 +57,7 @@ func GenerateSimpleDashboard(tickets []*ticket.Ticket, projectID, projectName, t
 		"blocked":      "#ef5350",
 	}
 
+	total := len(tickets)
 	var barSegments strings.Builder
 	for status, count := range statusCounts {
 		pct := 0.0
@@ -162,25 +135,8 @@ tr:hover td { background: #f5f5f5; }
 </div>
 %s
 
-<div class="cards">
-    <div class="card">
-        <div class="card-value">%d</div>
-        <div class="card-label">Tickets</div>
-        %s
-    </div>
-    <div class="card">
-        <div class="card-value" style="color:#15803d">%d%%</div>
-        <div class="card-label">Complete</div>
-    </div>
-    <div class="card">
-        <div class="card-value" style="color:#1976d2">%.1f</div>
-        <div class="card-label">Hours Logged</div>
-    </div>
-    <div class="card">
-        <div class="card-value">%d</div>
-        <div class="card-label">Ticket Types</div>
-    </div>
-</div>
+%s
+%s
 
 <div class="status-bar">%s</div>
 <div class="legend">%s</div>
@@ -192,11 +148,8 @@ tr:hover td { background: #f5f5f5; }
 		projectID,
 		projectID, projectName,
 		topHTML,
-		total,
+		statsHTML,
 		backlogNote,
-		completionPct,
-		totalHours,
-		len(typeCounts),
 		barSegments.String(),
 		legendItems.String(),
 		costHTML,
