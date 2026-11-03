@@ -96,11 +96,10 @@ func TestUIBlocksByDateFiltersAndExport(t *testing.T) {
 			t.Errorf("index.html missing %q", want)
 		}
 	}
-	// Export to Excel lives on the PM Dashboard tab, not the Tickets toolbar.
-	tickets := html[strings.Index(html, `id="tab-tickets"`):strings.Index(html, `id="tab-dashboard"`)]
-	dash := html[strings.Index(html, `id="tab-dashboard"`):]
-	if strings.Contains(tickets, `id="btn-export-xlsx"`) || !strings.Contains(dash[:600], `id="btn-export-xlsx"`) {
-		t.Error("Export to Excel should be on the PM Dashboard tab only")
+	// Export to Excel sits next to Export to draw.io inside the dashboard's
+	// Gantt panel (internal/pm/gantt.go), not in the app shell.
+	if strings.Contains(html, `id="btn-export-xlsx"`) {
+		t.Error("Export to Excel should be in the dashboard's Gantt panel, not the app shell")
 	}
 	for _, want := range []string{"blockBadge(", "block-head", "Current block: ", "renderFilterChips"} {
 		if !strings.Contains(js, want) {

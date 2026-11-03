@@ -502,6 +502,7 @@ func renderGanttPanel(snapshot *Snapshot, blocks []Block, note, exportURL string
         <button type="button" onclick="ganttView(this,'cp')" style="%sbackground:#fff;color:#374151;border-left:1px solid #d1d5db">Critical path</button>
       </div>
       <a href="%s" download="gantt.drawio" style="text-decoration:none;background:#1976d2;color:#fff;padding:7px 14px;border-radius:6px;font-size:13px;white-space:nowrap">Export to draw.io</a>
+      <a href="%s" download title="Every ticket and this Gantt as an Excel workbook" style="text-decoration:none;background:#1976d2;color:#fff;padding:7px 14px;border-radius:6px;font-size:13px;white-space:nowrap">Export to Excel</a>
     </div>
   </div>
   <div id="gantt-full" style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;background:#fff">%s</div>
@@ -515,7 +516,7 @@ func renderGanttPanel(snapshot *Snapshot, blocks []Block, note, exportURL string
     for (var i=0;i<bs.length;i++){ var on = bs[i]===btn; bs[i].style.background = on?'#1976d2':'#fff'; bs[i].style.color = on?'#fff':'#374151'; }
   }
   </script>
-</div>`, html.EscapeString(note), btn, btn, exportURL, full, cp, legend)
+</div>`, html.EscapeString(note), btn, btn, exportURL, strings.Replace(exportURL, "/gantt.drawio", "/export.xlsx", 1), full, cp, legend)
 }
 
 // runeTruncate shortens s to n runes with an ellipsis.

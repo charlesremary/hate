@@ -2386,17 +2386,6 @@ function downloadPhaseRollupCSV(report) {
   showToast('Rollup CSV downloaded');
 }
 
-// ── Excel export ─────────────────────────────────────
-// The server builds the workbook (Tickets + Gantt sheets); the browser just
-// follows the download link.
-document.getElementById('btn-export-xlsx').addEventListener('click', () => {
-  if (!currentProject) { showToast('Open a project first', 'error'); return; }
-  const a = document.createElement('a');
-  a.href = `/api/projects/${encodeURIComponent(currentProject.id)}/export.xlsx`;
-  a.setAttribute('download', ''); // the server names it <project>-<date>.xlsx
-  a.click();
-  showToast('Excel export downloaded');
-});
 
 // ── Git identity ─────────────────────────────────────
 async function refreshCommitAs() {

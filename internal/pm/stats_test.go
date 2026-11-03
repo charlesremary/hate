@@ -129,3 +129,13 @@ func TestStatsForceClosedDone(t *testing.T) {
 		t.Errorf("done %d/%d %v%% finished %v", st.TicketsDone, st.TicketsTotal, st.PercentComplete.Value, st.Finished.Value)
 	}
 }
+
+// Export to Excel sits next to Export to draw.io in the Gantt panel, keeping
+// the ?start= of the draw.io link.
+func TestGanttPanelExcelButton(t *testing.T) {
+	out := renderGanttPanel(ganttFixture(), nil, "note", "/api/projects/P/gantt.drawio?start=2026-11-02")
+	d, x := strings.Index(out, "Export to draw.io"), strings.Index(out, "Export to Excel")
+	if d < 0 || x < d || !strings.Contains(out, `href="/api/projects/P/export.xlsx?start=2026-11-02"`) {
+		t.Errorf("buttons: draw.io %d, excel %d", d, x)
+	}
+}
