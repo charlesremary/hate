@@ -104,3 +104,19 @@ func TestMigrationREST(t *testing.T) {
 		t.Errorf("create with lifecycle/block = %d %v", code, out)
 	}
 }
+
+// Confirm before closing is a per-project setting, committed with the config.
+func TestConfirmCloseSetting(t *testing.T) {
+	_, _ = setupEstimateProject(t)
+	r := chi.NewRouter()
+	RegisterProjectRoutes(r)
+	if code, out := do(t, r, "GET", "/api/projects/est/confirm-close", nil); code != 200 || out["confirm_close"] != false {
+		t.Fatalf("get = %d %v", code, out)
+	}
+	if code, out := do(t, r, "PUT", "/api/projects/est/confirm-close", map[string]interface{}{"confirm_close": true}); code != 200 || out["confirm_close"] != true {
+		t.Fatalf("put = %d %v", code, out)
+	}
+	if _, out := do(t, r, "GET", "/api/projects/est/confirm-close", nil); out["confirm_close"] != true {
+		t.Errorf("not saved: %v", out)
+	}
+}

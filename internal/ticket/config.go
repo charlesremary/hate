@@ -153,6 +153,10 @@ type ProjectConfig struct {
 	// EnforceQA, when true, blocks promoting a dev_task from dev_complete to
 	// qa_testing until it has at least one filled test case (step + expected).
 	EnforceQA bool `json:"enforce_qa,omitempty"`
+	// ConfirmClose, when true, makes the UI ask "are you sure?" before a
+	// promote that finishes a ticket (to complete or closed). Instead of an
+	// undo: closed tickets aren't reopened (see Rework).
+	ConfirmClose bool `json:"confirm_close,omitempty"`
 	// RequestedStart / RequestedEnd are the dates the client asked for
 	// (YYYY-MM-DD, optional). The PM dashboard's Schedule vs request card and
 	// the Load table compare the capacity-aware schedule against them.

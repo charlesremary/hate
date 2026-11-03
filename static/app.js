@@ -464,6 +464,7 @@ async function selectProject(id, path, projectData) {
   applyProjectClosedUI(currentProject.closed_at);
   applyProjectNewerUI(!!currentProject.newer_format);
   applyProjectUpdateUI(!!currentProject.needs_migration);
+  API.get(`/api/projects/${id}/confirm-close`).then(c => { if (currentProject && currentProject.id === id) currentProject.confirm_close = !!c.confirm_close; }).catch(() => {});
 
   // Fetch resources and current user identity
   try {
@@ -2005,6 +2006,13 @@ function formatBytes(n) {
 let pendingPromoteAfterLog = null;
 
 async function promoteTicket(id) {
+  // Confirm before closing (project setting): a promote that finishes the
+  // ticket asks first, since closed tickets aren't reopened.
+  const target = panelTicket && panelTicket.id === id && panelTicket.workflow ? panelTicket.workflow.promote_to : null;
+  if (currentProject && currentProject.confirm_close && ['complete', 'closed'].includes(target)
+      && !confirm(`Close ${id}${panelTicket.title ? ': ' + panelTicket.title : ''}?\n\nIt moves to ${statusLabel(target)}. Closed tickets aren't reopened; if the work turns out wrong, you'd create a Rework ticket.`)) {
+    return;
+  }
   try {
     const r = await fetch(`/api/projects/${currentProject.id}/tickets/${id}/promote?author=${encodeURIComponent(currentUser?.email || '')}`, { method: 'POST' });
     const data = await r.json();
@@ -2984,6 +2992,8 @@ async function loadProjectSettingsSections() {
   try {
     const eq = await API.get(`/api/projects/${currentProject.id}/enforce-qa`);
     document.getElementById('enforce-qa').checked = !!eq.enforce_qa;
+    const cc = await API.get(`/api/projects/${currentProject.id}/confirm-close`);
+    document.getElementById('confirm-close').checked = !!cc.confirm_close;
     document.getElementById('enforce-qa-project').textContent = '— ' + currentProject.name.toUpperCase();
     document.getElementById('enforce-qa-empty').classList.add('hidden');
     document.getElementById('enforce-qa-inputs').classList.remove('hidden');
@@ -3058,6 +3068,10 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
       await API.put(`/api/projects/${currentProject.id}/enforce-qa`, {
         enforce_qa: document.getElementById('enforce-qa').checked,
       });
+      const cc = await API.put(`/api/projects/${currentProject.id}/confirm-close`, {
+        confirm_close: document.getElementById('confirm-close').checked,
+      });
+      currentProject.confirm_close = !!cc.confirm_close;
     }
     showToast('Settings saved');
     showBilling = body.show_billing;

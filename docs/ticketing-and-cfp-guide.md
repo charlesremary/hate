@@ -794,6 +794,7 @@ Any write to a project a newer hate changed answers **409** with `newer_format: 
 | `GET /{projectId}/block-weeks` · `PUT …/block-weeks` | Read / set the planning block length: `2`, `3`, or `null` for no blocks (anything else → 400). Saved to `.tkt/config.json` and committed when it changes. | PUT: `{"block_weeks": 2}` |
 | `GET /{projectId}/strict-time` · `PUT …/strict-time` | Read / set strict time enforcement (gate time logs that go past a wrap ticket's estimate). | PUT: `{"strict_time_enforcement": true}` |
 | `GET /{projectId}/enforce-qa` · `PUT …/enforce-qa` | Read / set enforce-QA (keep tickets without test cases out of QA). | PUT: `{"enforce_qa": true}` |
+| `GET /{projectId}/confirm-close` · `PUT …/confirm-close` | Read / set "confirm before closing": the UI asks "are you sure?" before a promote that finishes a ticket (closed tickets aren't reopened). Agents: when it's on, confirm with the user before promoting a ticket to complete or closed. | PUT: `{"confirm_close": true}` |
 | `GET /{projectId}/overview` · `PUT …/overview` | Read / replace the Project Overview content (contacts, links, instructions). | PUT: `{contacts:[…], links:[…], instructions:[…]}` |
 | `POST /{projectId}/close` · `POST …/reopen` | Close / reopen the project (closed rejects ticket writes). | — |
 | `PATCH /{projectId}/info` | Edit the project display name (id/prefix are immutable). Max 120 chars, not empty. | `{project_name}` |

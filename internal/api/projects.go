@@ -5,6 +5,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"net/url"
@@ -125,6 +126,8 @@ func RegisterProjectRoutes(r chi.Router) {
 			r.Put("/strict-time", updateStrictTime)
 			r.Get("/enforce-qa", getEnforceQA)
 			r.Put("/enforce-qa", updateEnforceQA)
+			r.Get("/confirm-close", getConfirmClose)
+			r.Put("/confirm-close", updateConfirmClose)
 			r.Get("/overview", getOverview)
 			r.Put("/overview", updateOverview)
 			r.Post("/close", closeProject)
@@ -1007,6 +1010,50 @@ func updateEnforceQA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{"enforce_qa": cfg.EnforceQA})
+}
+
+// getConfirmClose handles GET /api/projects/{projectId}/confirm-close.
+func getConfirmClose(w http.ResponseWriter, r *http.Request) {
+	root, ok := getProjectRoot(w, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"confirm_close": cfg.ConfirmClose})
+}
+
+// updateConfirmClose handles PUT /api/projects/{projectId}/confirm-close
+// {"confirm_close": bool}: ask before a promote finishes a ticket (UI).
+func updateConfirmClose(w http.ResponseWriter, r *http.Request) {
+	root, ok := getProjectRoot(w, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	defer ticket.LockProject(root)()
+	var req struct {
+		ConfirmClose bool `json:"confirm_close"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if cfg.ConfirmClose != req.ConfirmClose {
+		cfg.ConfirmClose = req.ConfirmClose
+		if err := ticket.WriteConfig(root, cfg); err != nil {
+			respondServiceError(w, err, http.StatusInternalServerError)
+			return
+		}
+		_ = ticket.CommitFiles(root, []string{ticket.ConfigPath(root)}, fmt.Sprintf("confirm before closing: %v", req.ConfirmClose))
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"confirm_close": cfg.ConfirmClose})
 }
 
 // updateProjectInfo handles PATCH /api/projects/{projectId}/info. Currently
