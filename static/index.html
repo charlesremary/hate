@@ -1158,6 +1158,18 @@
               anything it can't combine keeps the shared version and saves yours under
               <code>.tkt/conflicts/</code>. Your project is never left half-updated. The button
               only appears when the project has a shared copy (a remote).</p>
+            <h3>Versions and updates</h3>
+            <p>⚙ Settings shows this copy's version. Once a day hate checks whether a newer
+              version has been published and, if so, shows a blue banner with the command to
+              update (<code>brew upgrade --cask hate</code>). <em>Dismiss</em> hides it until the
+              next version. Turn the check off in Settings (or set
+              <code>HATE_NO_UPDATE_CHECK=1</code>).</p>
+            <p>The first number of the version (the 1 in 1.1.0) is also the project format. When
+              a teammate's newer hate (say 2.0) has updated a shared project, your older copy
+              opens it <strong>read-only</strong>, with a red banner: you can look, but changes
+              are blocked so nothing gets lost. Sync still brings in their changes, but won't
+              combine your unsynced changes with theirs; they stay on this computer until you
+              update.</p>
             <h3>Git account and automatic sync</h3>
             <p>Under ⚙ Settings &rarr; <strong>Git account</strong>, paste a GitHub token and click
               <em>Test connection and save</em>. It's kept in this computer's password store

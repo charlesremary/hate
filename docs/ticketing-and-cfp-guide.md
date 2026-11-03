@@ -737,7 +737,9 @@ Conventions:
 
 | Method & path | What it does | Body |
 |---|---|---|
-| `GET /api/version` | The build version of the running binary (shown in Settings). | — |
+| `GET /api/version` | The build version of the running binary (shown in Settings), plus `latest` and `update_available` from the daily update check. | — |
+
+Any write to a project a newer hate changed answers **409** with `newer_format: true`; reads still work.
 | `GET /api/guide?section=` | This guide as `text/markdown`, embedded in the binary. `?section=3` returns only `## 3.` (404 for an unknown section). | — |
 | `GET /api/search?q=&limit=` | Search tickets across every non-hidden project (closed included) by ID or title, ignoring case. Ranked: exact ID, ID prefix (`HATE-84`), ID contains (`8414`), title contains; open tickets first within a rank. `limit` defaults to 20, max 50; an empty `q` returns `[]`. Each hit: `project_id, project_name, project_path, prefix, ticket_id, title, status, type, closed_project`. | — |
 | `GET /api/git/check` | Is git installed (`installed`, `version`, `install_url`). | — |
@@ -1076,7 +1078,9 @@ Rules of the road:
   (log time, then retry), `estimate_invalid` (§3), `needs_time_extension` (ask
   the user, retry with `extend_authorized` + `extend_reason`), `project_closed`,
   `not_found`, `ambiguous_project` (with `candidates`), `invalid_input`,
-  `conflict` (the folder, project id or prefix already exists).
+  `conflict` (the folder, project id or prefix already exists),
+  `project_newer_format` (a newer hate changed the project: reads work, writes
+  don't; tell the user to update hate).
 
 Tools (all named `hate_*`):
 

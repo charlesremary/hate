@@ -366,6 +366,25 @@ project, the status light) and the owner's "grant access" checklist are in
 hate opens the browser at the app when it starts; pass `-no-browser` (or set
 `HATE_NO_BROWSER=1`) to skip that.
 
+## Versions, project format and updates
+
+One version number: `AppVersion` (`internal/config`). Its **major** is also the
+project format, `schema_version` in `.tkt/config.json` (`ticket.FormatMajor`,
+pinned to the app's major by a test). A hate refuses to change a project whose
+format major is newer than its own: Go drops JSON fields it doesn't know, so an
+older binary editing a newer project would lose data silently. Such a project
+opens read-only (REST 409 `newer_format`, MCP `project_newer_format`, a UI
+banner), and sync won't merge local changes into it (a fast-forward is fine).
+Within a major, top-level ticket and config fields an older hate doesn't know
+are kept on write and through sync merges, so **adding** a field is a minor
+release. Renaming, removing or re-meaning a field, or adding one inside a
+nested object, is a format change: bump the major and add a migration.
+
+Once a day (`internal/update`) hate reads the version line of `Casks/hate.rb`
+on main (no API, no token, nothing sent but the GET), caches it in the app
+config folder, and shows a dismissible upgrade banner when it is newer. Off via
+Settings or `HATE_NO_UPDATE_CHECK=1`.
+
 ## License
 
 HATE is licensed under the Functional Source License, Version 1.1, Apache 2.0 Future License (FSL-1.1-Apache-2.0).

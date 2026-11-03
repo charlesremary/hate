@@ -24,7 +24,7 @@ import (
 //
 // (See the note in the Makefile, which also reminds you.)
 // ============================================================================
-const AppVersion = "1.0.20"
+const AppVersion = "1.1.0"
 
 // AppConfigPath is the path to the application-level config file:
 // ~/.pm-agent/config.json, or config.json in $HATE_CONFIG_DIR when that is set

@@ -404,7 +404,7 @@ func TestHeaderAndHelp(t *testing.T) {
 			t.Errorf("Help does not mention %q", want)
 		}
 	}
-	if config.AppVersion != "1.0.20" { // HATE-5yth: hate_create_project build is v1.0.20
+	if config.AppVersion != "1.1.0" { // HATE-txbo: release A (schema guard, update banner) is v1.1.0
 		t.Errorf("AppVersion = %s", config.AppVersion)
 	}
 }
