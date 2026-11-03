@@ -4,6 +4,7 @@
 package merge
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"hate/internal/ticket"
@@ -96,11 +97,15 @@ func MergeConfig(base, mine, theirs []byte) ([]byte, []string, error) {
 		}
 	}
 
-	var cfg ticket.ProjectConfig
-	if err := remarshal(out, &cfg); err != nil {
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg, err := ticket.DecodeConfig(raw) // hate's field order; unknown members kept
+	if err != nil {
 		return nil, nil, fmt.Errorf("merged config doesn't fit the config format: %v", err)
 	}
-	data, err := indent(&cfg, true)
+	data, err := ticket.EncodeConfig(cfg)
 	if err != nil {
 		return nil, nil, err
 	}

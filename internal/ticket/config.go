@@ -5,7 +5,6 @@ package ticket
 
 import (
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
@@ -171,6 +170,8 @@ type ProjectConfig struct {
 	Contacts     []Contact     `json:"contacts,omitempty"`
 	Links        []Link        `json:"links,omitempty"`
 	Instructions []Instruction `json:"instructions,omitempty"`
+	// extra holds members this hate has no field for; WriteConfig keeps them.
+	extra extraFields
 }
 
 // IsClosed reports whether the project's ClosedAt field is set.
@@ -386,26 +387,28 @@ func ReadConfig(repoRoot string) (*ProjectConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
-	var cfg ProjectConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	cfg, err := DecodeConfig(data)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
-	return &cfg, nil
+	return cfg, nil
 }
 
 // WriteConfig writes the project config to .tkt/config.json (atomically). The
 // caller holds the project lock.
 func WriteConfig(repoRoot string, cfg *ProjectConfig) error {
+	if err := CheckWritable(repoRoot); err != nil {
+		return err
+	}
 	path := ConfigPath(repoRoot)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := EncodeConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-	data = append(data, '\n')
 	return fsutil.WriteFileAtomic(path, data, 0644)
 }
 

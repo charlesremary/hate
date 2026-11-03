@@ -4,7 +4,6 @@
 package ticket
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -57,10 +56,11 @@ func ReadTicket(repoRoot, ticketID string) (*Ticket, error) {
 		}
 		return nil, err
 	}
-	var t Ticket
-	if err := json.Unmarshal(data, &t); err != nil {
+	tp, err := DecodeTicket(data)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse ticket %s: %w", ticketID, err)
 	}
+	t := *tp
 	// Ensure slices are not nil for JSON compatibility
 	if t.Tags == nil {
 		t.Tags = []string{}
@@ -109,11 +109,12 @@ func ReadAllTickets(repoRoot string) ([]*Ticket, error) {
 			log.Printf("skipping ticket file %s: %v", path, err)
 			continue
 		}
-		var t Ticket
-		if err := json.Unmarshal(data, &t); err != nil {
+		tp, err := DecodeTicket(data)
+		if err != nil {
 			log.Printf("skipping ticket file %s: invalid JSON: %v", path, err)
 			continue
 		}
+		t := *tp
 		if t.Tags == nil {
 			t.Tags = []string{}
 		}
@@ -143,6 +144,9 @@ func ReadAllTickets(repoRoot string) ([]*Ticket, error) {
 // here, so the normalized form is written with the edit that caused it. The
 // caller holds the project lock.
 func WriteTicket(repoRoot string, t *Ticket) error {
+	if err := CheckWritable(repoRoot); err != nil {
+		return err
+	}
 	recordNormalization(t)
 	errors := ValidateTicket(t)
 	if len(errors) > 0 {
@@ -153,11 +157,10 @@ func WriteTicket(repoRoot string, t *Ticket) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create tickets directory: %w", err)
 	}
-	data, err := json.MarshalIndent(t, "", "  ")
+	data, err := EncodeTicket(t)
 	if err != nil {
 		return fmt.Errorf("failed to marshal ticket: %w", err)
 	}
-	data = append(data, '\n')
 	return fsutil.WriteFileAtomic(path, data, 0644)
 }
 

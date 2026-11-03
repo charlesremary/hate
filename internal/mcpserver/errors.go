@@ -35,6 +35,9 @@ func mapError(err error) error {
 	var est *ticket.EstimateValidationError
 	var ext *service.TimeExtensionError
 	switch {
+	case ticket.IsNewerFormat(err):
+		return toolError{"error": "project_newer_format", "detail": err.Error(),
+			"next": "tell the user to update hate (brew upgrade --cask hate) and restart it; reads still work"}
 	case errors.As(err, &amb):
 		return toolError{"error": "ambiguous_project", "detail": err.Error(), "candidates": amb.Candidates}
 	case errors.Is(err, service.ErrProjectClosed):

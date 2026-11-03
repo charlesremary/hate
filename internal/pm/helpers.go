@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"hate/internal/fsutil"
+	"hate/internal/ticket"
 )
 
 // ValidSlipCategories is the list of valid slip reason categories.
@@ -63,10 +64,19 @@ func WriteSlipEvents(projectRoot string, events []SlipEvent) error {
 	if err != nil {
 		return err
 	}
-	return fsutil.WriteFileAtomic(SlipEventsPath(projectRoot), data, 0o644)
+	return writeProjectFile(projectRoot, SlipEventsPath(projectRoot), data, 0o644)
 }
 
 // ValidSlipCategoriesString returns the categories joined for error messages.
 func ValidSlipCategoriesString() string {
 	return strings.Join(ValidSlipCategories, ", ")
+}
+
+// writeProjectFile writes a file in the project at projectRoot, refusing
+// when a newer hate changed the project (see ticket.CheckWritable).
+func writeProjectFile(projectRoot, path string, data []byte, perm os.FileMode) error {
+	if err := ticket.CheckWritable(projectRoot); err != nil {
+		return err
+	}
+	return fsutil.WriteFileAtomic(path, data, perm)
 }

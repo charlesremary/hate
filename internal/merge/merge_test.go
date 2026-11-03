@@ -394,3 +394,27 @@ func TestBaselineBothSides(t *testing.T) {
 		t.Errorf("archive collision: %+v %v", res, written)
 	}
 }
+
+// HATE-189v: a field this hate doesn't know (written by a newer minor)
+// survives a three-way merge.
+func TestTicketMergeKeepsUnknownFields(t *testing.T) {
+	base := baseTicket()
+	mine, theirs := clone(t, base), clone(t, base)
+	mine.Title = "Mine"
+	mine.UpdatedAt = "2026-09-02T09:00:00Z"
+	var tm map[string]any
+	json.Unmarshal(mustJSON(t, theirs), &tm)
+	tm["lifecycle"] = "Build"
+	theirsJSON, _ := json.MarshalIndent(tm, "", "  ")
+	res, err := ResolveFile("tickets/CW-1.json", mustJSON(t, base), mustJSON(t, mine), theirsJSON)
+	if err != nil || res.NeedsAttention {
+		t.Fatalf("resolve: %v %+v", err, res)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(res.Merged, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["lifecycle"] != "Build" || got["title"] != "Mine" {
+		t.Errorf("merged lifecycle=%v title=%v\n%s", got["lifecycle"], got["title"], res.Merged)
+	}
+}

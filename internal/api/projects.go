@@ -98,6 +98,7 @@ func RegisterProjectRoutes(r chi.Router) {
 		r.Post("/unhide", unhideProject)
 
 		r.Route("/{projectId}", func(r chi.Router) {
+			r.Use(blockWritesWhenNewerFormat)
 			r.Get("/", getProject)
 			r.Get("/sync-status", getSyncStatus)
 			r.Post("/sync", syncProject)
@@ -144,10 +145,15 @@ func projectSummary(project map[string]interface{}) map[string]interface{} {
 	result["health"] = nil
 	result["resource_count"] = float64(0)
 	result["closed_at"] = ""
+	result["newer_format"] = false
 
 	path, _ := project["path"].(string)
 	if path == "" {
 		return result
+	}
+	if err := ticket.CheckWritable(path); err != nil {
+		result["newer_format"] = true
+		result["newer_format_detail"] = err.Error()
 	}
 
 	// Ticket count from the ticket files (not index.json, which a fresh clone

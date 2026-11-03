@@ -522,3 +522,46 @@ func TestNetworkFailureWording(t *testing.T) {
 		}
 	}
 }
+
+// HATE-189v: with local changes waiting, an older hate won't merge a shared
+// copy a newer hate changed: it stops, keeps the local commits, and says why.
+// With nothing local, it just catches up (a fast-forward) and the project is
+// then read-only here.
+func TestNewerSharedCopyNotMerged(t *testing.T) {
+	_, chuck, pm := twoMachines(t)
+	// pm's hate is "newer": bump the shared config's format.
+	cp := ticket.ConfigPath(pm.root)
+	data, _ := os.ReadFile(cp)
+	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "1.0.0"`, `"schema_version": "2.0.0"`, 1)), 0644)
+	pm.git("commit", "-qam", "migrate to format 2")
+	pm.git("push", "-q")
+
+	chuck.editTicket("ST-0001", func(tk *ticket.Ticket) { tk.Title = "local edit" })
+	localHead := chuck.git("rev-parse", "HEAD")
+	r := chuck.sync()
+	if r.State != StateAttention || !strings.Contains(r.Message, "newer hate") {
+		t.Fatalf("sync = %+v", r)
+	}
+	if chuck.git("rev-parse", "HEAD") != localHead {
+		t.Error("local history changed")
+	}
+	chuck.clean()
+
+}
+
+func TestNewerSharedCopyFastForwards(t *testing.T) {
+	_, chuck, pm := twoMachines(t)
+	cp := ticket.ConfigPath(pm.root)
+	data, _ := os.ReadFile(cp)
+	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "1.0.0"`, `"schema_version": "2.0.0"`, 1)), 0644)
+	pm.git("commit", "-qam", "migrate to format 2")
+	pm.git("push", "-q")
+
+	if r := chuck.sync(); r.State != StateSynced || r.Pulled == 0 {
+		t.Fatalf("sync = %+v", r)
+	}
+	if !ticket.IsNewerFormat(ticket.CheckWritable(chuck.root)) {
+		t.Error("project should be read-only after catching up to a newer format")
+	}
+	chuck.clean()
+}

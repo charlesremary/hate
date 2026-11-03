@@ -21,13 +21,16 @@ type ProjectSummary struct {
 	Path        string `json:"path"`
 	Closed      bool   `json:"closed"`
 	TicketCount int    `json:"ticket_count"`
+	// NewerFormat: a newer hate changed the project; it is read-only here.
+	NewerFormat bool `json:"newer_format,omitempty"`
 }
 
 // ListProjects returns every registered, non-hidden project.
 func ListProjects(includeClosed bool) []ProjectSummary {
 	out := []ProjectSummary{}
 	for _, p := range config.ListProjects() {
-		s := ProjectSummary{ID: p.ID, Name: p.Name, Client: p.Client, Prefix: p.Prefix, Path: p.Path}
+		s := ProjectSummary{ID: p.ID, Name: p.Name, Client: p.Client, Prefix: p.Prefix, Path: p.Path,
+			NewerFormat: ticket.CheckWritable(p.Path) != nil}
 		if cfg, err := ticket.ReadConfig(p.Path); err == nil {
 			s.Closed = cfg.IsClosed()
 		}
@@ -63,6 +66,8 @@ type ProjectDetail struct {
 	EnforceQA             bool              `json:"enforce_qa"`
 	TicketCount           int               `json:"ticket_count"`
 	Resources             []ProjectResource `json:"resources"`
+	// NewerFormat: a newer hate changed the project; writes are refused.
+	NewerFormat bool `json:"newer_format,omitempty"`
 }
 
 // GetProject reads a project's details.
@@ -75,7 +80,8 @@ func GetProject(root string) (*ProjectDetail, error) {
 		ID: cfg.ProjectID, Name: cfg.ProjectName, Client: cfg.Client, Prefix: cfg.Prefix, Path: root,
 		Closed: cfg.IsClosed(), BlockWeeks: cfg.BlockWeeks,
 		StrictTimeEnforcement: cfg.StrictTimeEnforcement, EnforceQA: cfg.EnforceQA,
-		Resources: []ProjectResource{},
+		Resources:   []ProjectResource{},
+		NewerFormat: ticket.CheckWritable(root) != nil,
 	}
 	d.TicketCount = countTickets(root)
 	for _, r := range cfg.Resources {

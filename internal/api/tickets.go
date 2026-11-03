@@ -84,6 +84,8 @@ func respondServiceError(w http.ResponseWriter, err error, fallback int) {
 	var estErr *ticket.EstimateValidationError
 	var extErr *service.TimeExtensionError
 	switch {
+	case ticket.IsNewerFormat(err):
+		respondNewerFormat(w, err)
 	case errors.Is(err, service.ErrProjectClosed):
 		respondError(w, http.StatusLocked, err.Error())
 	case errors.Is(err, ticket.ErrNeedsTimeLog):
@@ -215,7 +217,7 @@ func strVal(p *string) string {
 // RegisterTicketRoutes registers all ticket API routes on the given router.
 func RegisterTicketRoutes(r chi.Router) {
 	r.Route("/api/projects/{projectId}/tickets", func(r chi.Router) {
-		r.Use(blockWritesWhenProjectClosed)
+		r.Use(blockWritesWhenNewerFormat, blockWritesWhenProjectClosed)
 		r.Get("/", handleListTickets)
 		r.Post("/", handleCreateTicket)
 		r.Post("/bulk", handleCreateTicketsBulk)

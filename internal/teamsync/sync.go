@@ -95,6 +95,18 @@ func Sync(ctx context.Context, root string) Result {
 		}
 		res.Fetched = true
 		behind, ahead := counts(root)
+		if behind > 0 && ahead > 0 {
+			// Merging the shared copy into local changes rewrites files; an
+			// older hate must not do that to a newer project's files. With no
+			// local changes the merge is a fast-forward and safe (the project
+			// then opens read-only here).
+			if v := ticket.FormatOfConfig([]byte(gitOut(root, "show", "@{u}:.tkt/config.json"))); ticket.FormatIsNewer(v) {
+				r := attention("The shared copy was updated by a newer hate. Update hate (brew upgrade --cask hate) to sync; your changes are kept on this computer.",
+					&ticket.NewerFormatError{Root: root, Version: v})
+				r.Fetched = true
+				return r
+			}
+		}
 		if behind > 0 {
 			pulled, merged, notes, attn, err := mergeUpstream(root)
 			if err != nil {

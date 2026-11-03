@@ -12,7 +12,6 @@ import (
 	"sort"
 	"time"
 
-	"hate/internal/fsutil"
 	"hate/internal/ticket"
 )
 
@@ -240,7 +239,7 @@ func runSnapshot(projectID, projectRoot, generatedBy string) (*Snapshot, error) 
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal slip events: %w", err)
 		}
-		if err := fsutil.WriteFileAtomic(sep, slipData, 0644); err != nil {
+		if err := writeProjectFile(projectRoot, sep, slipData, 0644); err != nil {
 			return nil, fmt.Errorf("failed to write slip events: %w", err)
 		}
 	}
@@ -265,7 +264,7 @@ func runSnapshot(projectID, projectRoot, generatedBy string) (*Snapshot, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal snapshot: %w", err)
 	}
-	if err := fsutil.WriteFileAtomic(outPath, snapData, 0644); err != nil {
+	if err := writeProjectFile(projectRoot, outPath, snapData, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write snapshot: %w", err)
 	}
 
@@ -448,7 +447,7 @@ func writeBaseline(projectRoot string, baseline *Baseline) error {
 		return fmt.Errorf("failed to marshal baseline: %w", err)
 	}
 	bdata = append(bdata, '\n')
-	if err := fsutil.WriteFileAtomic(bp, bdata, 0644); err != nil {
+	if err := writeProjectFile(projectRoot, bp, bdata, 0644); err != nil {
 		return fmt.Errorf("failed to write baseline: %w", err)
 	}
 	return nil

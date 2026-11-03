@@ -18,7 +18,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"hate/internal/fsutil"
 	"hate/internal/ticket"
 )
 
@@ -79,7 +78,7 @@ func ensurePMGitignore(projectRoot string) (string, error) {
 		data = append(data, '\n')
 	}
 	data = append(data, []byte("snapshots/\n")...)
-	return path, fsutil.WriteFileAtomic(path, data, 0644)
+	return path, writeProjectFile(projectRoot, path, data, 0644)
 }
 
 // commitPlan commits the given (existing) paths with ticket.CommitFiles.
@@ -295,7 +294,7 @@ func Rebaseline(projectRoot, projectID, projectName, reason, author string) (*Re
 	if err != nil {
 		return nil, err
 	}
-	if err := fsutil.WriteFileAtomic(archivePath, append(data, '\n'), 0644); err != nil {
+	if err := writeProjectFile(projectRoot, archivePath, append(data, '\n'), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write baseline archive: %w", err)
 	}
 

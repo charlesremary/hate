@@ -57,6 +57,9 @@ func ResolveTicketProject(projectRef, ticketID string) (string, error) {
 
 // checkOpen refuses writes to a closed project. The caller holds the lock.
 func checkOpen(root string) error {
+	if err := ticket.CheckWritable(root); err != nil {
+		return &Error{Kind: ErrInvalidInput, Msg: err.Error(), Cause: err}
+	}
 	if cfg, err := ticket.ReadConfig(root); err == nil && cfg.IsClosed() {
 		return &Error{Kind: ErrProjectClosed, Msg: ErrProjectClosed.Error()}
 	}

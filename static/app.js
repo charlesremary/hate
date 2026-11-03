@@ -370,6 +370,17 @@ function applyProjectClosedUI(closedAt) {
   }
 }
 
+// Read-only banner for a project a newer hate changed (newer_format from
+// /api/projects). The server refuses the writes; this tells the user why.
+function applyProjectNewerUI(newer) {
+  document.getElementById('project-newer-banner').classList.toggle('hidden', !newer);
+  if (newer) {
+    const newBtn = document.getElementById('btn-new-ticket');
+    newBtn.disabled = true;
+    newBtn.title = 'This project was updated by a newer hate: update hate to make changes';
+  }
+}
+
 async function selectProject(id, path, projectData) {
   currentProject = { id, path, ...projectData };
   ticketRefCache.clear();
@@ -388,6 +399,7 @@ async function selectProject(id, path, projectData) {
   const hb = document.getElementById('project-health-badge');
   hb.outerHTML = `<span id="project-health-badge">${healthBadge(currentProject.health)}</span>`;
   applyProjectClosedUI(currentProject.closed_at);
+  applyProjectNewerUI(!!currentProject.newer_format);
 
   // Fetch resources and current user identity
   try {

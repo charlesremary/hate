@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"hate/internal/fsutil"
 	"hate/internal/ticket"
 )
 
@@ -105,15 +104,15 @@ func RecordForecastHistory(projectRoot string, rep ForecastReport, today time.Ti
 		RemainingHours: rep.RemainingHours,
 		ComputedAt:     today.UTC().Format(time.RFC3339),
 	})
-	if !changed {
-		return hist, false, nil
+	if !changed || ticket.CheckWritable(projectRoot) != nil {
+		return hist, false, nil // unchanged, or a newer hate's project: shown, not recorded
 	}
 	path := ForecastHistoryPath(projectRoot)
 	data, err := json.MarshalIndent(hist, "", "  ")
 	if err != nil {
 		return hist, false, err
 	}
-	if err := fsutil.WriteFileAtomic(path, append(data, '\n'), 0644); err != nil {
+	if err := writeProjectFile(projectRoot, path, append(data, '\n'), 0644); err != nil {
 		return hist, false, err
 	}
 	_ = ticket.CommitFiles(projectRoot, []string{path}, "forecast history")

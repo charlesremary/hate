@@ -4,6 +4,7 @@
 package merge
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -117,11 +118,15 @@ func MergeTicket(base, mine, theirs []byte) ([]byte, []string, error) {
 	})
 	out["activity"] = act
 
-	var tk ticket.Ticket
-	if err := remarshal(out, &tk); err != nil {
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return nil, nil, err
+	}
+	tk, err := ticket.DecodeTicket(raw) // hate's field order; unknown members kept
+	if err != nil {
 		return nil, nil, fmt.Errorf("merged ticket doesn't fit the ticket format: %v", err)
 	}
-	data, err := indent(&tk, true)
+	data, err := ticket.EncodeTicket(tk)
 	if err != nil {
 		return nil, nil, err
 	}

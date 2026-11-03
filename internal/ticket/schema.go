@@ -201,6 +201,10 @@ type Ticket struct {
 	// legacyNotes are the retired values NormalizeLegacy mapped on read, not
 	// yet written (see legacy.go). Not serialized.
 	legacyNotes []string
+
+	// extra holds members of the file this hate has no field for (written by
+	// a newer hate); WriteTicket keeps them. See format.go.
+	extra extraFields
 }
 
 // NowISO returns the current UTC time in ISO 8601 format matching Python's output.
