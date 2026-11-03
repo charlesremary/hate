@@ -103,6 +103,15 @@ func priorityRank(p string) int {
 	}
 }
 
+// ganttStatusOf is the Gantt colour status of a ticket: "blocked" when it's
+// flagged blocked (and not finished), else its coarse status.
+func ganttStatusOf(t *ticket.Ticket) string {
+	if s := ganttStatus(t.Status); t.Blocked != nil && s != "complete" {
+		return "blocked"
+	}
+	return ganttStatus(t.Status)
+}
+
 // ganttStatus maps a ticket status to the coarse status the Gantt colours by.
 func ganttStatus(s string) string {
 	switch s {
@@ -564,7 +573,7 @@ func (p *CapacityPlan) Snapshot(projectID, projectName string) *Snapshot {
 			TaskID:       t.ID,
 			Title:        t.Title,
 			Owner:        ownerOf(t),
-			Status:       ganttStatus(t.Status),
+			Status:       ganttStatusOf(t),
 			Lifecycle:    lifecycle,
 			Dependencies: deps,
 			Baseline: BaselineInfo{

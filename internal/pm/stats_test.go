@@ -90,3 +90,42 @@ func TestComputeStatsBlockWindow(t *testing.T) {
 	}
 }
 
+
+// HATE-kbq9: rework rate = hours on rework tickets / all hours logged, by
+// category and who introduced it; rework stays out of accuracy.
+func TestStatsRework(t *testing.T) {
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	a := wrapDone("A", 4, 6, "2026-11-02", "2026-11-03", "2026-11-05")
+	rw := wrapDone("R", 2, 2, "2026-11-10", "2026-11-11", "2026-11-12")
+	rw.Tags = append(rw.Tags, "rework-of:A")
+	rw.ReworkCategory, rw.IntroducedBy = "defect", "agent"
+	desc := wrapDone("D", 1, 0, "2026-11-02", "", "")
+	desc.Status, desc.CancellationReason, desc.CloseCategory = "closed", strp("not needed"), "descoped"
+	tickets := []*ticket.Ticket{a, rw, desc}
+	st := ComputeStats(tickets, NewEstimateContext(tickets, 0, nil), nil, "", now)
+	if st.ReworkRate.Value != 25 || st.ReworkRate.N != 1 || st.ReworkAgent != 1 || st.ReworkByCategory["defect"].Tickets != 1 {
+		t.Errorf("rework = %+v by %v agent %d", st.ReworkRate, st.ReworkByCategory, st.ReworkAgent)
+	}
+	if st.AccuracyWrap.N != 1 || st.AccuracyWrap.Value != 1.5 {
+		t.Errorf("accuracy should exclude rework: %+v", st.AccuracyWrap)
+	}
+	if st.Descoped["descoped"] != 1 {
+		t.Errorf("descoped = %v", st.Descoped)
+	}
+	if html := RenderStatsHTML(st, ""); !strings.Contains(html, "Rework") || !strings.Contains(html, "Defect (missed in testing)") || !strings.Contains(html, "Closed unfinished") {
+		t.Error("rework / closed cards missing")
+	}
+}
+
+// Force-closed as done counts as finished in the stats.
+func TestStatsForceClosedDone(t *testing.T) {
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	d := wrapDone("D", 4, 0, "2026-11-02", "", "")
+	d.Status, d.CancellationReason, d.CloseCategory = "closed", strp("Done: shipped"), "done"
+	d.Activity = append(d.Activity, ticket.Activity{Timestamp: "2026-11-18T10:00:00Z", Action: "force_closed", Detail: "not_started -> closed (Done): Done: shipped"})
+	o := wrapDone("O", 4, 0, "2026-11-02", "", "")
+	st := ComputeStats([]*ticket.Ticket{d, o}, NewEstimateContext([]*ticket.Ticket{d, o}, 0, nil), nil, "", now)
+	if st.TicketsDone != 1 || st.TicketsTotal != 2 || st.PercentComplete.Value != 50 || st.Finished.Value != 1 {
+		t.Errorf("done %d/%d %v%% finished %v", st.TicketsDone, st.TicketsTotal, st.PercentComplete.Value, st.Finished.Value)
+	}
+}

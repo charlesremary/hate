@@ -39,11 +39,18 @@ type MigrateOptions struct {
 
 // MigrationChange is one ticket's change.
 type MigrationChange struct {
-	TicketID  string `json:"ticket_id"`
-	Title     string `json:"title"`
-	From      string `json:"from"`      // the old phase
+	TicketID string `json:"ticket_id"`
+	Title    string `json:"title"`
+	// Kind: "phase" (1 -> 2: From is the old phase, Lifecycle / Block the
+	// result), "blocked" (2 -> 3: a blocked status becomes the flag),
+	// "close_category" (2 -> 3: a force-close gets its category).
+	Kind      string `json:"kind"`
+	From      string `json:"from"`
 	Lifecycle string `json:"lifecycle"` // "" = none
 	Block     int    `json:"block"`     // 0 = none
+	// To describes the result for people ("in_progress, flagged blocked",
+	// "Done").
+	To string `json:"to"`
 }
 
 // MigrationPlan is the preview (and, after ApplyMigration, the result).
@@ -58,6 +65,9 @@ type MigrationPlan struct {
 	Tickets                int               `json:"tickets"`
 	ToBlock                int               `json:"to_block"`
 	ToLifecycle            int               `json:"to_lifecycle"`
+	Unblocked              int               `json:"blocked_to_flag"`
+	ClosedDone             int               `json:"force_closed_done"`
+	ClosedDescoped         int               `json:"force_closed_descoped"`
 	Changes                []MigrationChange `json:"changes"`
 	// Applied and CommitWarning are set by ApplyMigration.
 	Applied       bool   `json:"applied"`
@@ -77,6 +87,7 @@ type resolvedOpts struct {
 
 var migrationSteps = []migrationStep{
 	{from: 1, run: migrate1to2},
+	{from: 2, run: migrate2to3},
 }
 
 // blockPhaseRe matches a format-1 block phase: "Block 01", "Block 7 (Nov 2-13)".
@@ -115,11 +126,84 @@ func migrate1to2(cfg rawObject, tickets []rawObject, opts resolvedOpts, note fun
 		}
 		id, _ := t["id"].(string)
 		title, _ := t["title"].(string)
-		changes = append(changes, MigrationChange{TicketID: id, Title: title, From: phase, Lifecycle: lc, Block: block})
+		to := fmt.Sprintf("lifecycle %q", lc)
 		if block > 0 {
-			note(t, fmt.Sprintf("migrated to hate 2.0: phase %q -> block %d", phase, block))
+			to = fmt.Sprintf("block %d", block)
+		}
+		changes = append(changes, MigrationChange{TicketID: id, Title: title, Kind: "phase", From: phase, Lifecycle: lc, Block: block, To: to})
+		if block > 0 {
+			note(t, fmt.Sprintf("migrated: phase %q -> block %d", phase, block))
 		} else {
-			note(t, fmt.Sprintf("migrated to hate 2.0: phase %q -> lifecycle %q", phase, lc))
+			note(t, fmt.Sprintf("migrated: phase %q -> lifecycle %q", phase, lc))
+		}
+	}
+	return changes
+}
+
+// statusBeforeBlocked finds the status a format-2 blocked ticket had before
+// it was blocked, from its activity log ("in_progress -> blocked: ...").
+func statusBeforeBlocked(activity []any) (status, since string) {
+	for i := len(activity) - 1; i >= 0; i-- {
+		a, _ := activity[i].(map[string]any)
+		if a == nil || a["action"] != "status_changed" {
+			continue
+		}
+		d, _ := a["detail"].(string)
+		before, after, ok := strings.Cut(d, " -> ")
+		if !ok {
+			continue
+		}
+		after, _, _ = strings.Cut(after, ":")
+		if strings.TrimSpace(after) == "blocked" && strings.TrimSpace(before) != "blocked" {
+			ts, _ := a["timestamp"].(string)
+			return strings.TrimSpace(before), ts
+		}
+	}
+	return "", ""
+}
+
+// closeCategoryFor guesses a force-close's category from its reason: "Done"
+// first means done (finished outside the workflow), anything else descoped.
+func closeCategoryFor(reason string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(reason)), "done") {
+		return "done"
+	}
+	return "descoped"
+}
+
+// migrate2to3: blocked status -> blocked flag; force-closes get a category.
+func migrate2to3(cfg rawObject, tickets []rawObject, opts resolvedOpts, note func(rawObject, string)) []MigrationChange {
+	var changes []MigrationChange
+	for _, t := range tickets {
+		id, _ := t["id"].(string)
+		title, _ := t["title"].(string)
+		reason, _ := t["block_reason"].(string)
+		delete(t, "block_reason")
+		if t["status"] == "blocked" {
+			act, _ := t["activity"].([]any)
+			prev, since := statusBeforeBlocked(act)
+			if prev == "" || !Contains(Statuses, prev) {
+				prev = "in_progress"
+			}
+			if since == "" {
+				since, _ = t["updated_at"].(string)
+			}
+			if strings.TrimSpace(reason) == "" {
+				reason = "(no reason recorded)"
+			}
+			t["status"] = prev
+			t["blocked"] = map[string]any{"reason": reason, "since": since}
+			changes = append(changes, MigrationChange{TicketID: id, Title: title, Kind: "blocked", From: "blocked", To: prev + ", flagged blocked"})
+			note(t, fmt.Sprintf("migrated to hate 3.0: status blocked -> %s with the blocked flag", prev))
+		}
+		cr, _ := t["cancellation_reason"].(string)
+		if t["status"] == "closed" && strings.TrimSpace(cr) != "" {
+			if c, _ := t["close_category"].(string); c == "" {
+				cat := closeCategoryFor(cr)
+				t["close_category"] = cat
+				changes = append(changes, MigrationChange{TicketID: id, Title: title, Kind: "close_category", From: "force-closed: " + cr, To: CloseCategoryLabels[cat]})
+				note(t, "migrated to hate 3.0: force-close category "+CloseCategoryLabels[cat])
+			}
 		}
 	}
 	return changes
@@ -199,9 +283,16 @@ func runMigration(p *rawProject, opts MigrateOptions, author, now string) *Migra
 		}
 	}
 	for _, c := range plan.Changes {
-		if c.Block > 0 {
+		switch {
+		case c.Kind == "blocked":
+			plan.Unblocked++
+		case c.Kind == "close_category" && c.To == CloseCategoryLabels["done"]:
+			plan.ClosedDone++
+		case c.Kind == "close_category":
+			plan.ClosedDescoped++
+		case c.Block > 0:
 			plan.ToBlock++
-		} else {
+		default:
 			plan.ToLifecycle++
 		}
 	}
@@ -312,26 +403,53 @@ func checkNotNewer(root string) error {
 
 // translateOnRead maps a ticket read from an older-format project to today's
 // fields in memory (nothing is written): 1 -> 2 turns phase into lifecycle +
-// block with the project's default rule. projectMajor and blockWeeks come
+// block with the project's default rule; 2 -> 3 turns a blocked status into
+// the flag and gives force-closes a category. projectMajor and blockWeeks come
 // from the project config.
 func translateOnRead(t *Ticket, projectMajor int, blockWeeks bool) {
-	if projectMajor >= 2 || t.extra == nil {
+	if projectMajor >= FormatMajor {
 		return
 	}
-	raw, ok := t.extra["phase"]
-	if !ok {
-		return
+	if projectMajor < 2 && t.extra != nil {
+		if raw, ok := t.extra["phase"]; ok {
+			delete(t.extra, "phase")
+			var phase string
+			if json.Unmarshal(raw, &phase) == nil && strings.TrimSpace(phase) != "" {
+				lc, block := PhaseToFormat2(phase, blockWeeks)
+				if lc != "" {
+					t.Lifecycle = StringPtr(lc)
+				}
+				t.Block = block
+			}
+		}
 	}
-	delete(t.extra, "phase")
-	var phase string
-	if json.Unmarshal(raw, &phase) != nil || strings.TrimSpace(phase) == "" {
-		return
+	if projectMajor < 3 {
+		var reason string
+		if t.extra != nil {
+			if raw, ok := t.extra["block_reason"]; ok {
+				_ = json.Unmarshal(raw, &reason)
+				delete(t.extra, "block_reason")
+			}
+		}
+		if t.Status == "blocked" {
+			act := make([]any, len(t.Activity))
+			for i, a := range t.Activity {
+				act[i] = map[string]any{"action": a.Action, "detail": a.Detail, "timestamp": a.Timestamp}
+			}
+			prev, since := statusBeforeBlocked(act)
+			if prev == "" || !Contains(Statuses, prev) {
+				prev = "in_progress"
+			}
+			if strings.TrimSpace(reason) == "" {
+				reason = "(no reason recorded)"
+			}
+			t.Status = prev
+			t.Blocked = &BlockedFlag{Reason: reason, Since: since}
+		}
+		if t.Status == "closed" && t.CancellationReason != nil && *t.CancellationReason != "" && t.CloseCategory == "" {
+			t.CloseCategory = closeCategoryFor(*t.CancellationReason)
+		}
 	}
-	lc, block := PhaseToFormat2(phase, blockWeeks)
-	if lc != "" {
-		t.Lifecycle = StringPtr(lc)
-	}
-	t.Block = block
 }
 
 // projectReadContext is what translateOnRead needs from the project config.

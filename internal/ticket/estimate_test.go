@@ -150,7 +150,7 @@ func TestCreateAndPromoteEstimateRules(t *testing.T) {
 	if !errors.As(err, &ev) {
 		t.Fatalf("promote unclassed child: got %v, want EstimateValidationError", err)
 	}
-	if fc, err := ForceClose(root, bare.ID, "scoped out", "me"); err != nil || fc.Status != "closed" {
+	if fc, err := ForceClose(root, bare.ID, "descoped", "scoped out", "me"); err != nil || fc.Status != "closed" {
 		t.Errorf("force-close should bypass the estimate rules: %v / %v", fc, err)
 	}
 }

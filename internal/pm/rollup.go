@@ -63,7 +63,7 @@ type RollupReport struct {
 // genuinely completed. Such tickets are dropped scope, not finished work, so
 // they're excluded from the percentage and counted on their own line.
 func isCancelled(t *ticket.Ticket) bool {
-	return t.Status == "closed" && t.CancellationReason != nil && *t.CancellationReason != ""
+	return ticket.IsDescoped(t) // force-closed as done counts as finished
 }
 
 // isComplete reports whether a ticket has reached a non-cancelled terminal
@@ -145,7 +145,7 @@ func Rollup(tickets []*ticket.Ticket, ctx EstimateContext, by string) RollupRepo
 		case isComplete(t):
 			p.CompleteCount++
 			p.EstHoursDone += hours
-		case t.Status == "blocked":
+		case t.Blocked != nil:
 			p.BlockedCount++
 		case t.Status == "not_started":
 			p.NotStartedCount++

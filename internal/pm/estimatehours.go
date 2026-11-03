@@ -99,7 +99,8 @@ func (ctx EstimateContext) prepared() EstimateContext {
 			continue
 		}
 		ix.hasChildren[pid] = true
-		if ticket.ClassOf(t) == ticket.ClassFunctional && inHoursScope(t) {
+		// Rework never takes a share of the feature's CFP (hate 3.0).
+		if ticket.ClassOf(t) == ticket.ClassFunctional && inHoursScope(t) && !ticket.IsRework(t) {
 			ix.functionalCnt[pid]++
 		}
 	}
@@ -166,6 +167,14 @@ func EstimatedHours(t *ticket.Ticket, ctx EstimateContext) (float64, string) {
 	ctx = ctx.prepared()
 	if ctx.idx.hasChildren[t.ID] {
 		return 0, "" // a parent is a container; its children carry the hours
+	}
+	if ticket.IsRework(t) {
+		// Rework is sized by its own estimate, never by the feature's CFP,
+		// so the original work's estimate-vs-actual stays clean.
+		if t.EstimateHours != nil {
+			return *t.EstimateHours, SourceEstimate
+		}
+		return 0, ""
 	}
 	switch class := ticket.ClassOf(t); {
 	case ticket.IsWrapClass(class):
@@ -258,7 +267,7 @@ func FeatureFunctionalDone(feature *ticket.Ticket, tickets []*ticket.Ticket) boo
 		n++
 	}
 	for _, c := range tickets {
-		if ticket.ParentID(c) != feature.ID || ticket.ClassOf(c) != ticket.ClassFunctional {
+		if ticket.ParentID(c) != feature.ID || ticket.ClassOf(c) != ticket.ClassFunctional || ticket.IsRework(c) {
 			continue
 		}
 		if !IsFunctionalDoneStatus(c.Status) {

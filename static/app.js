@@ -394,17 +394,26 @@ function applyProjectUpdateUI(needed) {
 async function loadProjectUpdatePreview(blocks) {
   const q = blocks === undefined ? '' : `?blocks_from_phase=${blocks}`;
   const plan = await API.get(`/api/projects/${currentProject.id}/migration${q}`);
+  const major = v => parseInt(String(v || '1').split('.')[0], 10) || 1;
+  document.getElementById('pu-title').textContent = `Update project to the hate ${major(plan.to_version)}.0 format`;
   document.getElementById('pu-blocks').checked = plan.blocks_from_phase;
+  document.getElementById('pu-blocks-label').classList.toggle('hidden', major(plan.from_version) >= 2);
+  const parts = [];
+  if (plan.to_block) parts.push(`<strong>${plan.to_block}</strong> old phases become block numbers`);
+  if (plan.to_lifecycle) parts.push(`<strong>${plan.to_lifecycle}</strong> old phases become lifecycles`);
+  if (plan.blocked_to_flag) parts.push(`<strong>${plan.blocked_to_flag}</strong> blocked tickets go back to their status with the blocked flag`);
+  if (plan.force_closed_done) parts.push(`<strong>${plan.force_closed_done}</strong> force-closed tickets count as done`);
+  if (plan.force_closed_descoped) parts.push(`<strong>${plan.force_closed_descoped}</strong> force-closed tickets are marked descoped`);
   document.getElementById('pu-summary').innerHTML = plan.needed
-    ? `${plan.tickets} tickets. <strong>${plan.to_block}</strong> get a block number, <strong>${plan.to_lifecycle}</strong> get a lifecycle, the rest have no phase and only get the new format.`
+    ? `${plan.tickets} tickets. ${parts.length ? parts.join('; ') + '.' : 'No ticket changes beyond the new format.'} Every ticket gets the new format.`
     : 'This project is already up to date.';
   document.getElementById('pu-changes').innerHTML = plan.changes.length ? `
     <table style="width:100%;border-collapse:collapse">
-      <thead><tr style="text-align:left;border-bottom:2px solid #ddd"><th>Ticket</th><th>Old phase</th><th>Becomes</th></tr></thead>
+      <thead><tr style="text-align:left;border-bottom:2px solid #ddd"><th>Ticket</th><th>Was</th><th>Becomes</th></tr></thead>
       <tbody>${plan.changes.map(c => `<tr style="border-bottom:1px solid #eee">
         <td style="padding:3px 6px"><strong>${escapeHtml(c.ticket_id)}</strong> ${escapeHtml(c.title)}</td>
-        <td style="padding:3px 6px">${escapeHtml(c.from)}</td>
-        <td style="padding:3px 6px">${c.block ? `block ${c.block}` : `lifecycle "${escapeHtml(c.lifecycle)}"`}</td></tr>`).join('')}</tbody>
+        <td style="padding:3px 6px">${escapeHtml(c.kind === 'phase' ? 'phase ' + c.from : c.from)}</td>
+        <td style="padding:3px 6px">${escapeHtml(c.to)}</td></tr>`).join('')}</tbody>
     </table>` : '';
   document.getElementById('btn-apply-project-update').disabled = !plan.needed;
 }
@@ -830,6 +839,12 @@ function predecessorState(t, byId) {
   return { state: blocking > 0 ? 'blocked' : 'ready', blocking };
 }
 
+// "↺ Rework of X" on rework tickets (hate 3.0).
+function reworkBadge(t) {
+  const of = (t.tags || []).find(x => x.startsWith('rework-of:'));
+  return of ? ` <span class="badge rework-badge" title="Rework (${escapeHtml(t.rework_category || '')}, introduced by ${escapeHtml(t.introduced_by || '?')})">↺ ${escapeHtml(of.slice(10))}</span>` : '';
+}
+
 // Inline badge shown next to the title. Nothing for done tickets or tickets
 // without predecessors.
 function depBadge(t, byId) {
@@ -857,7 +872,7 @@ function workOrderDepth() {
 // A child carries one tag `parent:<PARENT_TICKET_ID>`. No schema change — the
 // parent is an ordinary ticket and the link is just a conventionally-named tag.
 const PARENT_TAG_PREFIX = 'parent:';
-function isReservedTag(tag) { return tag.startsWith(PARENT_TAG_PREFIX); }
+function isReservedTag(tag) { return tag.startsWith(PARENT_TAG_PREFIX) || tag.startsWith('rework-of:'); }
 const BACKLOG_TAG = 'backlog';
 function isBacklogTicket(t) { return (t.tags || []).includes(BACKLOG_TAG); }
 function visibleTags(t) { return (t.tags || []).filter(x => !isReservedTag(x)); }
@@ -928,7 +943,7 @@ function renderTicketTable(tickets) {
     <tr data-id="${t.id}">
       <td style="text-align:center;padding:0;white-space:nowrap">${gutterMarks(t)}</td>
       <td><strong>${t.id}</strong></td>
-      <td>${t.title}${isBacklogTicket(t) ? ' <span class="badge backlog-badge">Backlog</span>' : ''}${depBadge(t, byId)}${kidCount.get(t.id) ? ` <span class="badge child-badge" title="${kidCount.get(t.id)} child ticket(s)">↳ ${kidCount.get(t.id)}</span>` : ''}${estimateGapBadge(t)}</td>
+      <td>${t.title}${isBacklogTicket(t) ? ' <span class="badge backlog-badge">Backlog</span>' : ''}${reworkBadge(t)}${depBadge(t, byId)}${kidCount.get(t.id) ? ` <span class="badge child-badge" title="${kidCount.get(t.id)} child ticket(s)">↳ ${kidCount.get(t.id)}</span>` : ''}${estimateGapBadge(t)}</td>
       <td>${lifecycleBlockCell(t)}</td>
       <td>${statusBadge(t.status)}</td>
       <td>${t.assignee ? t.assignee.split('@')[0] : '—'}</td>
@@ -1669,7 +1684,7 @@ function gutterMarks(t) {
   const badge = (bg, glyph, title) =>
     `<span title="${title}" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:${bg};color:#fff;font-weight:800;font-size:11px;line-height:1">${glyph}</span>`;
   const marks = [];
-  if (t.status === 'blocked') marks.push(badge('#dc2626', '✕', 'Blocked'));
+  if (t.blocked) marks.push(badge('#dc2626', '✕', 'Blocked: ' + escapeHtml(t.blocked.reason || '')));
   if (t.at_risk) marks.push(badge('#2563eb', '!', "Logged hours ≥ 90% of this wrap ticket's hour estimate"));
   return marks.join('&nbsp;');
 }
@@ -1696,15 +1711,16 @@ function workflowStrip(t) {
   return `<div class="wf-strip" title="${escapeHtml(TYPE_LABELS[t.type] || t.type)} workflow">${html}</div>`;
 }
 
-// Promote / Demote buttons named for where they go. Blocked: Promote reads
-// "Unblock to …" and Demote is hidden (both return to the same status). No
-// target: the button is disabled and its tooltip says why.
+// Promote / Demote buttons named for where they go. A blocked ticket (a flag
+// since hate 3.0) shows Unblock instead of Promote. No target: the button is
+// disabled and its tooltip says why.
 function workflowButtons(t) {
   const wf = t.workflow, cur = statusLabel(t.status), path = wf.path || [];
-  const promote = wf.promote_to
-    ? `<button class="btn-primary" onclick="promoteTicket('${t.id}')">▲ ${t.status === 'blocked' ? 'Unblock' : 'Promote'} to ${statusLabel(wf.promote_to)}</button>`
+  const promote = t.blocked
+    ? `<button class="btn-primary" onclick="unblockTicket('${t.id}')">Unblock</button>`
+    : wf.promote_to
+    ? `<button class="btn-primary" onclick="promoteTicket('${t.id}')">▲ Promote to ${statusLabel(wf.promote_to)}</button>`
     : `<button class="btn-primary" disabled title="${path[path.length - 1] === t.status ? `${cur} is the last status` : `Can't promote from ${cur}`}">▲ Promote</button>`;
-  if (t.status === 'blocked') return promote;
   const demote = wf.demote_to
     ? `<button class="btn-secondary" onclick="demoteTicket('${t.id}')">▼ Demote to ${statusLabel(wf.demote_to)}</button>`
     : `<button class="btn-secondary" disabled title="${path[0] === t.status ? `${cur} is the first status` : `Can't demote from ${cur}`}">▼ Demote</button>`;
@@ -1846,10 +1862,13 @@ function renderTicketPanel(t) {
     </div>
     <aside class="panel-side">
     ${workflowStrip(t)}
+    ${t.blocked ? `<div class="blocked-note">⛔ <strong>Blocked</strong>${t.blocked.since ? ' since ' + escapeHtml(t.blocked.since.slice(0, 10)) : ''}: ${escapeHtml(t.blocked.reason || '')}${(t.blocked.waits_on || []).length ? `<br>Waiting on ${linkifyTicketRefs(escapeHtml(t.blocked.waits_on.join(', ')))}` : ''}</div>` : ''}
+    ${t.close_category ? `<div class="blocked-note" style="background:#f8fafc;border-color:#94a3b8;color:#334155">Force-closed: <strong>${escapeHtml({done: 'Done', descoped: 'Descoped', duplicate: 'Duplicate', wont_do: "Won't do"}[t.close_category] || t.close_category)}</strong></div>` : ''}
     <div class="panel-actions">
       ${t.workflow ? `
       ${workflowButtons(t)}
-      ${t.status !== 'blocked' ? `<button class="btn-secondary" onclick="blockTicket('${t.id}','${(t.title||'').replace(/'/g, "\\'")}')">⛔ Block</button>` : ''}` : ''}
+      ${!t.blocked && !['complete', 'closed'].includes(t.status) ? `<button class="btn-secondary" onclick="blockTicket('${t.id}','${(t.title||'').replace(/'/g, "\\'")}')">⛔ Block</button>` : ''}` : ''}
+      ${['complete', 'closed'].includes(t.status) && !(t.close_category && t.close_category !== 'done') ? `<button class="btn-secondary" onclick="reworkTicket('${t.id}')" title="Create a new ticket to redo this one (closed tickets aren't reopened)">↺ Rework</button>` : ''}
       ${t.status !== 'closed' ? `<button class="btn-secondary" onclick="forceCloseTicket('${t.id}','${(t.title||'').replace(/'/g, "\\'")}')" title="Skip the workflow and close this ticket with a reason">⏩ Force close</button>` : ''}
       <button class="btn-secondary" onclick="showCommentBox('${t.id}')">💬 Comment</button>
       <button class="btn-secondary" onclick="showTimeBox('${t.id}')">⏱ Log Time</button>
@@ -2025,6 +2044,7 @@ async function demoteTicket(id) {
 function forceCloseTicket(id, title) {
   document.getElementById('fc-ticket-label').textContent = `${id} — ${title}`;
   document.getElementById('fc-reason').value = '';
+  document.getElementById('fc-category').value = '';
   document.getElementById('force-close-modal-overlay').dataset.ticketId = id;
   document.getElementById('force-close-modal-overlay').classList.remove('hidden');
   setTimeout(() => document.getElementById('fc-reason').focus(), 0);
@@ -2034,6 +2054,7 @@ function forceCloseTicket(id, title) {
 // handler; the reason lands on the ticket and the PM dashboard's blocked list.
 function blockTicket(id, title) {
   document.getElementById('bl-reason').value = '';
+  document.getElementById('bl-waits').value = '';
   document.getElementById('bl-ticket-label').textContent = `${id}${title ? ' — ' + title : ''}`;
   const overlay = document.getElementById('block-modal-overlay');
   overlay.dataset.ticketId = id;
@@ -2500,12 +2521,15 @@ document.getElementById('force-close-form').addEventListener('submit', async (e)
   const overlay = document.getElementById('force-close-modal-overlay');
   const id = overlay.dataset.ticketId;
   const reason = document.getElementById('fc-reason').value.trim();
+  const category = document.getElementById('fc-category').value;
+  if (!category) { showToast('Pick a category', 'error'); return; }
   if (reason.length < 5) {
     showToast('Reason must be at least 5 characters', 'error');
     return;
   }
   try {
     const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/force-close`, {
+      category,
       reason,
       author: currentUser?.email || '',
     });
@@ -2521,9 +2545,11 @@ document.getElementById('block-form').addEventListener('submit', async (e) => {
   const overlay = document.getElementById('block-modal-overlay');
   const id = overlay.dataset.ticketId;
   const reason = document.getElementById('bl-reason').value.trim();
+  const waits_on = document.getElementById('bl-waits').value.split(',').map(s => s.trim()).filter(Boolean);
   try {
     const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/block`, {
       reason,
+      waits_on,
       author: currentUser?.email || '',
     });
     overlay.classList.add('hidden');
@@ -2534,6 +2560,53 @@ document.getElementById('block-form').addEventListener('submit', async (e) => {
 });
 document.getElementById('btn-cancel-block').addEventListener('click', () => {
   document.getElementById('block-modal-overlay').classList.add('hidden');
+});
+
+async function unblockTicket(id) {
+  try {
+    const t = await API.post(`/api/projects/${currentProject.id}/tickets/${id}/unblock`, { author: currentUser?.email || '' });
+    showToast(`${id} unblocked`);
+    renderTicketPanel(t);
+    loadTickets();
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ── Rework (hate 3.0) ─────────────────────────────────
+function reworkTicket(id) {
+  const ov = document.getElementById('rework-modal-overlay');
+  ov.dataset.ticketId = id;
+  document.getElementById('rw-ticket-label').textContent = id;
+  ['rw-category', 'rw-broken', 'rw-reason', 'rw-estimate'].forEach(x => { document.getElementById(x).value = ''; });
+  document.querySelectorAll('input[name="rw-by"]').forEach(r => { r.checked = false; });
+  document.getElementById('rw-broken-label').classList.add('hidden');
+  ov.classList.remove('hidden');
+}
+document.getElementById('rw-category').addEventListener('change', (e) => {
+  document.getElementById('rw-broken-label').classList.toggle('hidden', e.target.value !== 'regression');
+});
+document.getElementById('btn-cancel-rework').addEventListener('click', () => {
+  document.getElementById('rework-modal-overlay').classList.add('hidden');
+});
+document.getElementById('rework-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const ov = document.getElementById('rework-modal-overlay');
+  const by = document.querySelector('input[name="rw-by"]:checked');
+  if (!by) { showToast('Pick who introduced it: an agent or a person', 'error'); return; }
+  const est = parseFloat(document.getElementById('rw-estimate').value);
+  try {
+    const res = await API.post(`/api/projects/${currentProject.id}/tickets/${ov.dataset.ticketId}/rework`, {
+      category: document.getElementById('rw-category').value,
+      introduced_by: by.value,
+      reason: document.getElementById('rw-reason').value.trim(),
+      broken_by: document.getElementById('rw-broken').value.trim() || undefined,
+      estimate_hours: est > 0 ? est : undefined,
+      author: currentUser?.email || '',
+    });
+    ov.classList.add('hidden');
+    showToast(`Created ${res.ticket.id}`);
+    loadTickets();
+    openTicketPanel(res.ticket.id);
+  } catch (err) { showToast(err.message, 'error'); }
 });
 
 const AUTO_COMPLETE_TYPES = ['meeting', 'administration'];

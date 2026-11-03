@@ -35,7 +35,7 @@ import (
 // FormatMajor is the project format this hate writes. A project at an older
 // format is readable (translated in memory) but must be migrated before it
 // can be changed; see migrate.go.
-const FormatMajor = 2
+const FormatMajor = 3
 
 // NewerFormatError: the project was changed by a newer hate.
 type NewerFormatError struct {

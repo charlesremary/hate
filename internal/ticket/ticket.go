@@ -280,15 +280,19 @@ func addActivity(t *Ticket, author, action, detail string) {
 }
 
 // ForceClose moves a ticket directly to the terminal "closed" status, skipping
-// the type's promote/demote workflow. Used for tickets that are dropped,
-// duplicated, scoped out, etc. — distinct from a real completion. A reason is
-// required and stored on the ticket; an activity entry is recorded.
+// the type's promote/demote workflow, with a category (CloseCategories: "done"
+// counts as finished, the others as out of scope) and a reason, both required
+// and stored on the ticket; an activity entry is recorded.
 //
 // Refuses if the ticket is already at a terminal status (closed).
-func ForceClose(repoRoot, ticketID, reason, author string) (*Ticket, error) {
+func ForceClose(repoRoot, ticketID, category, reason, author string) (*Ticket, error) {
 	reason = strings.TrimSpace(reason)
 	if len(reason) < 5 {
 		return nil, fmt.Errorf("reason is required (min 5 characters)")
+	}
+	category = strings.TrimSpace(category)
+	if !Contains(CloseCategories, category) {
+		return nil, fmt.Errorf("category is required: one of %s (done = finished outside the normal path; the others are out of scope)", strings.Join(CloseCategories, ", "))
 	}
 	t, err := ReadTicket(repoRoot, ticketID)
 	if err != nil {
@@ -303,7 +307,9 @@ func ForceClose(repoRoot, ticketID, reason, author string) (*Ticket, error) {
 	t.ClosedAt = &closedAt
 	r := reason
 	t.CancellationReason = &r
-	addActivity(t, author, "force_closed", fmt.Sprintf("%s -> closed: %s", oldStatus, reason))
+	t.CloseCategory = category
+	t.Blocked = nil
+	addActivity(t, author, "force_closed", fmt.Sprintf("%s -> closed (%s): %s", oldStatus, CloseCategoryLabels[category], reason))
 	if err := WriteTicket(repoRoot, t); err != nil {
 		return nil, err
 	}
@@ -311,7 +317,7 @@ func ForceClose(repoRoot, ticketID, reason, author string) (*Ticket, error) {
 }
 
 // ChangeStatus changes a ticket's status directly (bypassing the promote/demote
-// path). Used for transitions the workflow has no path into — e.g. "blocked".
+// path). Used for transitions the workflow has no path into.
 func ChangeStatus(repoRoot, ticketID, newStatus, author string) (*Ticket, error) {
 	if err := ValidateEnum("status", newStatus, GetStatuses()); err != nil {
 		return nil, err
@@ -336,9 +342,6 @@ func ChangeStatus(repoRoot, ticketID, newStatus, author string) (*Ticket, error)
 	} else if Contains(ClosedStatuses, oldStatus) && !Contains(ClosedStatuses, newStatus) {
 		t.ClosedAt = nil
 	}
-	if oldStatus == "blocked" && newStatus != "blocked" {
-		t.BlockReason = nil // leaving the blocked state clears the stale reason
-	}
 	addActivity(t, author, "status_changed", fmt.Sprintf("%s -> %s", oldStatus, newStatus))
 	if err := WriteTicket(repoRoot, t); err != nil {
 		return nil, err
@@ -346,30 +349,6 @@ func ChangeStatus(repoRoot, ticketID, newStatus, author string) (*Ticket, error)
 	return t, nil
 }
 
-// BlockTicket sets a ticket to "blocked" and records an optional reason (kept on
-// the ticket as BlockReason and folded into the activity-log detail). It's the
-// one entry point into the blocked state — the promote/demote workflow never
-// transitions *into* blocked.
-func BlockTicket(repoRoot, ticketID, reason, author string) (*Ticket, error) {
-	t, err := ReadTicket(repoRoot, ticketID)
-	if err != nil {
-		return nil, err
-	}
-	oldStatus := t.Status
-	t.Status = "blocked"
-	detail := fmt.Sprintf("%s -> blocked", oldStatus)
-	if r := strings.TrimSpace(reason); r != "" {
-		t.BlockReason = &r
-		detail += ": " + r
-	} else {
-		t.BlockReason = nil
-	}
-	addActivity(t, author, "status_changed", detail)
-	if err := WriteTicket(repoRoot, t); err != nil {
-		return nil, err
-	}
-	return t, nil
-}
 
 // resolvePrevious finds the status before the current one by scanning the activity log.
 func resolvePrevious(t *Ticket) string {
@@ -443,6 +422,9 @@ func Promote(repoRoot, ticketID, author string) (*Ticket, error) {
 	if Contains(TerminalStatuses, current) {
 		return nil, fmt.Errorf("Cannot promote from '%s' -- terminal status", current)
 	}
+	if t.Blocked != nil {
+		return nil, fmt.Errorf("%s is blocked (%s): unblock it before promoting", t.ID, t.Blocked.Reason)
+	}
 
 	// Gate: the first promote out of not_started checks the estimation rules
 	// (class, estimate_hours, no cfp: on children). force-close bypasses.
@@ -468,8 +450,8 @@ func Promote(repoRoot, ticketID, author string) (*Ticket, error) {
 	}
 
 	t.Status = nextStatus
-	if current == "blocked" && nextStatus != "blocked" {
-		t.BlockReason = nil // leaving the blocked state clears the stale reason
+	if Contains(ClosedStatuses, nextStatus) {
+		t.Blocked = nil // finished: nothing left to wait for
 	}
 	if nextStatus == "in_progress" && t.ActualStartDate == nil {
 		date := NowISO()[:10]
@@ -505,9 +487,6 @@ func Demote(repoRoot, ticketID, author string) (*Ticket, error) {
 	}
 
 	t.Status = prevStatus
-	if current == "blocked" && prevStatus != "blocked" {
-		t.BlockReason = nil // leaving the blocked state clears the stale reason
-	}
 	if Contains(ClosedStatuses, current) && !Contains(ClosedStatuses, prevStatus) {
 		t.ClosedAt = nil
 	}

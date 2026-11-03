@@ -132,6 +132,9 @@ func cosmicLoggedHours(t *ticket.Ticket) float64 {
 func ComputeCosmic(tickets []*ticket.Ticket) CosmicReport {
 	childrenByParent := map[string][]*ticket.Ticket{}
 	for _, t := range tickets {
+		if ticket.IsRework(t) {
+			continue // rework is measured on its own, never in calibration
+		}
 		if pid, ok := cosmicTagValue(t.Tags, parentTagPrefix); ok && pid != "" {
 			childrenByParent[pid] = append(childrenByParent[pid], t)
 		}

@@ -18,7 +18,7 @@ func TestNewerFormatMCP(t *testing.T) {
 	id := newTicket(t, root, ticket.CreateTicketParams{Type: "task", Title: "One", Creator: "a@x"})
 	p := ticket.ConfigPath(root)
 	data, _ := os.ReadFile(p)
-	os.WriteFile(p, []byte(strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "3.0.0"`, 1)), 0644)
+	os.WriteFile(p, []byte(strings.Replace(string(data), `"schema_version": "3.0.0"`, `"schema_version": "4.0.0"`, 1)), 0644)
 	cs := connect(t)
 
 	isErr, text, _ := call(t, cs, "hate_update_ticket", map[string]any{"ticket_id": id, "fields": map[string]any{"title": "changed"}})

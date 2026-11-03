@@ -5,7 +5,9 @@ package api
 
 import (
 	"net/http"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -71,12 +73,17 @@ func TestTicketWorkflowField(t *testing.T) {
 	if code != http.StatusOK || workflowOf(body)["promote_to"] != "dev_complete" || workflowOf(body)["demote_to"] != "not_started" {
 		t.Errorf("promote response: %d workflow=%v", code, body["workflow"])
 	}
-	code, body = do(t, h, "POST", base+dev+"/block", map[string]interface{}{"reason": "waiting"})
-	if code != http.StatusOK || body["status"] != "blocked" {
+	// hate 3.0: blocked is a flag; the status stays and promote is refused
+	// until it's unblocked.
+	code, body = do(t, h, "POST", base+dev+"/block", map[string]interface{}{"reason": "waiting", "waits_on": []string{"client IT"}})
+	if blk, _ := body["blocked"].(map[string]interface{}); code != http.StatusOK || body["status"] != "in_progress" || blk["reason"] != "waiting" {
 		t.Fatalf("block: %d %v", code, body)
 	}
-	_, body = do(t, h, "GET", base+dev, nil)
-	if wf := workflowOf(body); wf["promote_to"] != "in_progress" || wf["demote_to"] != "in_progress" {
-		t.Errorf("blocked: workflow = %v, want promote_to/demote_to in_progress", wf)
+	if code, body = do(t, h, "POST", base+dev+"/promote", nil); code < 400 || !strings.Contains(fmt.Sprint(body["detail"]), "blocked") {
+		t.Errorf("promote while blocked = %d %v", code, body)
+	}
+	code, body = do(t, h, "POST", base+dev+"/unblock", map[string]interface{}{"note": "keys arrived"})
+	if code != http.StatusOK || body["blocked"] != nil || body["status"] != "in_progress" {
+		t.Errorf("unblock: %d %v", code, body)
 	}
 }

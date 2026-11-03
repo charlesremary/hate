@@ -109,6 +109,9 @@ func TktTicketsToPMFormat(tickets []*ticket.Ticket) map[string]map[string]interf
 		if mapped, ok := tktToPMStatus[status]; ok {
 			status = mapped
 		}
+		if t.Blocked != nil && status != "complete" {
+			status = "blocked" // the flag (hate 3.0), not a status
+		}
 
 		var dueDate interface{}
 		if t.DueDate != nil {

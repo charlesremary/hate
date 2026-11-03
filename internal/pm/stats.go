@@ -67,6 +67,23 @@ type ProjectStats struct {
 	// Tests: pass rate over cases with a result (every committed ticket).
 	TestPassRate Stat `json:"test_pass_rate"` // 0..100; N = cases with a result
 	TestUntested int  `json:"test_untested"`
+
+	// Rework (hate 3.0): hours logged on rework tickets as a share of all
+	// hours logged (N = rework tickets), by category and by who introduced it.
+	ReworkRate       Stat               `json:"rework_rate"`
+	ReworkHours      float64            `json:"rework_hours"`
+	ReworkByCategory map[string]ReworkN `json:"rework_by_category"`
+	ReworkAgent      int                `json:"rework_agent"`
+	ReworkHuman      int                `json:"rework_human"`
+
+	// Force-closed out of scope, by category (descoped, duplicate, wont_do).
+	Descoped map[string]int `json:"descoped"`
+}
+
+// ReworkN is one rework category's tickets and logged hours.
+type ReworkN struct {
+	Tickets int     `json:"tickets"`
+	Hours   float64 `json:"hours"`
 }
 
 // ticketDates are the moments the stats need, from a ticket's own record.
@@ -84,8 +101,12 @@ func datesOf(t *ticket.Ticket) ticketDates {
 		ts := parseISO(a.Timestamp)
 		switch {
 		case a.Action == "force_closed":
-			if d.cancelled.IsZero() {
+			// Force-closed as done is finished work (hate 3.0); the other
+			// categories leave scope.
+			if isCancelled(t) && d.cancelled.IsZero() {
 				d.cancelled = ts
+			} else if !isCancelled(t) && d.done.IsZero() {
+				d.done = ts
 			}
 		case a.Action == "status_changed" && (strings.HasSuffix(a.Detail, "-> complete") || strings.HasSuffix(a.Detail, "-> closed")):
 			if d.done.IsZero() {
@@ -152,7 +173,7 @@ func deliveryAt(tickets []*ticket.Ticket, ctx EstimateContext, dates map[string]
 		if before(d.done, at) {
 			doneH += h
 			done++
-			if est, ok := WrapAllotment(t, ctx); ok && est > 0 {
+			if est, ok := WrapAllotment(t, ctx); ok && est > 0 && !ticket.IsRework(t) {
 				if l := loggedBy(t, at); l > 0 {
 					wrapLogged += l
 					wrapEst += est
@@ -310,6 +331,50 @@ func ComputeStats(tickets []*ticket.Ticket, ctx EstimateContext, blocks []Block,
 	}
 	if pass+fail > 0 {
 		st.TestPassRate = Stat{Value: round1(float64(pass) / float64(pass+fail) * 100), N: pass + fail}
+	}
+
+	// Rework: share of logged hours, now and at the end of the last period.
+	st.ReworkByCategory = map[string]ReworkN{}
+	st.Descoped = map[string]int{}
+	var allNow, rwNow, allThen, rwThen float64
+	for _, t := range tickets {
+		if isCancelled(t) {
+			cat := t.CloseCategory
+			if cat == "" {
+				cat = "descoped"
+			}
+			st.Descoped[cat]++
+			continue
+		}
+		if ticket.IsBacklog(t) {
+			continue
+		}
+		hNow, hThen := loggedBy(t, now), loggedBy(t, then)
+		allNow += hNow
+		allThen += hThen
+		if !ticket.IsRework(t) {
+			continue
+		}
+		rwNow += hNow
+		rwThen += hThen
+		st.ReworkRate.N++
+		c := st.ReworkByCategory[t.ReworkCategory]
+		c.Tickets++
+		c.Hours = round1(c.Hours + hNow)
+		st.ReworkByCategory[t.ReworkCategory] = c
+		switch t.IntroducedBy {
+		case "agent":
+			st.ReworkAgent++
+		case "human":
+			st.ReworkHuman++
+		}
+	}
+	st.ReworkHours = round1(rwNow)
+	if allNow > 0 {
+		st.ReworkRate.Value = round1(rwNow / allNow * 100)
+	}
+	if allThen > 0 {
+		st.ReworkRate.Prev, st.ReworkRate.HasPrev = round1(rwThen/allThen*100), true
 	}
 	return st
 }
@@ -469,6 +534,33 @@ func RenderStatsHTML(st ProjectStats, scheduleAnchor string) string {
 	} else {
 		b.WriteString(card("Tests passing", `<span class="st-none">no results</span>`, fmt.Sprintf("%d test cases not run yet", st.TestUntested)))
 	}
+	// Rework.
+	if st.ReworkRate.N > 0 {
+		top, topN := "", 0
+		for c, n := range st.ReworkByCategory {
+			if n.Tickets > topN || (n.Tickets == topN && c < top) {
+				top, topN = c, n.Tickets
+			}
+		}
+		tone := "st-good"
+		switch {
+		case st.ReworkRate.Value >= 20:
+			tone = "st-bad"
+		case st.ReworkRate.Value >= 10:
+			tone = "st-warn"
+		}
+		b.WriteString(card("Rework", fmt.Sprintf(`<span class="%s">%s%%</span>`, tone, fmtNum(st.ReworkRate.Value, 1)),
+			fmt.Sprintf("of hours logged: %sh on %d %s<br>most: %s (%d) &middot; agent %d, human %d<br>%s",
+				fmtNum(st.ReworkHours, 1), st.ReworkRate.N, map[bool]string{true: "ticket", false: "tickets"}[st.ReworkRate.N == 1],
+				esc(ticket.ReworkCategoryLabels[top]), topN, st.ReworkAgent, st.ReworkHuman,
+				trend(st.ReworkRate, " pts", false, false, 1))))
+	} else {
+		b.WriteString(card("Rework", `<span class="st-good">0%</span>`, "no rework tickets"))
+	}
+	if n := st.Descoped["descoped"] + st.Descoped["duplicate"] + st.Descoped["wont_do"]; n > 0 {
+		b.WriteString(card("Closed unfinished", fmtNum(float64(n), 0),
+			fmt.Sprintf("descoped %d, duplicate %d, won't do %d", st.Descoped["descoped"], st.Descoped["duplicate"], st.Descoped["wont_do"])))
+	}
 	b.WriteString(`</div></div>`)
 	return b.String()
 }
@@ -489,4 +581,8 @@ var statTips = map[string]string{
 	"Blocked": "Tickets in the blocked state right now, and the one that has been blocked the longest.",
 	"Scope": "Tickets created since the baseline was taken (or this week, without a baseline), backlog excluded. Steady growth here is scope creep.",
 	"Tests": "Of the test cases that have a result, the share that passed. Cases not run yet are counted separately.",
+	"Rework": "Hours logged on rework tickets (work redone after a ticket was closed) as a share of all hours logged. Shows the most common cause " +
+		"and who introduced the problems: an agent or a person. Rework is kept out of estimate accuracy and calibration.",
+	"Closed": "Tickets force-closed without being delivered: descoped, duplicate or won't do. They're left out of every other number. " +
+		"(Force-closed as done counts as finished.)",
 }

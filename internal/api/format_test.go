@@ -27,7 +27,7 @@ func makeNewer(t *testing.T, root string) {
 	t.Helper()
 	p := ticket.ConfigPath(root)
 	data, _ := os.ReadFile(p)
-	if err := os.WriteFile(p, []byte(strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "3.0.0"`, 1)), 0644); err != nil {
+	if err := os.WriteFile(p, []byte(strings.Replace(string(data), `"schema_version": "3.0.0"`, `"schema_version": "4.0.0"`, 1)), 0644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -76,7 +76,7 @@ func TestMigrationREST(t *testing.T) {
 	id := out["id"].(string)
 	p := ticket.ConfigPath(root)
 	data, _ := os.ReadFile(p)
-	os.WriteFile(p, []byte(strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "1.0.0"`, 1)), 0644)
+	os.WriteFile(p, []byte(strings.Replace(string(data), `"schema_version": "3.0.0"`, `"schema_version": "1.0.0"`, 1)), 0644)
 	tp := ticket.TicketPath(root, id)
 	data, _ = os.ReadFile(tp)
 	os.WriteFile(tp, []byte(strings.Replace(string(data), `"lifecycle": null,`, `"phase": "01 - Design",`, 1)), 0644)

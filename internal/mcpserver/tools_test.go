@@ -132,8 +132,8 @@ func TestToolsList(t *testing.T) {
 		return res.Tools
 	}
 	a, b := list(), list()
-	if len(a) != 21 {
-		t.Errorf("%d tools, want 21", len(a))
+	if len(a) != 23 {
+		t.Errorf("%d tools, want 23", len(a))
 	}
 	ro := map[string]bool{}
 	for _, n := range readTools {
@@ -359,16 +359,19 @@ func TestOtherWriteTools(t *testing.T) {
 	if l := mustOK(t, cs, "hate_link_tickets", map[string]any{"ticket_id": b, "add_predecessors": []string{a}}); len(l["predecessors"].([]any)) != 1 {
 		t.Errorf("link = %v", l["predecessors"])
 	}
-	if bl := mustOK(t, cs, "hate_block_ticket", map[string]any{"ticket_id": b, "reason": "waiting on A"}); bl["status"] != "blocked" {
-		t.Errorf("block = %v", bl["status"])
+	if bl := mustOK(t, cs, "hate_block_ticket", map[string]any{"ticket_id": b, "reason": "waiting on A", "waits_on": []string{a}}); bl["blocked"] == nil || bl["status"] == "blocked" {
+		t.Errorf("block = %v / %v", bl["status"], bl["blocked"])
 	}
-	if dm := mustOK(t, cs, "hate_demote_ticket", map[string]any{"ticket_id": b}); dm["status"] == "blocked" {
-		t.Errorf("demote left blocked")
+	if ub := mustOK(t, cs, "hate_unblock_ticket", map[string]any{"ticket_id": b}); ub["blocked"] != nil {
+		t.Errorf("unblock left the flag: %v", ub["blocked"])
 	}
-	if isErr, _, _ := call(t, cs, "hate_force_close_ticket", map[string]any{"ticket_id": b, "reason": "no"}); !isErr {
+	if isErr, _, _ := call(t, cs, "hate_force_close_ticket", map[string]any{"ticket_id": b, "category": "duplicate", "reason": "no"}); !isErr {
 		t.Error("force close with a 2-char reason should fail")
 	}
-	if fc := mustOK(t, cs, "hate_force_close_ticket", map[string]any{"ticket_id": b, "reason": "duplicate of A"}); fc["status"] != "closed" {
-		t.Errorf("force close = %v", fc["status"])
+	if isErr, text, _ := call(t, cs, "hate_force_close_ticket", map[string]any{"ticket_id": b, "reason": "duplicate of A"}); !isErr || !strings.Contains(text, "category") {
+		t.Errorf("force close without a category should fail: %s", text)
+	}
+	if fc := mustOK(t, cs, "hate_force_close_ticket", map[string]any{"ticket_id": b, "category": "duplicate", "reason": "duplicate of A"}); fc["status"] != "closed" || fc["close_category"] != "duplicate" {
+		t.Errorf("force close = %v %v", fc["status"], fc["close_category"])
 	}
 }

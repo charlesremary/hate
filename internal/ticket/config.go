@@ -227,8 +227,8 @@ var (
 
 // TypeWorkflows holds the built-in promotion workflow for each ticket type that
 // has one. Types not present here (meeting, administration) auto-complete on
-// creation and have no promote/demote path. "_previous" returns a blocked ticket
-// to its prior status.
+// creation and have no promote/demote path. (Blocked is a flag since hate
+// 3.0, not a status in these paths.)
 var TypeWorkflows = map[string]TypeWorkflow{
 	// Generic task: a short path with no dev/QA cycle.
 	"task": {
@@ -236,12 +236,10 @@ var TypeWorkflows = map[string]TypeWorkflow{
 			"not_started": "in_progress",
 			"in_progress": "complete",
 			"complete":    "closed",
-			"blocked":     "_previous",
 		},
 		Demote: map[string]string{
 			"in_progress": "not_started",
 			"complete":    "in_progress",
-			"blocked":     "_previous",
 		},
 	},
 	// Dev task: full dev + QA cycle, with a rework loop off QA testing.
@@ -253,14 +251,12 @@ var TypeWorkflows = map[string]TypeWorkflow{
 			"qa_testing":   "complete",
 			"complete":     "closed",
 			"rework":       "qa_testing",
-			"blocked":      "_previous",
 		},
 		Demote: map[string]string{
 			"in_progress":  "not_started",
 			"dev_complete": "in_progress",
 			"qa_testing":   "rework",
 			"complete":     "qa_testing",
-			"blocked":      "_previous",
 		},
 	},
 	// Design task: a review + approval cycle ending in closed.
@@ -270,13 +266,11 @@ var TypeWorkflows = map[string]TypeWorkflow{
 			"in_progress":          "submitted_for_review",
 			"submitted_for_review": "approved",
 			"approved":             "closed",
-			"blocked":              "_previous",
 		},
 		Demote: map[string]string{
 			"in_progress":          "not_started",
 			"submitted_for_review": "in_progress",
 			"approved":             "submitted_for_review",
-			"blocked":              "_previous",
 		},
 	},
 }

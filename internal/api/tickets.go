@@ -230,6 +230,8 @@ func RegisterTicketRoutes(r chi.Router) {
 		r.Post("/{ticketId}/promote", handlePromoteTicket)
 		r.Post("/{ticketId}/demote", handleDemoteTicket)
 		r.Post("/{ticketId}/block", handleBlockTicket)
+		r.Post("/{ticketId}/unblock", handleUnblockTicket)
+		r.Post("/{ticketId}/rework", handleReworkTicket)
 		r.Post("/{ticketId}/force-close", handleForceCloseTicket)
 		r.Post("/{ticketId}/comment", handleAddComment)
 		r.Patch("/{ticketId}/comments/{commentId}", handleEditComment)
@@ -610,10 +612,9 @@ func handleDemoteTicket(w http.ResponseWriter, r *http.Request) {
 	respondResult(w, res)
 }
 
-// handleBlockTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/block.
-// The promote/demote workflow has no transition *into* "blocked" (it only ever maps
-// blocked -> _previous), so this is the one entry point for marking a ticket blocked.
-// Leaving the blocked state is still done with promote/demote.
+// handleBlockTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/block
+// {reason, waits_on?, author?}: flags the ticket blocked (hate 3.0: the status
+// stays). POST …/unblock clears it.
 func handleBlockTicket(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	ticketID := chi.URLParam(r, "ticketId")
@@ -626,8 +627,9 @@ func handleBlockTicket(w http.ResponseWriter, r *http.Request) {
 	// Optional {reason, author} body — the reason is captured on the ticket and
 	// shown on the PM dashboard's blocked-tickets list. Body is tolerated as empty.
 	var req struct {
-		Reason string `json:"reason"`
-		Author string `json:"author"`
+		Reason  string   `json:"reason"`
+		WaitsOn []string `json:"waits_on"`
+		Author  string   `json:"author"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -635,7 +637,7 @@ func handleBlockTicket(w http.ResponseWriter, r *http.Request) {
 	if req.Author != "" {
 		author = req.Author
 	}
-	res, err := service.Block(root, ticketID, req.Reason, author)
+	res, err := service.Block(root, ticketID, req.Reason, req.WaitsOn, author)
 	if err != nil {
 		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
@@ -755,7 +757,59 @@ func handleForceCloseTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Reason string `json:"reason"`
+		Category string `json:"category"`
+		Reason   string `json:"reason"`
+		Author   string `json:"author"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Author == "" {
+		req.Author = r.URL.Query().Get("author")
+	}
+	res, err := service.ForceClose(root, ticketID, req.Category, req.Reason, req.Author)
+	if err != nil {
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
+		return
+	}
+	respondResult(w, res)
+}
+
+// handleUnblockTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/unblock
+// {note?, author?}: clears the blocked flag.
+func handleUnblockTicket(w http.ResponseWriter, r *http.Request) {
+	root, ok := getProjectRoot(w, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	var req struct {
+		Note   string `json:"note"`
+		Author string `json:"author"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if req.Author == "" {
+		req.Author = r.URL.Query().Get("author")
+	}
+	res, err := service.Unblock(root, chi.URLParam(r, "ticketId"), req.Note, req.Author)
+	if err != nil {
+		respondServiceError(w, err, http.StatusUnprocessableEntity)
+		return
+	}
+	respondResult(w, res)
+}
+
+// handleReworkTicket handles POST /api/projects/{projectId}/tickets/{ticketId}/rework
+// {category, introduced_by, reason, broken_by?, title?, estimate_hours?, author?}:
+// a new ticket redoing this closed one (hate 3.0; closed tickets aren't reopened).
+func handleReworkTicket(w http.ResponseWriter, r *http.Request) {
+	root, ok := getProjectRoot(w, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	var req struct {
+		service.ReworkInput
 		Author string `json:"author"`
 	}
 	if !decodeJSON(w, r, &req) {
@@ -764,12 +818,12 @@ func handleForceCloseTicket(w http.ResponseWriter, r *http.Request) {
 	if req.Author == "" {
 		req.Author = r.URL.Query().Get("author")
 	}
-	res, err := service.ForceClose(root, ticketID, req.Reason, req.Author)
+	res, err := service.Rework(root, chi.URLParam(r, "ticketId"), req.ReworkInput, req.Author)
 	if err != nil {
 		respondServiceError(w, err, http.StatusUnprocessableEntity)
 		return
 	}
-	respondResult(w, res)
+	respondJSON(w, http.StatusOK, res)
 }
 
 // handleAddComment handles POST /api/projects/{projectId}/tickets/{ticketId}/comment

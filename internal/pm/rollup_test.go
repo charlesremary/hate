@@ -35,7 +35,7 @@ func TestRollupLifecycle(t *testing.T) {
 		{ID: "Q3", Lifecycle: strp("02 - QA"), Type: "meeting", Status: "complete"},
 
 		// No phase: a blocked, sized ticket → "(no lifecycle)" bucket, sorts last.
-		{ID: "X1", Tags: wrap, EstimateHours: f64(16), Status: "blocked"},
+		{ID: "X1", Tags: wrap, EstimateHours: f64(16), Status: "in_progress", Blocked: &ticket.BlockedFlag{Reason: "waiting"}},
 	}
 
 	rep := Rollup(tickets, NewEstimateContext(tickets, 0, nil), RollupByLifecycle)

@@ -91,6 +91,12 @@ type migrateProjectIn struct {
 	Author          string `json:"author,omitempty" jsonschema:"who is applying it (default: the project's git identity)"`
 }
 
+type reworkOut struct {
+	Created       string     `json:"created"`
+	Ticket        TicketView `json:"ticket"`
+	CommitWarning string     `json:"commit_warning,omitempty"`
+}
+
 type createTicketsIn struct {
 	Project string        `json:"project" jsonschema:"project id, folder name or ticket prefix"`
 	Tickets []newTicketIn `json:"tickets" jsonschema:"1 to 50 tickets, created in order"`
@@ -120,6 +126,33 @@ type updateTicketIn struct {
 type reasonIn struct {
 	writeTicketIn
 	Reason string `json:"reason" jsonschema:"why, recorded on the ticket"`
+}
+
+type blockIn struct {
+	writeTicketIn
+	Reason  string   `json:"reason" jsonschema:"why it can't move forward"`
+	WaitsOn []string `json:"waits_on,omitempty" jsonschema:"what it waits for: ticket ids (the flag clears itself when they all finish) or a person/thing"`
+}
+
+type unblockIn struct {
+	writeTicketIn
+	Note string `json:"note,omitempty" jsonschema:"optional: what unblocked it"`
+}
+
+type forceCloseIn struct {
+	writeTicketIn
+	Category string `json:"category" jsonschema:"done (finished outside the normal path: counts as delivered), descoped, duplicate or wont_do (these three leave every number)"`
+	Reason   string `json:"reason" jsonschema:"why, at least 5 characters; for duplicate name the other ticket"`
+}
+
+type reworkIn struct {
+	writeTicketIn
+	Category      string   `json:"category" jsonschema:"defect (missed in testing), missed_requirement, misunderstood_requirement, incomplete, regression or environment (deployment / config drift). A changed request is NOT rework: create a new ticket"`
+	IntroducedBy  string   `json:"introduced_by" jsonschema:"who introduced the problem: agent or human"`
+	Reason        string   `json:"reason" jsonschema:"what is wrong, as found"`
+	BrokenBy      string   `json:"broken_by,omitempty" jsonschema:"regression only: the ticket whose change broke it"`
+	Title         string   `json:"title,omitempty" jsonschema:"default: Rework: <original title>"`
+	EstimateHours *float64 `json:"estimate_hours,omitempty" jsonschema:"rework is sized by its own estimate (quarter hours), never by the feature's CFP"`
 }
 
 type logTimeIn struct {
@@ -234,7 +267,7 @@ func (w writeTicketIn) ref() writeTicketIn { return w }
 func registerWriteTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "hate_migrate_project",
-		Description: "The one-time update of a project to this hate's format (hate 2.0: the old 'phase' becomes 'lifecycle' (kind of work) or 'block' (planning block number)). " +
+		Description: "The one-time update of a project to this hate's format (2.0: the old 'phase' becomes 'lifecycle' or 'block'; 3.0: a blocked status becomes the blocked flag and force-closes get a category). " +
 			"Writes to an unmigrated project fail with needs_migration. Call without apply for a preview (per-ticket changes, nothing written), show it to the user, " +
 			"and call again with apply: true only if they agree. Applying rewrites every ticket and commits once (git revert undoes it).",
 		Annotations: write("Update project format", false, true),
@@ -372,14 +405,15 @@ func registerWriteTools(s *mcp.Server) {
 	})
 
 	ticketTool(s, &mcp.Tool{
-		Name:        "hate_block_ticket",
-		Description: "Mark a ticket blocked with the reason (shown on the PM dashboard). Promote or demote leaves blocked.",
+		Name: "hate_block_ticket",
+		Description: "Flag a ticket blocked with the reason and, optionally, what it waits on (shown on the PM dashboard). The ticket keeps its status; " +
+			"a blocked ticket can't be promoted. Ticket ids in waits_on clear the flag when they all finish; otherwise call hate_unblock_ticket.",
 		Annotations: write("Block ticket", false, true),
-	}, func(root string, in reasonIn) (TicketView, error) {
+	}, func(root string, in blockIn) (TicketView, error) {
 		if strings.TrimSpace(in.Reason) == "" {
 			return TicketView{}, invalid("reason is required")
 		}
-		res, err := service.Block(root, in.TicketID, in.Reason, author(root, in.Author))
+		res, err := service.Block(root, in.TicketID, in.Reason, in.WaitsOn, author(root, in.Author))
 		if err != nil {
 			return TicketView{}, err
 		}
@@ -387,15 +421,43 @@ func registerWriteTools(s *mcp.Server) {
 	})
 
 	ticketTool(s, &mcp.Tool{
+		Name:        "hate_unblock_ticket",
+		Description: "Clear a ticket's blocked flag (it keeps its status, so carry on or promote as usual).",
+		Annotations: write("Unblock ticket", false, true),
+	}, func(root string, in unblockIn) (TicketView, error) {
+		res, err := service.Unblock(root, in.TicketID, in.Note, author(root, in.Author))
+		if err != nil {
+			return TicketView{}, err
+		}
+		return viewFromResult(root, res), nil
+	})
+
+	ticketTool(s, &mcp.Tool{
+		Name: "hate_rework_ticket",
+		Description: "Redo a closed ticket: creates a NEW ticket tagged rework-of:<id> (closed tickets are never reopened, so the original's estimate and hours stay as they were) " +
+			"with the category and who introduced the problem; the original gets a comment pointing at it. Rework is sized by its own estimate and measured separately. " +
+			"A client changing their mind is not rework: create a new ticket instead.",
+		Annotations: write("Rework ticket", false, false),
+	}, func(root string, in reworkIn) (reworkOut, error) {
+		res, err := service.Rework(root, in.TicketID, service.ReworkInput{
+			Category: in.Category, IntroducedBy: in.IntroducedBy, Reason: in.Reason, BrokenBy: in.BrokenBy, Title: in.Title, Estimate: in.EstimateHours,
+		}, author(root, in.Author))
+		if err != nil {
+			return reworkOut{}, err
+		}
+		return reworkOut{Created: res.Ticket.ID, Ticket: viewFromResult(root, &service.Result{Ticket: res.Ticket}), CommitWarning: res.CommitWarning}, nil
+	})
+
+	ticketTool(s, &mcp.Tool{
 		Name: "hate_force_close_ticket",
-		Description: "Close a ticket skipping its workflow, recording why. This DESCOPES the ticket (dropped, duplicate, cancelled); it is not how you finish work, " +
-			"which is promote. Confirm with the user before using it.",
+		Description: "Close a ticket skipping its workflow, with a category and why. Categories: done (finished outside the normal path, e.g. no time could be logged; " +
+			"counts as delivered), descoped, duplicate, wont_do (these leave every number). Finishing work normally is promote. Confirm with the user before using it.",
 		Annotations: write("Force-close ticket", true, true),
-	}, func(root string, in reasonIn) (TicketView, error) {
+	}, func(root string, in forceCloseIn) (TicketView, error) {
 		if len(strings.TrimSpace(in.Reason)) < 5 {
 			return TicketView{}, invalid("reason must be at least 5 characters")
 		}
-		res, err := service.ForceClose(root, in.TicketID, in.Reason, author(root, in.Author))
+		res, err := service.ForceClose(root, in.TicketID, in.Category, in.Reason, author(root, in.Author))
 		if err != nil {
 			return TicketView{}, err
 		}

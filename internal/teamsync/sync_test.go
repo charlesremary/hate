@@ -532,8 +532,8 @@ func TestNewerSharedCopyNotMerged(t *testing.T) {
 	// pm's hate is "newer": bump the shared config's format.
 	cp := ticket.ConfigPath(pm.root)
 	data, _ := os.ReadFile(cp)
-	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "3.0.0"`, 1)), 0644)
-	pm.git("commit", "-qam", "migrate to format 3")
+	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "3.0.0"`, `"schema_version": "4.0.0"`, 1)), 0644)
+	pm.git("commit", "-qam", "migrate to format 4")
 	pm.git("push", "-q")
 
 	chuck.editTicket("ST-0001", func(tk *ticket.Ticket) { tk.Title = "local edit" })
@@ -553,8 +553,8 @@ func TestNewerSharedCopyFastForwards(t *testing.T) {
 	_, chuck, pm := twoMachines(t)
 	cp := ticket.ConfigPath(pm.root)
 	data, _ := os.ReadFile(cp)
-	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "3.0.0"`, 1)), 0644)
-	pm.git("commit", "-qam", "migrate to format 3")
+	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "3.0.0"`, `"schema_version": "4.0.0"`, 1)), 0644)
+	pm.git("commit", "-qam", "migrate to format 4")
 	pm.git("push", "-q")
 
 	if r := chuck.sync(); r.State != StateSynced || r.Pulled == 0 {
@@ -575,7 +575,7 @@ func TestCrossFormatChangesNotMerged(t *testing.T) {
 	pm.git("push", "-q")
 	cp := ticket.ConfigPath(chuck.root)
 	data, _ := os.ReadFile(cp)
-	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "1.0.0"`, 1)), 0644)
+	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "3.0.0"`, `"schema_version": "1.0.0"`, 1)), 0644)
 	chuck.git("commit", "-qam", "edit from hate 1.x")
 	head := chuck.git("rev-parse", "HEAD")
 	r := chuck.sync()

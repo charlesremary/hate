@@ -57,7 +57,7 @@ func TestComputeReadyChain(t *testing.T) {
 // open predecessor in the ready set.
 func TestComputeReadyRules(t *testing.T) {
 	blocked := capT("BL", 1, "")
-	blocked.Status = "blocked"
+	blocked.Blocked = &ticket.BlockedFlag{Reason: "waiting"}
 	afterBlocked := capT("AB", 1, "", "BL")
 	hi := capT("HI", 1, "")
 	hi.Priority = "high"

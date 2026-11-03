@@ -10,12 +10,12 @@ import (
 )
 
 // SchemaVersion is the current schema version for tickets and config.
-const SchemaVersion = "2.0.0"
+const SchemaVersion = "3.0.0"
 
 // Enum slices matching the Python system exactly.
 var (
 	TicketTypes       = []string{"task", "dev_task", "design_task", "meeting", "administration"}
-	Statuses          = []string{"not_started", "in_progress", "dev_complete", "qa_testing", "submitted_for_review", "approved", "complete", "closed", "rework", "blocked"}
+	Statuses          = []string{"not_started", "in_progress", "dev_complete", "qa_testing", "submitted_for_review", "approved", "complete", "closed", "rework"}
 	Priorities        = []string{"critical", "high", "medium", "low"}
 	Efforts           = []string{"xs", "s", "m", "l", "xl"}
 	DefectSeverities  = []string{"critical", "major", "minor", "trivial"}
@@ -197,9 +197,21 @@ type Ticket struct {
 	// the workflow). Empty for normal completions.
 	CancellationReason *string `json:"cancellation_reason,omitempty"`
 
-	// BlockReason is the reason captured when the ticket was last set to
-	// "blocked". Cleared when the ticket leaves the blocked state.
-	BlockReason *string `json:"block_reason,omitempty"`
+	// Blocked is set while the ticket can't move forward (hate 3.0: a flag,
+	// not a status, so the ticket keeps its real status). nil = not blocked.
+	Blocked *BlockedFlag `json:"blocked,omitempty"`
+
+	// CloseCategory is why a ticket was force-closed (CloseCategories):
+	// "done" counts as finished work; the others are out of scope.
+	CloseCategory string `json:"close_category,omitempty"`
+
+	// Rework (hate 3.0): a ticket tagged rework-of:<id> redoes a closed one.
+	// ReworkCategory is why (ReworkCategories); IntroducedBy who introduced
+	// the problem ("agent" or "human"); BrokenBy the ticket whose change broke
+	// it (regressions).
+	ReworkCategory string `json:"rework_category,omitempty"`
+	IntroducedBy   string `json:"introduced_by,omitempty"`
+	BrokenBy       string `json:"broken_by,omitempty"`
 
 	// TestCases are the QA test cases for this ticket (how to test it + results).
 	TestCases []TestCase `json:"test_cases,omitempty"`

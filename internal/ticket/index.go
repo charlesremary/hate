@@ -24,6 +24,10 @@ type IndexSummary struct {
 	Class            string   `json:"class"` // functional | config | nonfunc | ""
 	Lifecycle        *string  `json:"lifecycle"`
 	Block            int      `json:"block,omitempty"`
+	Blocked          *BlockedFlag `json:"blocked,omitempty"`
+	CloseCategory    string   `json:"close_category,omitempty"`
+	ReworkCategory   string   `json:"rework_category,omitempty"`
+	IntroducedBy     string   `json:"introduced_by,omitempty"`
 	Assignee         *string  `json:"assignee"`
 	Predecessors     []string `json:"predecessors"`
 	Repo             *string  `json:"repo"`
@@ -70,6 +74,10 @@ func buildIndex(tickets []*Ticket) *Index {
 			Class:            ClassOf(t),
 			Lifecycle:        t.Lifecycle,
 			Block:            t.Block,
+			Blocked:          t.Blocked,
+			CloseCategory:    t.CloseCategory,
+			ReworkCategory:   t.ReworkCategory,
+			IntroducedBy:     t.IntroducedBy,
 			Assignee:         t.Assignee,
 			Predecessors:     predecessors,
 			Repo:             t.Repo,

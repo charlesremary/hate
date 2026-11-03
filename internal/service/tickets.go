@@ -84,6 +84,16 @@ func mutate(root, ticketID string, regen bool, fn func() (*ticket.Ticket, string
 	if err != nil {
 		return nil, err
 	}
+	// A ticket that just finished unblocks the tickets waiting only on it.
+	files := []string{ticket.TicketPath(root, tk.ID)}
+	if ticket.Contains(ticket.ClosedStatuses, tk.Status) {
+		if ids, err := ticket.ClearWaitsOn(root, tk.ID, "hate"); err == nil {
+			for _, id := range ids {
+				files = append(files, ticket.TicketPath(root, id))
+				action += ", unblocked " + id
+			}
+		}
+	}
 	if regen {
 		if err := ticket.RegenerateIndex(root); err != nil {
 			return nil, wrap(ErrInternal, err)
@@ -92,7 +102,7 @@ func mutate(root, ticketID string, regen bool, fn func() (*ticket.Ticket, string
 	if ticketID == "" {
 		ticketID = tk.ID
 	}
-	return &Result{Ticket: tk, CommitWarning: commit(root, ticketID, action)}, nil
+	return &Result{Ticket: tk, CommitWarning: ticket.CommitWarning(ticket.CommitFiles(root, files, ticketID+": "+action))}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -312,26 +322,39 @@ func statusChange(root, ticketID string, fn func() (*ticket.Ticket, error)) (*Re
 	})
 }
 
-// Block marks a ticket blocked with an optional reason. The workflow has no
-// transition into "blocked", so this is the one way in; promote/demote leave it.
-func Block(root, ticketID, reason, author string) (*Result, error) {
+// Block flags a ticket blocked (hate 3.0: a flag, the status stays) with a
+// reason and optionally what it waits on (ticket ids clear it when they
+// finish).
+func Block(root, ticketID, reason string, waitsOn []string, author string) (*Result, error) {
 	return mutate(root, ticketID, true, func() (*ticket.Ticket, string, error) {
-		tk, err := ticket.BlockTicket(root, ticketID, reason, author)
+		tk, err := ticket.Block(root, ticketID, reason, waitsOn, author)
 		if err != nil {
 			return nil, "", classify(err)
 		}
-		return tk, "status → blocked", nil
+		return tk, "blocked", nil
 	})
 }
 
-// ForceClose closes a ticket skipping the workflow, recording the reason.
-func ForceClose(root, ticketID, reason, author string) (*Result, error) {
+// Unblock clears the blocked flag.
+func Unblock(root, ticketID, note, author string) (*Result, error) {
 	return mutate(root, ticketID, true, func() (*ticket.Ticket, string, error) {
-		tk, err := ticket.ForceClose(root, ticketID, reason, author)
+		tk, err := ticket.Unblock(root, ticketID, note, author)
 		if err != nil {
 			return nil, "", classify(err)
 		}
-		return tk, "force-closed: " + reason, nil
+		return tk, "unblocked", nil
+	})
+}
+
+// ForceClose closes a ticket skipping the workflow, with a category
+// (ticket.CloseCategories) and a reason.
+func ForceClose(root, ticketID, category, reason, author string) (*Result, error) {
+	return mutate(root, ticketID, true, func() (*ticket.Ticket, string, error) {
+		tk, err := ticket.ForceClose(root, ticketID, category, reason, author)
+		if err != nil {
+			return nil, "", classify(err)
+		}
+		return tk, "force-closed (" + category + "): " + reason, nil
 	})
 }
 

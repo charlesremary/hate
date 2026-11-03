@@ -110,7 +110,7 @@ func TestMigrateBlockProject(t *testing.T) {
 		t.Errorf("after apply CheckWritable = %v", err)
 	}
 	raw, _ := os.ReadFile(TicketPath(root, "P-1"))
-	if strings.Contains(string(raw), `"phase"`) || !strings.Contains(string(raw), `"block": 3`) || !strings.Contains(string(raw), `"schema_version": "2.0.0"`) {
+	if strings.Contains(string(raw), `"phase"`) || !strings.Contains(string(raw), `"block": 3`) || !strings.Contains(string(raw), `"schema_version": "3.0.0"`) {
 		t.Errorf("P-1 after:\n%s", raw)
 	}
 	p2, _ := ReadTicket(root, "P-2")
@@ -160,5 +160,59 @@ func TestMigrateRefusesNewer(t *testing.T) {
 	os.WriteFile(ConfigPath(root), []byte(`{"schema_version": "9.0.0"}`), 0644)
 	if _, err := PlanMigration(root, MigrateOptions{}); !IsNewerFormat(err) {
 		t.Errorf("plan on newer = %v", err)
+	}
+}
+
+// HATE-6wjb / HATE-1go0: 2 -> 3 turns a blocked status into the flag (back
+// to the status it had) and gives force-closes a category; a 1.x project
+// runs both steps in one update.
+func TestMigrateTo3(t *testing.T) {
+	root := v1Project(t, 0, map[string]string{"P-1": "", "P-2": "", "P-3": "", "P-4": ""})
+	edit := func(id string, f func(m map[string]any)) {
+		b, _ := os.ReadFile(TicketPath(root, id))
+		var m map[string]any
+		json.Unmarshal(b, &m)
+		f(m)
+		b, _ = json.MarshalIndent(m, "", "  ")
+		os.WriteFile(TicketPath(root, id), b, 0644)
+	}
+	edit("P-1", func(m map[string]any) {
+		m["status"] = "blocked"
+		m["block_reason"] = "waiting on keys"
+		m["activity"] = append(m["activity"].([]any),
+			map[string]any{"timestamp": "2026-10-02T00:00:00Z", "action": "status_changed", "detail": "not_started -> in_progress"},
+			map[string]any{"timestamp": "2026-10-03T00:00:00Z", "action": "status_changed", "detail": "in_progress -> blocked: waiting on keys"})
+	})
+	edit("P-2", func(m map[string]any) { m["status"] = "closed"; m["cancellation_reason"] = "Done: shipped in abc123" })
+	edit("P-3", func(m map[string]any) { m["status"] = "closed"; m["cancellation_reason"] = "duplicate of P-4" })
+
+	// Read before the update: translated in memory.
+	if tk, _ := ReadTicket(root, "P-1"); tk.Status != "in_progress" || tk.Blocked == nil || tk.Blocked.Reason != "waiting on keys" {
+		t.Fatalf("read P-1 = %s %+v", tk.Status, tk.Blocked)
+	}
+	if tk, _ := ReadTicket(root, "P-2"); tk.CloseCategory != "done" || IsDescoped(tk) {
+		t.Errorf("read P-2 category %q", tk.CloseCategory)
+	}
+	plan, err := PlanMigration(root, MigrateOptions{})
+	if err != nil || plan.Unblocked != 1 || plan.ClosedDone != 1 || plan.ClosedDescoped != 1 {
+		t.Fatalf("plan = %+v, %v", plan, err)
+	}
+	if _, err := ApplyMigration(root, MigrateOptions{}, "a@x"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(TicketPath(root, "P-1"))
+	if strings.Contains(string(raw), "block_reason") || strings.Contains(string(raw), `"status": "blocked"`) || !strings.Contains(string(raw), `"blocked": {`) {
+		t.Errorf("P-1 after:\n%s", raw)
+	}
+	p3, _ := ReadTicket(root, "P-3")
+	if p3.CloseCategory != "descoped" || !IsDescoped(p3) {
+		t.Errorf("P-3 = %q", p3.CloseCategory)
+	}
+	if err := CheckWritable(root); err != nil {
+		t.Errorf("after update: %v", err)
+	}
+	// Promote is refused while blocked; unblock, then it works.
+	if _, err := Promote(root, "P-1", "a@x"); err == nil || !strings.Contains(err.Error(), "blocked") {
+		t.Errorf("promote blocked = %v", err)
 	}
 }

@@ -36,7 +36,7 @@ func TestStatusChangeAuthor(t *testing.T) {
 		{"promote body", base + id + "/promote", map[string]interface{}{"author": "body@x"}, "body@x"},
 		{"demote query", base + id + "/demote?author=query@x", nil, "query@x"},
 		{"promote body wins", base + id + "/promote?author=query@x", map[string]interface{}{"author": "body@x"}, "body@x"},
-		{"force-close query", base + id + "/force-close?author=query@x", map[string]interface{}{"reason": "test cleanup"}, "query@x"},
+		{"force-close query", base + id + "/force-close?author=query@x", map[string]interface{}{"category": "descoped", "reason": "test cleanup"}, "query@x"},
 	} {
 		code, body := do(t, h, "POST", c.path, c.body)
 		if code != http.StatusOK {

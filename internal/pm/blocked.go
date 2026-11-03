@@ -20,17 +20,17 @@ type BlockedRow struct {
 	Since    string `json:"since"`
 }
 
-// ComputeBlocked lists tickets currently in the "blocked" state, with the reason
+// ComputeBlocked lists tickets currently flagged blocked, with the reason
 // captured when they were blocked and the date they were last blocked.
 func ComputeBlocked(tickets []*ticket.Ticket) []BlockedRow {
 	var rows []BlockedRow
 	for _, t := range tickets {
-		if t.Status != "blocked" {
+		if t.Blocked == nil || ticket.Contains(ticket.ClosedStatuses, t.Status) {
 			continue
 		}
-		reason := ""
-		if t.BlockReason != nil {
-			reason = strings.TrimSpace(*t.BlockReason)
+		reason := strings.TrimSpace(t.Blocked.Reason)
+		if len(t.Blocked.WaitsOn) > 0 {
+			reason += " (waiting on " + strings.Join(t.Blocked.WaitsOn, ", ") + ")"
 		}
 		assignee := ""
 		if t.Assignee != nil {
@@ -41,10 +41,18 @@ func ComputeBlocked(tickets []*ticket.Ticket) []BlockedRow {
 			Title:    t.Title,
 			Assignee: assignee,
 			Reason:   reason,
-			Since:    lastBlockedDate(t),
+			Since:    blockedSince(t),
 		})
 	}
 	return rows
+}
+
+// blockedSince is the date (YYYY-MM-DD) the ticket was flagged blocked.
+func blockedSince(t *ticket.Ticket) string {
+	if t.Blocked != nil && len(t.Blocked.Since) >= 10 {
+		return t.Blocked.Since[:10]
+	}
+	return lastBlockedDate(t)
 }
 
 // lastBlockedDate returns the date (YYYY-MM-DD) of the most recent transition
@@ -52,7 +60,7 @@ func ComputeBlocked(tickets []*ticket.Ticket) []BlockedRow {
 func lastBlockedDate(t *ticket.Ticket) string {
 	for i := len(t.Activity) - 1; i >= 0; i-- {
 		a := t.Activity[i]
-		if a.Action == "status_changed" && strings.Contains(a.Detail, "-> blocked") {
+		if a.Action == "blocked" || (a.Action == "status_changed" && strings.Contains(a.Detail, "-> blocked")) {
 			if len(a.Timestamp) >= 10 {
 				return a.Timestamp[:10]
 			}

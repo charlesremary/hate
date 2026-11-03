@@ -52,7 +52,7 @@
           🔒 <strong>This project is closed</strong> <span id="project-closed-date" style="color:#999"></span>. Ticket changes are blocked — reopen the project under <em>Project List</em> to make changes.
         </div>
         <div id="project-update-banner" class="project-update-banner hidden">
-          <span><strong>This project needs a one-time update</strong> to the hate 2.0 format ("phase" becomes <em>lifecycle</em> and <em>block</em>). You can look around; changes wait until it's updated.</span>
+          <span><strong>This project needs a one-time update</strong> to this version of hate's project format. You can look around; changes wait until it's updated.</span>
           <button type="button" class="btn-primary btn-xs" id="btn-project-update">Review the update…</button>
         </div>
         <div id="project-newer-banner" class="hidden" style="background:#fdecea;border-left:4px solid #c62828;padding:8px 14px;margin:0;font-size:13px">
@@ -539,8 +539,8 @@
               that type's path. Every transition is recorded in the activity log. (Meeting and
               administration tickets auto-complete on creation and have no workflow.)</p>
             <p>The buttons name the status they move to (<strong>▲ Promote to QA Testing</strong>,
-              <strong>▼ Demote to In Progress</strong>; a blocked ticket shows <strong>▲ Unblock to
-              …</strong>), and the strip of statuses above them shows the type's full path with the
+              <strong>▼ Demote to In Progress</strong>; a blocked ticket shows <strong>Unblock</strong>
+              instead), and the strip of statuses above them shows the type's full path with the
               current status highlighted and the finished steps greyed out. A button with nowhere to
               go is greyed out too; hover it to see why.</p>
 
@@ -575,29 +575,44 @@
               <span class="badge s-closed">Closed</span>
             </p>
 
-            <h3>Blocked — any workflow type</h3>
-            <p>The <strong>⛔ Block</strong> button in the ticket panel moves a ticket to
-              <span class="badge s-blocked">Blocked</span> — no workflow has a path <em>into</em>
-              Blocked, so the button is the only way in. Promoting or demoting from Blocked returns
-              the ticket to <em>whatever status it was in before</em>, which the tool figures out by
-              reading the activity log.</p>
+            <h3>Blocked — a flag, not a status</h3>
+            <p><strong>⛔ Block</strong> flags a ticket blocked, with a reason and optionally what it
+              waits on. The ticket <em>keeps its status</em> (in QA stays in QA), so reports still show
+              where it really is, and the time you logged before the block still counts. A blocked
+              ticket can't be promoted: click <strong>Unblock</strong> first. If it waits on other
+              tickets, the flag clears itself when they're all finished.</p>
 
             <h3>Force close — skipping the workflow</h3>
-            <p>Use <strong>⏩ Force close</strong> in the ticket panel when a ticket won't be worked
-              to completion — duplicates, scoped-out items, mistakes, anything that should leave
-              the active list without going through promotion. It lands the ticket directly at
-              <span class="badge s-closed">Closed</span>, regardless of where it was in the workflow.</p>
-            <p>Force close <strong>requires a written reason</strong> (minimum five characters),
+            <p>Use <strong>⏩ Force close</strong> in the ticket panel to close a ticket without going
+              through promotion. It lands the ticket directly at
+              <span class="badge s-closed">Closed</span>, with a <strong>category</strong>:</p>
+            <ul>
+              <li><strong>Done</strong>: the work was delivered, just not through the normal path (say,
+                no time could be logged). It counts as finished everywhere.</li>
+              <li><strong>Descoped</strong>, <strong>Duplicate</strong>, <strong>Won't do</strong>: it
+                leaves every number (complete %, estimates, stats) and is counted separately.</li>
+            </ul>
+            <p>Force close also <strong>requires a written reason</strong> (minimum five characters),
               which is recorded permanently:</p>
             <ul>
               <li>As a <code>force_closed</code> entry in the ticket's activity log.</li>
               <li>On the ticket itself in the <em>cancellation_reason</em> field, shown as a banner
                 in the panel so future readers can see why it was dropped.</li>
             </ul>
-            <p>This is different from normal completion — a ticket reaching Closed via promotion
-              represents real finished work; a ticket reaching Closed via Force close represents
-              work that was cancelled. Both are <strong>terminal</strong>: a force-closed ticket
-              cannot be promoted, demoted, or force-closed again.</p>
+            <p>Closed is <strong>terminal</strong>: a closed ticket isn't reopened. If finished work
+              turns out wrong, use <strong>↺ Rework</strong> on it (below).</p>
+
+            <h3>Rework — redoing finished work</h3>
+            <p><strong>↺ Rework</strong> on a finished ticket creates a <em>new</em> ticket to redo it,
+              tagged as rework of the original, with <strong>why</strong> (defect missed in testing,
+              missed requirement, misunderstood requirement, incomplete, regression, environment /
+              deployment) and <strong>who introduced it</strong> (an agent or a person). The original
+              stays exactly as it closed and gets a comment pointing at the new ticket.</p>
+            <p>A client changing their mind isn't rework; create a new ticket for it. Rework is sized
+              by its own estimate, never takes a share of the feature's CFP, and is left out of
+              estimate accuracy and calibration, so your estimates stay honest. The PM Dashboard's
+              <em>Rework</em> card shows the share of hours that went to rework, the top cause, and
+              agent vs person.</p>
             <p>Use Force close instead of trying to delete a ticket. Deletion would corrupt the
               baseline; Force close transitions the ticket cleanly and preserves the audit trail.
               Time entries and predecessor links on a force-closed ticket are kept intact.</p>
@@ -803,6 +818,9 @@
               <li><strong>Blocked now</strong> (and the longest-blocked ticket), <strong>Scope
                 added</strong> since the baseline (or this week without one), and <strong>Tests
                 passing</strong>.</li>
+              <li><strong>Rework</strong>: hours logged on rework tickets as a share of all hours, the
+                most common cause, and agent vs person. <strong>Closed unfinished</strong>: tickets
+                force-closed as descoped, duplicate or won't do.</li>
             </ul>
             <p>Force-closed (descoped) and backlog tickets are left out of every number.</p>
             <h3>Schedule vs request</h3>
@@ -1300,11 +1318,11 @@
     <div id="project-update-modal-overlay" class="modal-overlay-generic hidden">
       <div style="background:#fff;padding:20px;border-radius:8px;width:820px;max-width:94vw;max-height:85vh;overflow:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <h3 style="margin:0">Update project to the hate 2.0 format</h3>
+          <h3 style="margin:0" id="pu-title">Update project format</h3>
           <button class="icon-btn" id="btn-close-project-update">✕</button>
         </div>
         <p style="font-size:13px;margin:0 0 8px">Nothing changes until you click <strong>Update project</strong>. It rewrites every ticket file once and commits that as one change, so it can be undone with git.</p>
-        <label style="font-size:13px"><input type="checkbox" id="pu-blocks"> Old phases like "Block 03 (…)" become block numbers (otherwise every old phase becomes a lifecycle)</label>
+        <label style="font-size:13px" id="pu-blocks-label"><input type="checkbox" id="pu-blocks"> Old phases like "Block 03 (…)" become block numbers (otherwise every old phase becomes a lifecycle)</label>
         <div id="pu-summary" style="font-size:13px;margin:10px 0"></div>
         <div id="pu-changes" style="font-size:12px;max-height:45vh;overflow:auto"></div>
         <div class="form-actions" style="margin-top:12px">
@@ -1336,11 +1354,20 @@
         <h3>Force close ticket</h3>
         <p style="font-size:13px;color:#555;margin:8px 0 12px">
           This skips the normal promotion workflow and lands the ticket at <strong>closed</strong>.
-          Use it for duplicates, scoped-out work, or anything that won't be done.
-          A reason is required and recorded permanently in the activity log.
+          Pick why: <em>Done</em> counts as delivered work (finished outside the normal path);
+          the others leave every number. The reason is recorded permanently.
         </p>
         <p style="font-size:13px;color:#333;margin:0 0 12px"><strong>Ticket:</strong> <span id="fc-ticket-label"></span></p>
         <form id="force-close-form">
+          <label style="display:block;margin-bottom:8px">Category
+            <select id="fc-category" required style="margin-left:6px">
+              <option value="">Choose…</option>
+              <option value="done">Done (delivered outside the normal path)</option>
+              <option value="descoped">Descoped</option>
+              <option value="duplicate">Duplicate</option>
+              <option value="wont_do">Won't do</option>
+            </select>
+          </label>
           <label style="display:block">Reason
             <textarea id="fc-reason" rows="3" minlength="5" required placeholder="e.g. Duplicate of TKT-abcd — keeping the older one." style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-top:4px"></textarea>
           </label>
@@ -1353,17 +1380,63 @@
     </div>
 
     <!-- Block ticket modal -->
+    <div id="rework-modal-overlay" class="modal-overlay-generic hidden">
+      <div style="background:#fff;padding:20px;border-radius:8px;width:520px;max-width:94vw">
+        <h3>↺ Rework</h3>
+        <p style="font-size:13px;color:#555;margin:8px 0 12px">
+          Creates a <strong>new</strong> ticket to redo <span id="rw-ticket-label"></span>. The closed ticket
+          stays as it was (its estimate and hours aren't touched) and gets a comment pointing at the new one.
+          Rework is sized by its own estimate and counted separately on the dashboard.
+        </p>
+        <form id="rework-form">
+          <label style="display:block;margin-bottom:8px">Why
+            <select id="rw-category" required style="margin-left:6px">
+              <option value="">Choose…</option>
+              <option value="defect">Defect (missed in testing)</option>
+              <option value="missed_requirement">Missed requirement</option>
+              <option value="misunderstood_requirement">Misunderstood requirement</option>
+              <option value="incomplete">Incomplete</option>
+              <option value="regression">Regression</option>
+              <option value="environment">Environment / deployment</option>
+            </select>
+          </label>
+          <p style="font-size:12px;color:#888;margin:-4px 0 8px">The client changed their mind? That's new scope, not rework: create a new ticket.</p>
+          <label id="rw-broken-label" class="hidden" style="display:block;margin-bottom:8px">Broken by <span style="color:#888;font-size:12px">(optional: the ticket whose change broke it)</span>
+            <input type="text" id="rw-broken" placeholder="e.g. HATE-9xyz" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-top:4px">
+          </label>
+          <div style="margin-bottom:8px;font-size:13px;display:flex;align-items:center">Introduced by
+            <label style="display:inline-flex;gap:4px;align-items:center;margin-left:10px"><input type="radio" name="rw-by" value="agent" style="width:auto">an agent</label>
+            <label style="display:inline-flex;gap:4px;align-items:center;margin-left:10px"><input type="radio" name="rw-by" value="human" style="width:auto">a person</label>
+          </div>
+          <label style="display:block">What's wrong
+            <textarea id="rw-reason" rows="3" required minlength="5" placeholder="e.g. Transfer drops the caller when the queue is closed (found in UAT)." style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-top:4px"></textarea>
+          </label>
+          <label style="display:block;margin-top:8px">Estimate (hours, optional)
+            <input type="number" id="rw-estimate" step="0.25" min="0.25" style="width:100px;margin-left:6px">
+          </label>
+          <div class="form-actions" style="margin-top:12px">
+            <button type="submit" class="btn-primary">Create rework ticket</button>
+            <button type="button" class="btn-secondary" id="btn-cancel-rework">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div id="block-modal-overlay" class="hidden">
       <div id="block-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:480px;margin:8% auto">
         <h3>⛔ Block ticket</h3>
         <p style="font-size:13px;color:#555;margin:8px 0 12px">
-          Marks the ticket <strong>blocked</strong> and records why. The reason shows on the
-          PM dashboard's blocked-tickets list. Optional, but recommended so nobody's left guessing.
+          Flags the ticket <strong>blocked</strong>: it keeps its status, but can't be promoted
+          until it's unblocked. The reason shows on the PM dashboard. If it waits on other
+          tickets, list them and the flag clears itself when they're all finished.
         </p>
         <p style="font-size:13px;color:#333;margin:0 0 12px"><strong>Ticket:</strong> <span id="bl-ticket-label"></span></p>
         <form id="block-form">
           <label style="display:block">Reason
-            <textarea id="bl-reason" rows="3" placeholder="e.g. Waiting on Genesys API credentials from the client." style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-top:4px"></textarea>
+            <textarea id="bl-reason" rows="3" required placeholder="e.g. Waiting on Genesys API credentials from the client." style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-top:4px"></textarea>
+          </label>
+          <label style="display:block;margin-top:8px">Waiting on <span style="color:#888;font-size:12px">(optional: ticket ids or a person, comma separated)</span>
+            <input type="text" id="bl-waits" placeholder="e.g. HATE-1a2b, client IT" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-top:4px">
           </label>
           <div class="form-actions" style="margin-top:12px">
             <button type="submit" class="btn-primary">Block</button>

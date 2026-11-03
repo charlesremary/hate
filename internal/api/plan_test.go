@@ -404,7 +404,7 @@ func TestHeaderAndHelp(t *testing.T) {
 			t.Errorf("Help does not mention %q", want)
 		}
 	}
-	if config.AppVersion != "2.2.0" { // HATE-8t9e: live project stats is v2.2.0
+	if config.AppVersion != "3.0.0" { // HATE-jvri: blocked flag, rework, force-close categories, stats (format 3) is v3.0.0
 		t.Errorf("AppVersion = %s", config.AppVersion)
 	}
 }

@@ -68,6 +68,7 @@ type WorkItem struct {
 	Wave           int      `json:"wave"`            // 1-based
 	EstimatedHours float64  `json:"estimated_hours"` // 0 when unsized
 	WaitsOn        []string `json:"waits_on"`        // open predecessors
+	Blocked        bool     `json:"blocked,omitempty"` // flagged blocked: never ready
 }
 
 // WaveGroup is one dependency wave of the work order.
@@ -120,6 +121,7 @@ func ComputeReady(tickets []*ticket.Ticket, ctx EstimateContext) ReadyReport {
 			w.Lifecycle = *t.Lifecycle
 		}
 		w.Block = t.Block
+		w.Blocked = t.Blocked != nil
 		for _, p := range t.Predecessors {
 			if _, open := waves[p]; open && p != t.ID {
 				w.WaitsOn = append(w.WaitsOn, p)
@@ -140,13 +142,13 @@ func ComputeReady(tickets []*ticket.Ticket, ctx EstimateContext) ReadyReport {
 
 	ready := map[string]bool{}
 	for _, w := range items {
-		if w.Wave == 1 && w.Status != "blocked" {
+		if w.Wave == 1 && !w.Blocked {
 			ready[w.ID] = true
 			rep.Ready = append(rep.Ready, w)
 		}
 	}
 	for _, w := range items {
-		if ready[w.ID] || w.Status == "blocked" || len(w.WaitsOn) == 0 {
+		if ready[w.ID] || w.Blocked || len(w.WaitsOn) == 0 {
 			continue
 		}
 		all := true

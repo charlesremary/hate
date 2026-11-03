@@ -17,7 +17,7 @@ func downgrade(t *testing.T, root, id, phase string) {
 	t.Helper()
 	cp := ticket.ConfigPath(root)
 	data, _ := os.ReadFile(cp)
-	s := strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "1.0.0"`, 1)
+	s := strings.Replace(string(data), `"schema_version": "3.0.0"`, `"schema_version": "1.0.0"`, 1)
 	s = strings.Replace(s, `"prefix": "EST",`, `"prefix": "EST", "block_weeks": 2,`, 1)
 	os.WriteFile(cp, []byte(s), 0644)
 	tp := ticket.TicketPath(root, id)

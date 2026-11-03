@@ -164,9 +164,9 @@ func TestFeatureFunctionalDone(t *testing.T) {
 	if !FeatureFunctionalDone(self, []*ticket.Ticket{self}) {
 		t.Error("self-contained functional feature in qa_testing should be done")
 	}
-	self.Status = "blocked"
+	self.Status = "in_progress"
 	if FeatureFunctionalDone(self, []*ticket.Ticket{self}) {
-		t.Error("blocked self-contained feature should not be done")
+		t.Error("in-progress self-contained feature should not be done")
 	}
 	empty := &ticket.Ticket{ID: "E", Tags: []string{"cfp:5"}}
 	if FeatureFunctionalDone(empty, []*ticket.Ticket{empty}) {

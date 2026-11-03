@@ -47,10 +47,6 @@ func TestTicketWorkflow(t *testing.T) {
 		{"dev rework", "dev_task", "rework", nil, "qa_testing", nil},
 		{"task closed", "task", "closed", nil, nil, nil},
 		{"design approved", "design_task", "approved", nil, "closed", "submitted_for_review"},
-		{"dev blocked resolves _previous", "dev_task", "blocked", []Activity{
-			{Action: "status_changed", Detail: "not_started -> in_progress"},
-			{Action: "status_changed", Detail: "in_progress -> blocked"},
-		}, "in_progress", "in_progress"},
 	}
 	for _, c := range cases {
 		v := TicketWorkflow(&Ticket{Type: c.typ, Status: c.status, Activity: c.activity})
