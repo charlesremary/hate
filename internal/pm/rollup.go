@@ -28,6 +28,8 @@ type GroupProgress struct {
 	Block      int    `json:"block,omitempty"`
 	BlockStart string `json:"block_start,omitempty"`
 	BlockEnd   string `json:"block_end,omitempty"`
+	BlockDates string `json:"block_dates,omitempty"` // "Nov 30-Dec 11"
+	BlockState string `json:"block_state,omitempty"` // past / current / upcoming
 
 	TicketCount     int `json:"ticket_count"`      // tickets in scope (excludes cancelled)
 	CompleteCount   int `json:"complete_count"`    // reached a non-cancelled terminal status
@@ -230,6 +232,7 @@ func ApplyBlockDates(rep *RollupReport, blocks []Block) {
 		g := &rep.Groups[i]
 		if b, ok := byN[g.Block]; ok && g.Block > 0 {
 			g.BlockStart, g.BlockEnd, g.Label = b.Start, b.End, b.Label
+			g.BlockDates, g.BlockState = b.Dates, b.State
 		}
 	}
 }

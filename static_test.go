@@ -87,3 +87,24 @@ func TestUILifecycleBlockAndUpdate(t *testing.T) {
 		}
 	}
 }
+
+// HATE-9qrf / HATE-wfta / HATE-ya9d / HATE-twh1 (UI).
+func TestUIBlocksByDateFiltersAndExport(t *testing.T) {
+	html, js := staticFile(t, "index.html"), staticFile(t, "app.js")
+	for _, want := range []string{`<option value="block">Sort: Block</option>`, `id="btn-filters"`, `id="filter-chips"`, `id="filter-selects" class="hidden"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("index.html missing %q", want)
+		}
+	}
+	// Export to Excel lives on the PM Dashboard tab, not the Tickets toolbar.
+	tickets := html[strings.Index(html, `id="tab-tickets"`):strings.Index(html, `id="tab-dashboard"`)]
+	dash := html[strings.Index(html, `id="tab-dashboard"`):]
+	if strings.Contains(tickets, `id="btn-export-xlsx"`) || !strings.Contains(dash[:600], `id="btn-export-xlsx"`) {
+		t.Error("Export to Excel should be on the PM Dashboard tab only")
+	}
+	for _, want := range []string{"blockBadge(", "block-head", "Current block: ", "renderFilterChips"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("app.js missing %q", want)
+		}
+	}
+}

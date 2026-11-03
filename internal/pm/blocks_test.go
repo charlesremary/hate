@@ -207,3 +207,23 @@ func TestProjectedGanttLanes(t *testing.T) {
 		t.Errorf("lane groups = %s, want Zed then Amy (config order)", got)
 	}
 }
+
+// HATE-9qrf: blocks carry their dates and a past/current/upcoming state, and
+// the list covers every block a ticket is planned into.
+func TestBlocksStateAndCoverage(t *testing.T) {
+	far := capT("Z", 1, "")
+	far.Block = 9
+	tickets := []*ticket.Ticket{capT("A", 8, ""), far}
+	cfg := &ticket.ProjectConfig{BlockWeeks: 2, RequestedStart: "2026-11-02", RequestedEnd: "2026-11-27"}
+	today := day("2026-11-21") // Saturday after block 2's last Friday: still block 2
+	blocks := BlocksForProject(cfg, tickets, NewEstimateContext(tickets, 0, nil), today)
+	if len(blocks) < 9 {
+		t.Fatalf("%d blocks, want at least 9 (a ticket is in block 9)", len(blocks))
+	}
+	if blocks[0].State != BlockPast || blocks[1].State != BlockCurrent || blocks[2].State != BlockUpcoming {
+		t.Errorf("states = %s %s %s", blocks[0].State, blocks[1].State, blocks[2].State)
+	}
+	if blocks[0].Dates != "Nov 2-13" || blocks[2].Dates != "Nov 30-Dec 11" || blocks[2].Label != "Block 03 (Nov 30-Dec 11)" {
+		t.Errorf("dates %q %q label %q", blocks[0].Dates, blocks[2].Dates, blocks[2].Label)
+	}
+}

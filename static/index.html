@@ -91,15 +91,23 @@
           <datalist id="est-hours-options"><option value="0.25"></option><option value="0.5"></option><option value="1"></option><option value="2"></option><option value="4"></option><option value="8"></option></datalist>
           <div class="tickets-toolbar">
             <button class="btn-primary" id="btn-new-ticket">+ New Ticket</button>
-            <button class="btn-secondary" id="btn-export-xlsx" title="Download every ticket and a Gantt as an Excel workbook">Export to Excel</button>
-            <select id="filter-status"><option value="">All statuses</option></select>
-            <select id="filter-type"><option value="">All types</option></select>
-            <select id="filter-lifecycle" title="Filter by lifecycle (kind of work)"><option value="">All lifecycles</option></select>
-            <select id="filter-block" title="Filter by planning block" class="hidden"><option value="">All blocks</option></select>
-            <select id="filter-tag" title="Filter by tag"><option value="">All tags</option></select>
-            <select id="filter-assignee" title="Filter by assignee"><option value="">All assignees</option></select>
+            <!-- The Filters menu drives these (kept as the filter state; hidden). -->
+            <span id="filter-selects" class="hidden">
+              <select id="filter-status"><option value="">All statuses</option></select>
+              <select id="filter-type"><option value="">All types</option></select>
+              <select id="filter-lifecycle"><option value="">All lifecycles</option></select>
+              <select id="filter-block"><option value="">All blocks</option></select>
+              <select id="filter-tag"><option value="">All tags</option></select>
+              <select id="filter-assignee"><option value="">All assignees</option></select>
+            </span>
+            <div class="filter-menu-wrap">
+              <button type="button" class="btn-secondary" id="btn-filters" aria-haspopup="true" aria-expanded="false">Filters</button>
+              <div id="filter-menu" class="filter-menu hidden" role="menu"></div>
+            </div>
+            <span id="filter-chips" class="filter-chips"></span>
             <select id="filter-sort" title="Sort tickets by">
               <option value="work" selected>Sort: Work order</option>
+              <option value="block">Sort: Block</option>
               <option value="start">Sort: Start date</option>
               <option value="due">Sort: Due date</option>
               <option value="priority">Sort: Priority</option>
@@ -127,6 +135,9 @@
 
         <!-- Dashboard tab -->
         <div id="tab-dashboard" class="tab-content hidden">
+          <div class="dashboard-toolbar">
+            <button class="btn-secondary" id="btn-export-xlsx" title="Download every ticket and a Gantt as an Excel workbook">Export to Excel</button>
+          </div>
           <iframe id="dashboard-frame" src="about:blank" frameborder="0"></iframe>
         </div>
 
@@ -436,7 +447,15 @@
             <p>Create a ticket with <strong>+ New Ticket</strong>. Click any row to open its detail
               panel, where every field is editable inline and the full activity history is shown.</p>
 
-            <p><strong>Export to Excel</strong> downloads a workbook with every ticket and a Gantt.</p>
+            <p><strong>Filters</strong> opens one menu with a section each for status, type, lifecycle,
+              block, tag and assignee. Each filter you set shows as a chip beside the button; click its
+              &times; to remove it, or <em>Clear all</em> in the menu.</p>
+            <p><strong>Sort: Block</strong> (the default on projects planned in blocks) splits the list
+              into one section per block, headed by its dates: the current block is highlighted green,
+              past blocks are greyed, and unplanned work comes last. Everywhere a block appears it reads
+              as its dates (<em>Nov 30-Dec 11</em>), with the block number beside it.</p>
+            <p><strong>Export to Excel</strong> is on the <em>PM Dashboard</em> tab: a workbook with every
+              ticket and a Gantt.</p>
 
             <h3>Ticket types</h3>
             <p>A ticket's type determines the workflow it follows — see §3.</p>

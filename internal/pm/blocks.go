@@ -23,8 +23,29 @@ import (
 type Block struct {
 	N     int    `json:"n"`     // 1-based
 	Label string `json:"label"` // "Block 01 (Nov 2-13)"
+	Dates string `json:"dates"` // "Nov 2-13", "Nov 30-Dec 11": what people call the block
 	Start string `json:"start"` // YYYY-MM-DD, a Monday
 	End   string `json:"end"`   // YYYY-MM-DD, the Friday of the block's last week
+	// State is past, current or upcoming against today (a block is current
+	// from its Monday through the Sunday after its last Friday). Set by
+	// BlocksForProject; "" from BuildBlocks.
+	State string `json:"state,omitempty"`
+}
+
+// Block states.
+const (
+	BlockPast     = "past"
+	BlockCurrent  = "current"
+	BlockUpcoming = "upcoming"
+)
+
+// BlockDates is a block's date range: "Nov 2-13", or "Nov 30-Dec 11" across a
+// month boundary.
+func BlockDates(start, end time.Time) string {
+	if start.Month() == end.Month() && start.Year() == end.Year() {
+		return fmt.Sprintf("%s %d-%d", start.Format("Jan"), start.Day(), end.Day())
+	}
+	return fmt.Sprintf("%s-%s", start.Format("Jan 2"), end.Format("Jan 2"))
 }
 
 // maxBlocks caps a block list (a 3-week block x 200 is over 11 years).
@@ -46,12 +67,8 @@ func mondayOnOrBefore(d time.Time) time.Time {
 // BlockLabel names block n by its dates: "Block 01 (Nov 2-13)", or
 // "Block 03 (Nov 30-Dec 11)" across a month boundary.
 func BlockLabel(n int, start, end time.Time) string {
-	if start.Month() == end.Month() && start.Year() == end.Year() {
-		return fmt.Sprintf("Block %02d (%s %d-%d)", n, start.Format("Jan"), start.Day(), end.Day())
-	}
-	return fmt.Sprintf("Block %02d (%s-%s)", n, start.Format("Jan 2"), end.Format("Jan 2"))
+	return fmt.Sprintf("Block %02d (%s)", n, BlockDates(start, end))
 }
-
 
 // BlockAnchor is the start of block 1: the Monday on or before the requested
 // start, else on or before the earliest planned_start_date of an in-scope
@@ -88,7 +105,7 @@ func BuildBlocks(weeks int, anchor, until time.Time) []Block {
 	reached := false
 	for n := 1; n <= maxBlocks; n++ {
 		end := start.AddDate(0, 0, weeks*7-3) // Friday of the last week
-		out = append(out, Block{N: n, Label: BlockLabel(n, start, end), Start: fmtDate(start), End: fmtDate(end)})
+		out = append(out, Block{N: n, Label: BlockLabel(n, start, end), Dates: BlockDates(start, end), Start: fmtDate(start), End: fmtDate(end)})
 		if reached {
 			break
 		}
@@ -122,7 +139,30 @@ func BlocksForProject(cfg *ticket.ProjectConfig, tickets []*ticket.Ticket, ctx E
 	if until.Before(anchor) {
 		until = anchor
 	}
-	return BuildBlocks(cfg.BlockWeeks, anchor, until)
+	// Cover every block a ticket is planned into, even past the schedule.
+	maxBlock := 0
+	for _, t := range tickets {
+		maxBlock = max(maxBlock, t.Block)
+	}
+	if maxBlock > 0 {
+		if last := mondayOnOrBefore(anchor).AddDate(0, 0, (maxBlock-1)*cfg.BlockWeeks*7); last.After(until) {
+			until = last
+		}
+	}
+	blocks := BuildBlocks(cfg.BlockWeeks, anchor, until)
+	day := dateOnly(today)
+	for i := range blocks {
+		start, end := parseDate(blocks[i].Start), parseDate(blocks[i].End).AddDate(0, 0, 2)
+		switch {
+		case day.After(end):
+			blocks[i].State = BlockPast
+		case day.Before(start):
+			blocks[i].State = BlockUpcoming
+		default:
+			blocks[i].State = BlockCurrent
+		}
+	}
+	return blocks
 }
 
 // blockIndexAt returns the index of the block whose span (Monday through the

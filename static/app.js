@@ -762,12 +762,18 @@ async function loadTickets() {
     ]);
     allTickets = tickets;
     workOrder = wo;
+    const hadBlocks = projectBlocks.length > 0;
     projectBlocks = blocks || [];
+    if (hadBlocks !== projectBlocks.length > 0 || !loadTickets.sortFor || loadTickets.sortFor !== currentProject.id) {
+      loadTickets.sortFor = currentProject.id;
+      restoreSortPreference();
+    }
     const pickFrom = unfiltered || tickets;
     populateLifecycleFilter(pickFrom);
     populateBlockFilter(pickFrom);
     populateTagFilter(pickFrom);
     populateAssigneeFilter(pickFrom);
+    renderFilterChips();
     renderMigrationBanner();
     renderTickets();
   } catch (e) {
@@ -894,13 +900,15 @@ function renderTicketTable(tickets) {
   const byId = new Map((allTickets || []).map(t => [t.id, t]));
   const kidCount = childCountMap();
 
-  if (mode === 'work') {
+  if (mode === 'work' || mode === 'block') {
     const depth = workOrderDepth();
     // Committed-active first, then backlog, then done — so uncommitted/finished
-    // work never leads the order.
+    // work never leads the order. Sort: Block puts the block first.
     const rank = t => isDone(t) ? 2 : (isBacklogTicket(t) ? 1 : 0);
+    const blk = t => t.block || 1e9; // no block last
     tickets.sort((a, b) =>
-         (rank(a) - rank(b))
+         (mode === 'block' ? blk(a) - blk(b) : 0)
+      || (rank(a) - rank(b))
       || ((depth.get(a.id) || 0) - (depth.get(b.id) || 0))     // dependency order: ready before blocked
       || ((a.block || 1e9) - (b.block || 1e9))                 // within a wave: block order; no block last
       || (a.lifecycle || '~').localeCompare(b.lifecycle || '~') // then lifecycle (Discovery→Build→…); none last
@@ -916,7 +924,7 @@ function renderTicketTable(tickets) {
     tbody.innerHTML = `<tr><td colspan="9" style="padding:16px;color:#999">${reviewConvertedOnly ? 'No wrap tickets with converted estimates.' : 'No tickets. Create one with "+ New Ticket".'}</td></tr>`;
     return;
   }
-  tbody.innerHTML = tickets.map(t => `
+  const row = t => `
     <tr data-id="${t.id}">
       <td style="text-align:center;padding:0;white-space:nowrap">${gutterMarks(t)}</td>
       <td><strong>${t.id}</strong></td>
@@ -927,10 +935,35 @@ function renderTicketTable(tickets) {
       <td style="white-space:nowrap">${estHoursCell(t)}</td>
       <td>${t.planned_start_date || '—'}</td>
       <td>${t.due_date || '—'}</td>
-    </tr>`).join('');
+    </tr>`;
+  if (mode === 'block') {
+    // One dated section per block (HATE-wfta), then "No block".
+    const groups = new Map();
+    tickets.forEach(t => {
+      const k = t.block || 0;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(t);
+    });
+    const keys = [...groups.keys()].sort((a, b) => (a || 1e9) - (b || 1e9));
+    tbody.innerHTML = keys.map(k => {
+      const list = groups.get(k);
+      const done = list.filter(isDone).length;
+      const hrs = list.reduce((s, t) => s + (t.estimated_hours || 0), 0);
+      const b = k ? blockInfo(k) : null;
+      const state = b ? b.state : '';
+      const title = k
+        ? `${escapeHtml(b ? b.dates : 'Block ' + k)} <span class="bh-meta">Block ${k}${state === 'current' ? ' · current block' : state === 'past' ? ' · past' : ''}</span>`
+        : 'No block';
+      return `<tr class="block-head ${state}"><td colspan="9"><strong>${title}</strong>
+        <span class="bh-meta">${list.length} ticket${list.length === 1 ? '' : 's'}, ${done} done · ${fmtHours(hrs)}h</span></td></tr>`
+        + list.map(row).join('');
+    }).join('');
+  } else {
+    tbody.innerHTML = tickets.map(row).join('');
+  }
 
-  tbody.querySelectorAll('tr').forEach(row => {
-    row.addEventListener('click', () => openTicketPanel(row.dataset.id));
+  tbody.querySelectorAll('tr[data-id]').forEach(r => {
+    r.addEventListener('click', () => openTicketPanel(r.dataset.id));
   });
 }
 
@@ -953,15 +986,30 @@ function renderTicketTable(tickets) {
 // Planning blocks of the current project (GET /blocks; [] when it doesn't
 // plan in blocks). Labels and dates are computed there, never stored.
 let projectBlocks = [];
+function blockInfo(n) {
+  return projectBlocks.find(x => x.n === n) || null;
+}
+// Plain text for pick lists: "Nov 30-Dec 11 (block 3, now)".
 function blockLabel(n) {
   if (!n) return '';
-  const b = projectBlocks.find(x => x.n === n);
-  return b ? b.label : `Block ${String(n).padStart(2, '0')}`;
+  const b = blockInfo(n);
+  if (!b) return `Block ${n}`;
+  const st = b.state === 'current' ? ', now' : b.state === 'past' ? ', past' : '';
+  return `${b.dates} (block ${n}${st})`;
+}
+// The badge: dates first, the block number secondary; current highlighted,
+// past greyed.
+function blockBadge(n) {
+  if (!n) return '';
+  const b = blockInfo(n);
+  const cls = b && b.state ? ` blk-${b.state}` : '';
+  const title = b ? `Block ${n}: ${b.start} to ${b.end}${b.state === 'current' ? ' (current block)' : b.state === 'past' ? ' (past)' : ''}` : `Block ${n}`;
+  return `<span class="blk${cls}" title="${escapeHtml(title)}">${escapeHtml(b ? b.dates : 'Block ' + n)}<span class="blk-n">B${n}</span></span>`;
 }
 function lifecycleBlockCell(t) {
   const parts = [];
+  if (t.block) parts.push(blockBadge(t.block));
   if (t.lifecycle) parts.push(escapeHtml(t.lifecycle));
-  if (t.block) parts.push(`<span class="badge" title="${escapeHtml(blockLabel(t.block))}">B${t.block}</span>`);
   return parts.length ? parts.join(' ') : '—';
 }
 
@@ -982,8 +1030,14 @@ function populateBlockFilter(tickets) {
   const sel = document.getElementById('filter-block');
   const current = sel.value;
   const used = [...new Set(tickets.map(t => t.block).filter(Boolean))].sort((a, b) => a - b);
-  sel.classList.toggle('hidden', !used.length && !projectBlocks.length);
   sel.innerHTML = '<option value="">All blocks</option>';
+  const cur = projectBlocks.find(b => b.state === 'current');
+  if (cur) {
+    const opt = document.createElement('option');
+    opt.value = String(cur.n); opt.textContent = `Current block: ${cur.dates}`;
+    opt.dataset.current = '1';
+    sel.appendChild(opt);
+  }
   used.forEach(n => {
     const opt = document.createElement('option');
     opt.value = String(n); opt.textContent = blockLabel(n);
@@ -1043,6 +1097,88 @@ function populateAssigneeFilter(tickets) {
   });
   sel.value = [...sel.options].some(o => o.value === current) ? current : '';
 }
+
+// ── Filters menu + chips (HATE-twh1) ─────────────────
+// One "Filters" button opens a menu with a section per filter; the hidden
+// selects stay the filter state (loadTickets / visibleTickets read them), so
+// picking here just sets a select and fires its change.
+const FILTERS = [
+  ['filter-status', 'Status'], ['filter-type', 'Type'], ['filter-lifecycle', 'Lifecycle'],
+  ['filter-block', 'Block'], ['filter-tag', 'Tag'], ['filter-assignee', 'Assignee'],
+];
+const filterMenu = document.getElementById('filter-menu');
+const filterBtn = document.getElementById('btn-filters');
+let filterMenuOpenSection = null;
+
+function setFilter(id, value) {
+  const sel = document.getElementById(id);
+  if (sel.value === value) return;
+  sel.value = value;
+  sel.dispatchEvent(new Event('change'));
+}
+
+function renderFilterMenu() {
+  filterMenu.innerHTML = FILTERS.map(([id, label]) => {
+    const sel = document.getElementById(id);
+    const opts = [...sel.options];
+    if (opts.length <= 1 && !sel.value) return ''; // nothing to pick (e.g. no blocks)
+    const cur = sel.value ? sel.options[sel.selectedIndex]?.textContent : '';
+    return `<details class="fm-section" data-id="${id}"${filterMenuOpenSection === id ? ' open' : ''}>
+      <summary>${label}<span class="fm-current">${escapeHtml(cur || 'Any')}</span></summary>
+      ${opts.map(o => `<div class="fm-opt${o.value === sel.value ? ' on' : ''}" role="menuitemradio" data-id="${id}" data-value="${escapeHtml(o.value)}">${escapeHtml(o.value ? o.textContent : 'Any ' + label.toLowerCase())}</div>`).join('')}
+    </details>`;
+  }).join('') + `<div class="fm-foot"><button type="button" class="btn-secondary btn-xs" id="fm-clear">Clear all</button></div>`;
+}
+
+function renderFilterChips() {
+  const chips = document.getElementById('filter-chips');
+  const active = FILTERS.filter(([id]) => document.getElementById(id).value);
+  chips.innerHTML = active.map(([id, label]) => {
+    const sel = document.getElementById(id);
+    let text = sel.options[sel.selectedIndex]?.textContent || sel.value;
+    if (text.startsWith('Current block: ')) text = text.slice('Current block: '.length) + ' (current)';
+    return `<span class="filter-chip">${label}: ${escapeHtml(text)}<button type="button" title="Remove this filter" data-clear="${id}">&times;</button></span>`;
+  }).join('');
+  filterBtn.textContent = active.length ? `Filters (${active.length})` : 'Filters';
+  if (!filterMenu.classList.contains('hidden')) renderFilterMenu();
+}
+
+filterBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const open = filterMenu.classList.toggle('hidden') === false;
+  filterBtn.setAttribute('aria-expanded', String(open));
+  if (open) renderFilterMenu();
+});
+filterMenu.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const opt = e.target.closest('.fm-opt');
+  if (opt) { setFilter(opt.dataset.id, opt.dataset.value); renderFilterChips(); return; }
+  if (e.target.id === 'fm-clear') {
+    FILTERS.forEach(([id]) => { document.getElementById(id).value = ''; });
+    loadTickets();
+    renderFilterChips();
+  }
+});
+filterMenu.addEventListener('toggle', (e) => {
+  const d = e.target.closest('details');
+  if (d && d.open) filterMenuOpenSection = d.dataset.id;
+}, true);
+document.getElementById('filter-chips').addEventListener('click', (e) => {
+  const id = e.target.dataset && e.target.dataset.clear;
+  if (id) { setFilter(id, ''); renderFilterChips(); }
+});
+document.addEventListener('click', () => {
+  if (!filterMenu.classList.contains('hidden')) {
+    filterMenu.classList.add('hidden');
+    filterBtn.setAttribute('aria-expanded', 'false');
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !filterMenu.classList.contains('hidden')) {
+    filterMenu.classList.add('hidden');
+    filterBtn.setAttribute('aria-expanded', 'false');
+  }
+});
 
 // The client-side filters applied to allTickets: hide-closed, tag, assignee.
 function visibleTickets() {
@@ -1156,15 +1292,18 @@ document.getElementById('filter-hide-closed').addEventListener('change', loadTic
 // usually wants it for all their projects.
 // Bumped to v2 when Work order became the default sort — resets any stale saved
 // preference once so the new default takes effect.
+// Block projects default to Sort: Block and remember their own choice
+// (HATE-wfta); other projects share the per-browser preference.
 const SORT_STORAGE_KEY = 'hate:sort:v2';
-(function restoreSortPreference() {
-  const saved = localStorage.getItem(SORT_STORAGE_KEY);
-  if (!saved) return;
+const sortKeyFor = () => (projectBlocks.length && currentProject) ? `${SORT_STORAGE_KEY}:${currentProject.id}` : SORT_STORAGE_KEY;
+function restoreSortPreference() {
   const sel = document.getElementById('filter-sort');
-  if ([...sel.options].some(o => o.value === saved)) sel.value = saved;
-})();
+  const saved = localStorage.getItem(sortKeyFor()) || (projectBlocks.length ? 'block' : localStorage.getItem(SORT_STORAGE_KEY));
+  sel.value = saved && [...sel.options].some(o => o.value === saved) ? saved : 'work';
+}
+restoreSortPreference();
 document.getElementById('filter-sort').addEventListener('change', (e) => {
-  localStorage.setItem(SORT_STORAGE_KEY, e.target.value);
+  localStorage.setItem(sortKeyFor(), e.target.value);
   // No need to refetch — re-render the visible set with the new sort.
   if (!allTickets.length) return;
   renderTickets();
@@ -2168,7 +2307,7 @@ function renderPhaseRollup(report) {
     if (p.unsized_count) flags.push(`<span style="color:#999;font-size:11px" title="Work tickets with no estimate (invisible to the hours math)">${p.unsized_count} unsized</span>`);
     if (p.cancelled_count) flags.push(`<span style="color:#999;font-size:11px" title="Force-closed / descoped — excluded from %">${p.cancelled_count} descoped</span>`);
     return `<tr style="border-bottom:1px solid #eee">
-      <td style="padding:6px 8px"><strong>${escapeHtml(p.label)}</strong></td>
+      <td style="padding:6px 8px">${report.by === 'block' && p.block ? blockBadge(p.block) : `<strong>${escapeHtml(p.label)}</strong>`}</td>
       <td style="padding:6px 8px;white-space:nowrap">${bar(p.percent_complete)} ${pctText(p.percent_complete)}</td>
       <td style="padding:6px 8px">${p.complete_count}/${p.ticket_count}</td>
       <td style="padding:6px 8px;white-space:nowrap">${fmtHours(p.est_hours_done)}/${fmtHours(p.est_hours_total)}h</td>
