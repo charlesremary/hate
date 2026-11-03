@@ -35,6 +35,10 @@ func TestCreateProjectTool(t *testing.T) {
 		t.Fatalf("git log = %q, %v", log, err)
 	}
 
+	if st, _ := exec.Command("git", "-C", dir, "status", "--porcelain").CombinedOutput(); len(st) != 0 {
+		t.Errorf("new repo not clean: %s", st)
+	}
+
 	listed := false
 	for _, p := range mustOK(t, cs, "hate_list_projects", nil)["projects"].([]any) {
 		listed = listed || p.(map[string]any)["id"] == "billing"

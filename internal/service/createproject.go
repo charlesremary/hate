@@ -87,8 +87,9 @@ func (p *NewProject) normalize() error {
 
 // CreateProject makes a new project folder under the projects root: .tkt/
 // config.json, tickets/, an empty index, and (when git is installed) a git
-// repo with an initial commit of the config. The project id and ticket prefix
-// must not be used by another project on this machine, hidden ones included.
+// repo with an initial commit of the config and a .gitignore for index.json.
+// The project id and ticket prefix must not be used by another project on
+// this machine, hidden ones included.
 func CreateProject(p NewProject) (*CreatedProject, error) {
 	if err := p.normalize(); err != nil {
 		return nil, err
@@ -149,8 +150,12 @@ func CreateProject(p NewProject) (*CreatedProject, error) {
 			out.CommitWarning = "git init failed: " + strings.TrimSpace(string(b))
 		} else {
 			out.Git = true
-			out.CommitWarning = ticket.CommitWarning(ticket.CommitFiles(dir,
-				[]string{filepath.Join(".tkt", "config.json")}, "Create project "+p.ProjectName))
+			files := []string{filepath.Join(".tkt", "config.json")}
+			// index.json is derived and never committed (see ticket.UntrackIndex).
+			if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("index.json\n"), 0o644); err == nil {
+				files = append(files, ".gitignore")
+			}
+			out.CommitWarning = ticket.CommitWarning(ticket.CommitFiles(dir, files, "Create project "+p.ProjectName))
 		}
 	}
 	return out, nil
