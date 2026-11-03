@@ -269,8 +269,8 @@ every dashboard view:
   (`internal/pm/waves.go`: longest chain of open predecessors; wave 1 has
   nothing open in front of it) orders the capacity schedule, the Tickets tab's
   Work order view, and `GET …/ready` (`ready`, `next`, `waves`) for agents.
-- **Excel export.** `GET /api/projects/{projectId}/export.xlsx` (the Tickets
-  tab's Export to Excel button) downloads `<projectId>-<YYYY-MM-DD>.xlsx` with
+- **Excel export.** `GET /api/projects/{projectId}/export.xlsx` (the PM
+  Dashboard's Export to Excel button) downloads `<projectId>-<YYYY-MM-DD>.xlsx` with
   two sheets: **Tickets** (every ticket, closed and backlog included: status,
   type, assignee, lifecycle, block, parent, class, CFP, estimated and logged hours, planned
   start and due as real dates, predecessors, tags; bold frozen header with an

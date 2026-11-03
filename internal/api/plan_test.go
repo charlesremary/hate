@@ -404,7 +404,7 @@ func TestHeaderAndHelp(t *testing.T) {
 			t.Errorf("Help does not mention %q", want)
 		}
 	}
-	if config.AppVersion != "2.0.0" { // HATE-ag4s: release B (lifecycle, block, wave; format 2) is v2.0.0
+	if config.AppVersion != "2.1.0" { // HATE-7zx6: dated blocks, block sort, filters menu is v2.1.0
 		t.Errorf("AppVersion = %s", config.AppVersion)
 	}
 }
