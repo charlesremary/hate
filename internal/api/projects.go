@@ -19,6 +19,7 @@ import (
 	"hate/internal/pm"
 	"hate/internal/service"
 	"hate/internal/ticket"
+	"hate/internal/update"
 )
 
 // urlParam reads a chi URL parameter and percent-decodes it. chi matches on the
@@ -62,6 +63,8 @@ type AppSettingsRequest struct {
 	// ShowCosmic is ignored: the COSMIC tab is always shown. Still accepted
 	// (and stored) so older clients that send it don't break.
 	ShowCosmic *bool `json:"show_cosmic"`
+	// DisableUpdateCheck turns the daily new-version check off.
+	DisableUpdateCheck *bool `json:"disable_update_check"`
 }
 
 // GitIdentityRequest is the body for POST git-identity.
@@ -350,9 +353,15 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // getVersion handles GET /api/version — the build version baked into this
-// binary, shown in Settings so a stale copy is identifiable.
+// binary, shown in Settings so a stale copy is identifiable, plus the newest
+// published version when the update check knows one (internal/update).
 func getVersion(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, map[string]string{"version": config.AppVersion})
+	st := update.Current()
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"version":          config.AppVersion,
+		"latest":           st.Latest,
+		"update_available": st.UpdateAvailable,
+	})
 }
 
 // updateSettings handles PUT /api/projects/settings
@@ -371,6 +380,9 @@ func updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ShowCosmic != nil {
 		cfg.ShowCosmic = *req.ShowCosmic
+	}
+	if req.DisableUpdateCheck != nil {
+		cfg.DisableUpdateCheck = *req.DisableUpdateCheck
 	}
 	if req.Scheduler != nil {
 		sched := *req.Scheduler

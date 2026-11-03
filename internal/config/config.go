@@ -64,6 +64,9 @@ type AppConfig struct {
 	ShowBilling bool `json:"show_billing"`
 	// ShowCosmic controls whether the experimental COSMIC tab is visible. Hidden by default.
 	ShowCosmic bool `json:"show_cosmic"`
+	// DisableUpdateCheck turns off the daily check for a newer hate (the
+	// upgrade banner). See internal/update.
+	DisableUpdateCheck bool `json:"disable_update_check,omitempty"`
 }
 
 // ProjectInfo describes a discovered project.

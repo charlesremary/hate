@@ -2552,6 +2552,7 @@ document.getElementById('btn-settings').addEventListener('click', async () => {
     const cfg = await API.get('/api/projects/settings');
     document.getElementById('settings-projects-root').value = cfg.projects_root || '';
     document.getElementById('show-billing').checked = cfg.show_billing || false;
+    document.getElementById('update-check').checked = !cfg.disable_update_check;
     document.getElementById('scheduler-enabled').checked = cfg.scheduler?.enabled || false;
     document.getElementById('scheduler-interval').value = cfg.scheduler?.interval_hours || 24;
   } catch (e) { showToast(e.message, 'error'); }
@@ -2663,6 +2664,7 @@ document.getElementById('settings-form').addEventListener('submit', async (e) =>
   const body = {
     projects_root: document.getElementById('settings-projects-root').value || undefined,
     show_billing: document.getElementById('show-billing').checked,
+    disable_update_check: !document.getElementById('update-check').checked,
     scheduler: {
       enabled: document.getElementById('scheduler-enabled').checked,
       interval_hours: parseFloat(document.getElementById('scheduler-interval').value),
@@ -3444,6 +3446,33 @@ async function initTabVisibility() {
 
 // A #ticket/<ID> deep link opens once the project list is in.
 loadProjects().then(openTicketFromHash);
+
+// ── Update banner (HATE-xmat) ─────────────────────────
+// The server checks the published version once a day (internal/update); the
+// banner shows when it's newer than this build, until dismissed for that
+// version.
+const UPDATE_DISMISSED_KEY = 'hate-update-dismissed';
+async function checkForUpdate() {
+  let v;
+  try { v = await API.get('/api/version'); } catch { return; }
+  const banner = document.getElementById('update-banner');
+  if (!v.update_available || localStorage.getItem(UPDATE_DISMISSED_KEY) === v.latest) {
+    banner.classList.add('hidden');
+    return;
+  }
+  document.getElementById('update-banner-text').innerHTML =
+    `hate <strong>${escapeHtml(v.latest)}</strong> is available (you have ${escapeHtml(v.version)}). ` +
+    `Update with <code>brew upgrade --cask hate</code>, then restart hate.`;
+  banner.dataset.latest = v.latest;
+  banner.classList.remove('hidden');
+}
+document.getElementById('btn-update-banner-dismiss').addEventListener('click', () => {
+  const banner = document.getElementById('update-banner');
+  localStorage.setItem(UPDATE_DISMISSED_KEY, banner.dataset.latest || '');
+  banner.classList.add('hidden');
+});
+checkForUpdate();
+setInterval(checkForUpdate, 6 * 60 * 60 * 1000);
 initTabVisibility();
 
 // ── Git account (Settings) ───────────────────────────

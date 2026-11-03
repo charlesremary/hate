@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"flag"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"hate/internal/service"
 	"hate/internal/teamsync"
 	"hate/internal/ticket"
+	"hate/internal/update"
 )
 
 //go:embed static/*
@@ -63,6 +65,7 @@ func main() {
 	api.RegisterGitRoutes(r)
 	api.RegisterSearchRoutes(r)
 	service.SetGuide(agentGuide)
+	update.Start(context.Background()) // daily new-version check; off via Settings or HATE_NO_UPDATE_CHECK=1
 	api.RegisterGuideRoutes(r)
 
 	// Serve embedded static files

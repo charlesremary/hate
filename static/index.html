@@ -39,6 +39,10 @@
         <span id="token-banner-text"></span>
         <button type="button" class="btn-secondary" id="btn-token-banner-replace">Replace token</button>
       </div>
+      <div id="update-banner" class="token-banner update-banner hidden" role="status">
+        <span id="update-banner-text"></span>
+        <button type="button" class="btn-secondary" id="btn-update-banner-dismiss">Dismiss</button>
+      </div>
       <div id="welcome" class="welcome">
         <h2>Welcome to HATE</h2>
         <p>Select a project from the sidebar to get started.</p>
@@ -212,6 +216,7 @@
             <input type="text" id="settings-projects-root" placeholder="~/projects">
           </label>
           <label><input type="checkbox" id="show-billing"> Show Billing tab</label>
+          <label><input type="checkbox" id="update-check"> Check once a day for a newer version of hate</label>
           <fieldset>
             <legend>Scheduler</legend>
             <label><input type="checkbox" id="scheduler-enabled"> Enable automatic snapshots</label>
