@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -84,7 +85,7 @@ func respondServiceError(w http.ResponseWriter, err error, fallback int) {
 	var estErr *ticket.EstimateValidationError
 	var extErr *service.TimeExtensionError
 	switch {
-	case ticket.IsNewerFormat(err):
+	case ticket.IsNewerFormat(err), ticket.IsNeedsMigration(err):
 		respondNewerFormat(w, err)
 	case errors.Is(err, service.ErrProjectClosed):
 		respondError(w, http.StatusLocked, err.Error())
@@ -153,7 +154,9 @@ type CreateTicketRequest struct {
 	EstimateHours    *float64 `json:"estimate_hours"`
 	Assignee         *string  `json:"assignee"`
 	Tags             []string `json:"tags"`
-	Phase            *string  `json:"phase"`
+	Lifecycle        *string  `json:"lifecycle"`
+	Block            *int     `json:"block"`
+	Phase            *string  `json:"phase"` // retired in 2.0: non-empty is refused
 	Predecessors     []string `json:"predecessors"`
 	PlannedStartDate *string  `json:"planned_start_date"`
 	DueDate          *string  `json:"due_date"`
@@ -281,7 +284,7 @@ func handleListTickets(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	items, err := service.ListTickets(root, service.ListFilter{
 		Status: q.Get("status"), Type: q.Get("type"), Assignee: q.Get("assignee"),
-		Tag: q.Get("tag"), Phase: q.Get("phase"), Parent: q.Get("parent"),
+		Tag: q.Get("tag"), Lifecycle: q.Get("lifecycle"), Block: atoiOr0(q.Get("block")), Parent: q.Get("parent"),
 	})
 	if err != nil {
 		respondServiceError(w, err, http.StatusInternalServerError)
@@ -302,6 +305,14 @@ func handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	if strings.TrimSpace(strVal(req.Phase)) != "" {
+		respondError(w, http.StatusUnprocessableEntity, ticket.ErrPhaseRetired.Error())
+		return
+	}
+	block := 0
+	if req.Block != nil {
+		block = *req.Block
+	}
 
 	params := ticket.CreateTicketParams{
 		Type:             req.Type,
@@ -312,7 +323,8 @@ func handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		EstimateHours:    req.EstimateHours,
 		Assignee:         strVal(req.Assignee),
 		Description:      strVal(req.Description),
-		Phase:            strVal(req.Phase),
+		Lifecycle:        strVal(req.Lifecycle),
+		Block:            block,
 		PlannedStartDate: strVal(req.PlannedStartDate),
 		DueDate:          strVal(req.DueDate),
 		Severity:         strVal(req.Severity),
@@ -400,17 +412,18 @@ func handleGetBilling(w http.ResponseWriter, r *http.Request) {
 	estCtx := pm.NewEstimateContext(nil, 0, effortToDays)
 
 	type billingEntry struct {
-		TicketID      string  `json:"ticket_id"`
-		TicketTitle   string  `json:"ticket_title"`
-		TicketPhase   *string `json:"ticket_phase"`
-		ID            string  `json:"id"`
-		Date          string  `json:"date"`
-		Hours         float64 `json:"hours"`          // normal (within-allotment) portion
-		OverrideHours float64 `json:"override_hours"` // over-allotment portion
-		ExtendReason  string  `json:"extend_reason"`  // recorded authorization for override hours, if any
-		Description   string  `json:"description"`
-		Author        string  `json:"author"`
-		LoggedAt      string  `json:"logged_at"`
+		TicketID        string  `json:"ticket_id"`
+		TicketTitle     string  `json:"ticket_title"`
+		TicketLifecycle *string `json:"ticket_lifecycle"`
+		TicketBlock     int     `json:"ticket_block,omitempty"`
+		ID              string  `json:"id"`
+		Date            string  `json:"date"`
+		Hours           float64 `json:"hours"`          // normal (within-allotment) portion
+		OverrideHours   float64 `json:"override_hours"` // over-allotment portion
+		ExtendReason    string  `json:"extend_reason"`  // recorded authorization for override hours, if any
+		Description     string  `json:"description"`
+		Author          string  `json:"author"`
+		LoggedAt        string  `json:"logged_at"`
 	}
 
 	var entries []billingEntry
@@ -463,17 +476,18 @@ func handleGetBilling(w http.ResponseWriter, r *http.Request) {
 				reason = te.ExtendReason
 			}
 			entries = append(entries, billingEntry{
-				TicketID:      tk.ID,
-				TicketTitle:   tk.Title,
-				TicketPhase:   tk.Phase,
-				ID:            te.ID,
-				Date:          te.Date,
-				Hours:         normal,
-				OverrideHours: over,
-				ExtendReason:  reason,
-				Description:   te.Description,
-				Author:        te.Author,
-				LoggedAt:      te.LoggedAt,
+				TicketID:        tk.ID,
+				TicketTitle:     tk.Title,
+				TicketLifecycle: tk.Lifecycle,
+				TicketBlock:     tk.Block,
+				ID:              te.ID,
+				Date:            te.Date,
+				Hours:           normal,
+				OverrideHours:   over,
+				ExtendReason:    reason,
+				Description:     te.Description,
+				Author:          te.Author,
+				LoggedAt:        te.LoggedAt,
 			})
 		}
 	}
@@ -1056,4 +1070,13 @@ func handleDeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondTicket(w, tk, commitAttachment(root, ticketID, delPath, "attachment removed: "+att.Filename))
+}
+
+// atoiOr0 parses a query number; anything else is 0.
+func atoiOr0(s string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }

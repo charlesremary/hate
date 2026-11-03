@@ -72,7 +72,7 @@ func restGet(t *testing.T, srv *httptest.Server, path string) map[string]any {
 
 // agentLoop is what an agent does with a feature: find the project, create
 // the feature and its children, add test cases, start work, log time,
-// promote, set the phase. Returns the child it worked.
+// promote, set the lifecycle. Returns the child it worked.
 func agentLoop(t *testing.T, cs *mcp.ClientSession) string {
 	t.Helper()
 	projects := mustOK(t, cs, "hate_list_projects", nil)["projects"].([]any)
@@ -111,9 +111,9 @@ func agentLoop(t *testing.T, cs *mcp.ClientSession) string {
 	if st := mustOK(t, cs, "hate_promote_ticket", map[string]any{"ticket_id": child})["status"]; st != "dev_complete" {
 		t.Fatalf("finish work: status %v", st)
 	}
-	up := mustOK(t, cs, "hate_update_ticket", map[string]any{"ticket_id": child, "fields": map[string]any{"phase": "02 - Build"}})
-	if up["phase"] != "02 - Build" {
-		t.Fatalf("phase = %v", up["phase"])
+	up := mustOK(t, cs, "hate_update_ticket", map[string]any{"ticket_id": child, "fields": map[string]any{"lifecycle": "Build"}})
+	if up["lifecycle"] != "Build" {
+		t.Fatalf("lifecycle = %v", up["lifecycle"])
 	}
 	ready := mustOK(t, cs, "hate_get_ready", map[string]any{"project": prefix})
 	if !strings.Contains(fmt.Sprint(ready["ready"]), "Deploy the export") {
@@ -140,13 +140,13 @@ func TestRoundTripHTTP(t *testing.T) {
 	// Read it back over REST: the same ticket the tools wrote.
 	viaMCP := mustOK(t, cs, "hate_get_ticket", map[string]any{"ticket_id": child})
 	viaREST := restGet(t, srv, "/api/projects/est/tickets/"+child)
-	for _, k := range []string{"status", "phase", "title", "estimated_hours"} {
+	for _, k := range []string{"status", "lifecycle", "title", "estimated_hours"} {
 		if fmt.Sprint(viaREST[k]) != fmt.Sprint(viaMCP[k]) {
 			t.Errorf("%s: REST %v, MCP %v", k, viaREST[k], viaMCP[k])
 		}
 	}
-	if viaREST["phase"] != "02 - Build" {
-		t.Errorf("REST phase = %v", viaREST["phase"])
+	if viaREST["lifecycle"] != "Build" {
+		t.Errorf("REST lifecycle = %v", viaREST["lifecycle"])
 	}
 	if te := viaREST["time_entries"].([]any); len(te) != 1 {
 		t.Errorf("REST time entries = %v", te)
@@ -169,8 +169,8 @@ func TestRoundTripLegacyProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Tools) != 19 {
-		t.Errorf("%d tools over 2025-11-25, want 19", len(res.Tools))
+	if len(res.Tools) != 20 {
+		t.Errorf("%d tools over 2025-11-25, want 20", len(res.Tools))
 	}
 	mustOK(t, cs, "hate_list_projects", nil)
 }

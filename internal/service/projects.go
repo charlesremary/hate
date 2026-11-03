@@ -23,14 +23,18 @@ type ProjectSummary struct {
 	TicketCount int    `json:"ticket_count"`
 	// NewerFormat: a newer hate changed the project; it is read-only here.
 	NewerFormat bool `json:"newer_format,omitempty"`
+	// NeedsMigration: the project is at an older format; it is read-only
+	// until the one-time update (hate_migrate_project) is applied.
+	NeedsMigration bool `json:"needs_migration,omitempty"`
 }
 
 // ListProjects returns every registered, non-hidden project.
 func ListProjects(includeClosed bool) []ProjectSummary {
 	out := []ProjectSummary{}
 	for _, p := range config.ListProjects() {
+		werr := ticket.CheckWritable(p.Path)
 		s := ProjectSummary{ID: p.ID, Name: p.Name, Client: p.Client, Prefix: p.Prefix, Path: p.Path,
-			NewerFormat: ticket.CheckWritable(p.Path) != nil}
+			NewerFormat: ticket.IsNewerFormat(werr), NeedsMigration: ticket.IsNeedsMigration(werr)}
 		if cfg, err := ticket.ReadConfig(p.Path); err == nil {
 			s.Closed = cfg.IsClosed()
 		}
@@ -68,6 +72,8 @@ type ProjectDetail struct {
 	Resources             []ProjectResource `json:"resources"`
 	// NewerFormat: a newer hate changed the project; writes are refused.
 	NewerFormat bool `json:"newer_format,omitempty"`
+	// NeedsMigration: writes wait for the one-time update.
+	NeedsMigration bool `json:"needs_migration,omitempty"`
 }
 
 // GetProject reads a project's details.
@@ -80,8 +86,9 @@ func GetProject(root string) (*ProjectDetail, error) {
 		ID: cfg.ProjectID, Name: cfg.ProjectName, Client: cfg.Client, Prefix: cfg.Prefix, Path: root,
 		Closed: cfg.IsClosed(), BlockWeeks: cfg.BlockWeeks,
 		StrictTimeEnforcement: cfg.StrictTimeEnforcement, EnforceQA: cfg.EnforceQA,
-		Resources:   []ProjectResource{},
-		NewerFormat: ticket.CheckWritable(root) != nil,
+		Resources:      []ProjectResource{},
+		NewerFormat:    ticket.IsNewerFormat(ticket.CheckWritable(root)),
+		NeedsMigration: ticket.IsNeedsMigration(ticket.CheckWritable(root)),
 	}
 	d.TicketCount = countTickets(root)
 	for _, r := range cfg.Resources {
@@ -231,4 +238,28 @@ func Search(q string, limit int) []SearchResult {
 		results = results[:limit]
 	}
 	return results
+}
+
+// PlanMigration is the dry run of the one-time project update (see
+// ticket.PlanMigration). Writes nothing.
+func PlanMigration(root string, opts ticket.MigrateOptions) (*ticket.MigrationPlan, error) {
+	unlock := ticket.LockProject(root)
+	defer unlock()
+	p, err := ticket.PlanMigration(root, opts)
+	if err != nil {
+		return nil, wrap(ErrInvalidInput, err)
+	}
+	return p, nil
+}
+
+// ApplyMigration runs the one-time project update and commits it (one
+// commit). Only ever called on the user's choice.
+func ApplyMigration(root string, opts ticket.MigrateOptions, author string) (*ticket.MigrationPlan, error) {
+	unlock := ticket.LockProject(root)
+	defer unlock()
+	p, err := ticket.ApplyMigration(root, opts, author)
+	if err != nil {
+		return nil, wrap(ErrInvalidInput, err)
+	}
+	return p, nil
 }

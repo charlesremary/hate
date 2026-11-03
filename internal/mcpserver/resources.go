@@ -29,7 +29,7 @@ func registerResources(s *mcp.Server) {
 		res.CacheScope = "private"
 		return res, nil
 	}
-	const guideDesc = "The hate agent guide: how to create tickets, the tag contract (class, cfp:, parent:), estimating, phases, planning, the API. " +
+	const guideDesc = "The hate agent guide: how to create tickets, the tag contract (class, cfp:, parent:), estimating, lifecycle and blocks, planning, the API. " +
 		"Read section 3 before creating or promoting tickets. ?section=N returns only '## N.'."
 	s.AddResource(&mcp.Resource{URI: "hate://guide", Name: "guide", Title: "hate agent guide", MIMEType: "text/markdown", Description: guideDesc}, guide)
 	s.AddResourceTemplate(&mcp.ResourceTemplate{URITemplate: "hate://guide{?section}", Name: "guide-section", Title: "hate agent guide (one section)", MIMEType: "text/markdown", Description: guideDesc}, guide)

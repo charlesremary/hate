@@ -16,8 +16,8 @@ import (
 // each bar starts in and the blocks are drawn as faint labelled bands behind
 // the bars; otherwise the rows are grouped by person, matching the capacity
 // schedule's lanes (one person works their tickets in order, so a group reads
-// top to bottom). Dependency stages are not drawn here: they ignore people and
-// time (see stages.go). It is a read-only, self-contained view (inline SVG, no
+// top to bottom). Dependency waves are not drawn here: they ignore people and
+// time (see waves.go). It is a read-only, self-contained view (inline SVG, no
 // external assets). Rescheduling happens by editing tickets, not here.
 
 // ganttRow is a single task with its dates parsed and laid out.
@@ -29,7 +29,7 @@ type ganttRow struct {
 	barEnd       time.Time // actual/projected end when known, else planned end
 	milestone    bool
 	critical     bool
-	phase        string // project phase, for within-group ordering
+	lifecycle    string // for within-group ordering
 	group        int    // index into the groups returned by ganttData
 	y            int
 }
@@ -60,7 +60,7 @@ func daysBetween(a, b time.Time) int {
 
 // ganttData parses the snapshot's tasks into rows, groups them (by block when
 // blocks are given, else by person) and returns the chart's date window. Rows
-// are ordered by group, then planned start, then phase, then title. Tasks with
+// are ordered by group, then planned start, then lifecycle, then title. Tasks with
 // no valid planned start are skipped (nothing to place).
 func ganttData(snapshot *Snapshot, blocks []Block) (rows []ganttRow, groups []ganttGroup, chartStart, chartEnd time.Time) {
 	cp := map[string]bool{}
@@ -80,7 +80,7 @@ func ganttData(snapshot *Snapshot, blocks []Block) (rows []ganttRow, groups []ga
 		row := ganttRow{
 			task: t, plannedStart: ps, plannedEnd: pe,
 			barEnd: pe, milestone: t.IsMilestone, critical: cp[t.TaskID],
-			phase: t.Phase,
+			lifecycle: t.Lifecycle,
 		}
 		if t.Current.ActualStart != nil {
 			row.actualStart = parseDate(*t.Current.ActualStart)
@@ -150,9 +150,9 @@ func ganttData(snapshot *Snapshot, blocks []Block) (rows []ganttRow, groups []ga
 		groups[g].days += rows[i].task.Baseline.PlannedDays
 	}
 
-	phaseKey := func(p string) string {
+	lifecycleKey := func(p string) string {
 		if p == "" {
-			return "~" // sort unphased last
+			return "~" // no lifecycle last
 		}
 		return p
 	}
@@ -163,7 +163,7 @@ func ganttData(snapshot *Snapshot, blocks []Block) (rows []ganttRow, groups []ga
 		if !rows[i].plannedStart.Equal(rows[j].plannedStart) {
 			return rows[i].plannedStart.Before(rows[j].plannedStart)
 		}
-		if pi, pj := phaseKey(rows[i].phase), phaseKey(rows[j].phase); pi != pj {
+		if pi, pj := lifecycleKey(rows[i].lifecycle), lifecycleKey(rows[j].lifecycle); pi != pj {
 			return pi < pj
 		}
 		return rows[i].task.Title < rows[j].task.Title

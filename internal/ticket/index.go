@@ -22,7 +22,8 @@ type IndexSummary struct {
 	Effort           *string  `json:"effort"` // retired, read-only legacy
 	EstimateHours    *float64 `json:"estimate_hours,omitempty"`
 	Class            string   `json:"class"` // functional | config | nonfunc | ""
-	Phase            *string  `json:"phase"`
+	Lifecycle        *string  `json:"lifecycle"`
+	Block            int      `json:"block,omitempty"`
 	Assignee         *string  `json:"assignee"`
 	Predecessors     []string `json:"predecessors"`
 	Repo             *string  `json:"repo"`
@@ -67,7 +68,8 @@ func buildIndex(tickets []*Ticket) *Index {
 			Effort:           t.Effort,
 			EstimateHours:    t.EstimateHours,
 			Class:            ClassOf(t),
-			Phase:            t.Phase,
+			Lifecycle:        t.Lifecycle,
+			Block:            t.Block,
 			Assignee:         t.Assignee,
 			Predecessors:     predecessors,
 			Repo:             t.Repo,

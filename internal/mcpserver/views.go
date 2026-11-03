@@ -16,7 +16,8 @@ type TicketSummary struct {
 	Status         string   `json:"status"`
 	Priority       string   `json:"priority"`
 	Assignee       string   `json:"assignee"`
-	Phase          string   `json:"phase"`
+	Lifecycle      string   `json:"lifecycle"`
+	Block          int      `json:"block,omitempty"`
 	Tags           []string `json:"tags"`
 	Parent         string   `json:"parent"`
 	Class          string   `json:"class"`
@@ -29,7 +30,7 @@ type TicketSummary struct {
 func summaryFromItem(it service.ListItem) TicketSummary {
 	s := TicketSummary{
 		ID: it.ID, Title: it.Title, Type: it.Type, Status: it.Status, Priority: it.Priority,
-		Assignee: deref(it.Assignee), Phase: deref(it.Phase), Tags: it.Tags, Class: it.Class,
+		Assignee: deref(it.Assignee), Lifecycle: deref(it.Lifecycle), Block: it.Block, Tags: it.Tags, Class: it.Class,
 		EstimateHours: it.EstimateHours, EstimatedHours: it.EstimatedHours, EstimateSource: it.EstimateSource,
 		AtRisk: it.AtRisk,
 	}
@@ -52,7 +53,7 @@ func summaryFromTicket(t *ticket.Ticket, est func(string) service.Estimate) Tick
 	}
 	return TicketSummary{
 		ID: t.ID, Title: t.Title, Type: t.Type, Status: t.Status, Priority: t.Priority,
-		Assignee: deref(t.Assignee), Phase: deref(t.Phase), Tags: tags, Parent: ticket.ParentID(t),
+		Assignee: deref(t.Assignee), Lifecycle: deref(t.Lifecycle), Block: t.Block, Tags: tags, Parent: ticket.ParentID(t),
 		Class: ticket.ClassOf(t), EstimateHours: t.EstimateHours, EstimatedHours: e.Hours, EstimateSource: e.Source,
 	}
 }

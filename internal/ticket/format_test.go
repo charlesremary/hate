@@ -11,7 +11,7 @@ import (
 )
 
 func TestFormatIsNewer(t *testing.T) {
-	for v, want := range map[string]bool{"": false, "1.0.0": false, "1.9.3": false, "v1.2": false, "0.9.0": false, "2.0.0": true, "10.1.0": true, "garbage": true} {
+	for v, want := range map[string]bool{"": false, "1.0.0": false, "1.9.3": false, "v1.2": false, "0.9.0": false, "2.0.0": false, "3.0.0": true, "10.1.0": true, "garbage": true} {
 		if got := FormatIsNewer(v); got != want {
 			t.Errorf("FormatIsNewer(%q) = %v, want %v", v, got, want)
 		}
@@ -30,7 +30,7 @@ func TestNewerProjectIsReadOnly(t *testing.T) {
 	}
 	cfgPath := ConfigPath(root)
 	data, _ := os.ReadFile(cfgPath)
-	newer := strings.Replace(string(data), `"schema_version": "1.0.0"`, `"schema_version": "2.0.0"`, 1)
+	newer := strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "3.0.0"`, 1)
 	os.WriteFile(cfgPath, []byte(newer), 0644)
 	before, _ := os.ReadFile(TicketPath(root, "P-0001"))
 
@@ -50,7 +50,7 @@ func TestNewerProjectIsReadOnly(t *testing.T) {
 	if after, _ := os.ReadFile(TicketPath(root, "P-0001")); string(after) != string(before) {
 		t.Error("ticket file changed")
 	}
-	if !strings.Contains(err.Error(), "hate 2.0 or newer") || !strings.Contains(err.Error(), "brew upgrade --cask hate") {
+	if !strings.Contains(err.Error(), "hate 3.0 or newer") || !strings.Contains(err.Error(), "brew upgrade --cask hate") {
 		t.Errorf("message: %s", err)
 	}
 }

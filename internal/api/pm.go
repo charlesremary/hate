@@ -67,7 +67,7 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Get("/target-date", getTargetDate) // alias for the requested end
 	r.Put("/target-date", updateTargetDate)
 	r.Get("/forecast", getForecast)
-	r.Get("/phase-rollup", getPhaseRollup)
+	r.Get("/rollup", getRollup)
 	r.Get("/block-weeks", getBlockWeeks)
 	r.Put("/block-weeks", updateBlockWeeks)
 	r.Get("/blocks", getBlocks)
@@ -93,11 +93,12 @@ func getTestSummary(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, pm.ComputeTestSummary(tickets))
 }
 
-// getPhaseRollup handles GET /api/projects/{projectId}/phase-rollup.
-// Pure analysis: groups the current tickets by phase and returns an
-// hours-weighted percent-complete per phase ("Block NN" phases in block order,
-// with each block's dates when the project plans in blocks). Nothing is written.
-func getPhaseRollup(w http.ResponseWriter, r *http.Request) {
+// getRollup handles GET /api/projects/{projectId}/rollup?by=lifecycle|block.
+// Pure analysis: groups the current tickets by lifecycle or planning block and
+// returns an hours-weighted percent-complete per group (blocks in order, with
+// their dates). by defaults to block when the project plans in blocks, else
+// lifecycle. Nothing is written.
+func getRollup(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectId")
 	root, ok := getProjectRoot(w, projectID)
 	if !ok {
@@ -114,7 +115,14 @@ func getPhaseRollup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	estCtx := pm.ProjectEstimateContext(root, tickets, cfg)
-	report := pm.PhaseRollup(tickets, estCtx)
+	by := r.URL.Query().Get("by")
+	if by == "" {
+		by = pm.RollupByLifecycle
+		if cfg.BlockWeeks == 2 || cfg.BlockWeeks == 3 {
+			by = pm.RollupByBlock
+		}
+	}
+	report := pm.Rollup(tickets, estCtx, by)
 	pm.ApplyBlockDates(&report, pm.BlocksForProject(cfg, tickets, estCtx, time.Now()))
 	respondJSON(w, http.StatusOK, report)
 }

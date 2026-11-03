@@ -100,9 +100,23 @@ func Sync(ctx context.Context, root string) Result {
 			// older hate must not do that to a newer project's files. With no
 			// local changes the merge is a fast-forward and safe (the project
 			// then opens read-only here).
-			if v := ticket.FormatOfConfig([]byte(gitOut(root, "show", "@{u}:.tkt/config.json"))); ticket.FormatIsNewer(v) {
+			up := ticket.FormatOfConfig([]byte(gitOut(root, "show", "@{u}:.tkt/config.json")))
+			if ticket.FormatIsNewer(up) {
 				r := attention("The shared copy was updated by a newer hate. Update hate (brew upgrade --cask hate) to sync; your changes are kept on this computer.",
-					&ticket.NewerFormatError{Root: root, Version: v})
+					&ticket.NewerFormatError{Root: root, Version: up})
+				r.Fetched = true
+				return r
+			}
+			// Both sides changed, in different project formats: combining
+			// them field by field would mix the formats.
+			local, upM := ticket.FormatMajorOf(ticket.ProjectFormat(root)), ticket.FormatMajorOf(up)
+			if local < upM {
+				r := attention("The shared copy was updated to the new project format while this computer has unshared changes. Open the project and click Update project, then sync again; your changes are kept.", nil)
+				r.Fetched = true
+				return r
+			}
+			if local > upM {
+				r := attention("A teammate shared changes from an older hate after this project was updated here. Ask them to update hate (brew upgrade --cask hate) and sync; your changes are kept on this computer.", nil)
 				r.Fetched = true
 				return r
 			}

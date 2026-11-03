@@ -101,11 +101,13 @@ func mutate(root, ticketID string, regen bool, fn func() (*ticket.Ticket, string
 
 // ListFilter narrows ListTickets; empty fields match everything.
 type ListFilter struct {
-	Status   string
-	Type     string
-	Assignee string
-	Tag      string
-	Phase    string
+	Status    string
+	Type      string
+	Assignee  string
+	Tag       string
+	Lifecycle string
+	// Block matches tickets planned into that block (0 = any).
+	Block int
 	// Parent matches tickets tagged parent:<Parent> (the children of a feature).
 	Parent string
 }
@@ -145,7 +147,10 @@ func ListTickets(root string, f ListFilter) ([]ListItem, error) {
 		if f.Tag != "" && !ticket.Contains(t.Tags, f.Tag) {
 			continue
 		}
-		if f.Phase != "" && strVal(t.Phase) != f.Phase {
+		if f.Lifecycle != "" && strVal(t.Lifecycle) != f.Lifecycle {
+			continue
+		}
+		if f.Block > 0 && t.Block != f.Block {
 			continue
 		}
 		if f.Parent != "" && !ticket.Contains(t.Tags, "parent:"+f.Parent) {

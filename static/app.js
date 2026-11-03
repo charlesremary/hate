@@ -381,6 +381,60 @@ function applyProjectNewerUI(newer) {
   }
 }
 
+// One-time project update (hate 2.0 format). Never automatic: the banner
+// opens a preview (GET /migration) and only Update project applies it.
+function applyProjectUpdateUI(needed) {
+  document.getElementById('project-update-banner').classList.toggle('hidden', !needed);
+  if (needed) {
+    const newBtn = document.getElementById('btn-new-ticket');
+    newBtn.disabled = true;
+    newBtn.title = 'This project needs its one-time update first';
+  }
+}
+async function loadProjectUpdatePreview(blocks) {
+  const q = blocks === undefined ? '' : `?blocks_from_phase=${blocks}`;
+  const plan = await API.get(`/api/projects/${currentProject.id}/migration${q}`);
+  document.getElementById('pu-blocks').checked = plan.blocks_from_phase;
+  document.getElementById('pu-summary').innerHTML = plan.needed
+    ? `${plan.tickets} tickets. <strong>${plan.to_block}</strong> get a block number, <strong>${plan.to_lifecycle}</strong> get a lifecycle, the rest have no phase and only get the new format.`
+    : 'This project is already up to date.';
+  document.getElementById('pu-changes').innerHTML = plan.changes.length ? `
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="text-align:left;border-bottom:2px solid #ddd"><th>Ticket</th><th>Old phase</th><th>Becomes</th></tr></thead>
+      <tbody>${plan.changes.map(c => `<tr style="border-bottom:1px solid #eee">
+        <td style="padding:3px 6px"><strong>${escapeHtml(c.ticket_id)}</strong> ${escapeHtml(c.title)}</td>
+        <td style="padding:3px 6px">${escapeHtml(c.from)}</td>
+        <td style="padding:3px 6px">${c.block ? `block ${c.block}` : `lifecycle "${escapeHtml(c.lifecycle)}"`}</td></tr>`).join('')}</tbody>
+    </table>` : '';
+  document.getElementById('btn-apply-project-update').disabled = !plan.needed;
+}
+document.getElementById('btn-project-update').addEventListener('click', async () => {
+  try {
+    await loadProjectUpdatePreview();
+    document.getElementById('project-update-modal-overlay').classList.remove('hidden');
+  } catch (e) { showToast(e.message, 'error'); }
+});
+document.getElementById('pu-blocks').addEventListener('change', (e) => {
+  loadProjectUpdatePreview(e.target.checked).catch(err => showToast(err.message, 'error'));
+});
+['btn-close-project-update', 'btn-cancel-project-update'].forEach(id =>
+  document.getElementById(id).addEventListener('click', () =>
+    document.getElementById('project-update-modal-overlay').classList.add('hidden')));
+document.getElementById('btn-apply-project-update').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-apply-project-update');
+  btn.disabled = true;
+  try {
+    const res = await API.post(`/api/projects/${currentProject.id}/migration`,
+      { blocks_from_phase: document.getElementById('pu-blocks').checked });
+    document.getElementById('project-update-modal-overlay').classList.add('hidden');
+    showToast(res.commit_warning ? `Project updated (${res.commit_warning})` : 'Project updated');
+    const all = await loadProjects();
+    const p = (all || []).find(x => x.id === currentProject.id && x.path === currentProject.path);
+    if (p) await selectProject(p.id, p.path, p);
+  } catch (e) { showToast(e.message, 'error'); }
+  finally { btn.disabled = false; }
+});
+
 async function selectProject(id, path, projectData) {
   currentProject = { id, path, ...projectData };
   ticketRefCache.clear();
@@ -400,6 +454,7 @@ async function selectProject(id, path, projectData) {
   hb.outerHTML = `<span id="project-health-badge">${healthBadge(currentProject.health)}</span>`;
   applyProjectClosedUI(currentProject.closed_at);
   applyProjectNewerUI(!!currentProject.newer_format);
+  applyProjectUpdateUI(!!currentProject.needs_migration);
 
   // Fetch resources and current user identity
   try {
@@ -686,26 +741,31 @@ async function loadTickets() {
   try {
     const status = document.getElementById('filter-status').value;
     const type = document.getElementById('filter-type').value;
-    const phase = document.getElementById('filter-phase').value;
+    const lifecycle = document.getElementById('filter-lifecycle').value;
+    const block = document.getElementById('filter-block').value;
     let url = `/api/projects/${currentProject.id}/tickets`;
     const params = [];
     if (status) params.push(`status=${status}`);
     if (type) params.push(`type=${type}`);
-    if (phase) params.push(`phase=${encodeURIComponent(phase)}`);
+    if (lifecycle) params.push(`lifecycle=${encodeURIComponent(lifecycle)}`);
+    if (block) params.push(`block=${encodeURIComponent(block)}`);
     if (params.length) url += '?' + params.join('&');
 
-    // The pick lists come from the unfiltered list, so picking a phase (or
+    // The pick lists come from the unfiltered list, so picking a lifecycle (or
     // status/type) doesn't shrink them to what's showing (HATE-3j7k).
     const allUrl = `/api/projects/${currentProject.id}/tickets`;
-    const [tickets, wo, unfiltered] = await Promise.all([
+    const [tickets, wo, unfiltered, blocks] = await Promise.all([
       API.get(url),
       API.get(`/api/projects/${currentProject.id}/ready`).catch(() => null),
       params.length ? API.get(allUrl) : null,
+      API.get(`/api/projects/${currentProject.id}/blocks`).catch(() => []),
     ]);
     allTickets = tickets;
     workOrder = wo;
+    projectBlocks = blocks || [];
     const pickFrom = unfiltered || tickets;
-    populatePhaseFilter(pickFrom);
+    populateLifecycleFilter(pickFrom);
+    populateBlockFilter(pickFrom);
     populateTagFilter(pickFrom);
     populateAssigneeFilter(pickFrom);
     renderMigrationBanner();
@@ -774,7 +834,7 @@ function depBadge(t, byId) {
   return '';
 }
 
-// The work order from GET /ready (the server's dependency stages: the one stage
+// The work order from GET /ready (the server's dependency waves: the one wave
 // computation, shared with the capacity schedule and the agent API). Loaded with
 // the tickets; null until then.
 let workOrder = null;
@@ -783,7 +843,7 @@ let workOrder = null;
 // Tickets not in it (done, backlog, parents) are 0: they're ranked separately.
 function workOrderDepth() {
   const depth = new Map();
-  ((workOrder && workOrder.stages) || []).forEach(g => (g.tickets || []).forEach(w => depth.set(w.id, w.stage - 1)));
+  ((workOrder && workOrder.waves) || []).forEach(g => (g.tickets || []).forEach(w => depth.set(w.id, w.wave - 1)));
   return depth;
 }
 
@@ -842,7 +902,8 @@ function renderTicketTable(tickets) {
     tickets.sort((a, b) =>
          (rank(a) - rank(b))
       || ((depth.get(a.id) || 0) - (depth.get(b.id) || 0))     // dependency order: ready before blocked
-      || (a.phase || '~').localeCompare(b.phase || '~')        // within a stage: phase order (Discovery→Build→…); unphased last
+      || ((a.block || 1e9) - (b.block || 1e9))                 // within a wave: block order; no block last
+      || (a.lifecycle || '~').localeCompare(b.lifecycle || '~') // then lifecycle (Discovery→Build→…); none last
       || cmpDate(a.planned_start_date, b.planned_start_date)
       || cmpDate(a.due_date, b.due_date)
       || ((PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99))
@@ -860,7 +921,7 @@ function renderTicketTable(tickets) {
       <td style="text-align:center;padding:0;white-space:nowrap">${gutterMarks(t)}</td>
       <td><strong>${t.id}</strong></td>
       <td>${t.title}${isBacklogTicket(t) ? ' <span class="badge backlog-badge">Backlog</span>' : ''}${depBadge(t, byId)}${kidCount.get(t.id) ? ` <span class="badge child-badge" title="${kidCount.get(t.id)} child ticket(s)">↳ ${kidCount.get(t.id)}</span>` : ''}${estimateGapBadge(t)}</td>
-      <td>${t.phase || '—'}</td>
+      <td>${lifecycleBlockCell(t)}</td>
       <td>${statusBadge(t.status)}</td>
       <td>${t.assignee ? t.assignee.split('@')[0] : '—'}</td>
       <td style="white-space:nowrap">${estHoursCell(t)}</td>
@@ -889,14 +950,43 @@ function renderTicketTable(tickets) {
   });
 })();
 
-function populatePhaseFilter(tickets) {
-  const sel = document.getElementById('filter-phase');
+// Planning blocks of the current project (GET /blocks; [] when it doesn't
+// plan in blocks). Labels and dates are computed there, never stored.
+let projectBlocks = [];
+function blockLabel(n) {
+  if (!n) return '';
+  const b = projectBlocks.find(x => x.n === n);
+  return b ? b.label : `Block ${String(n).padStart(2, '0')}`;
+}
+function lifecycleBlockCell(t) {
+  const parts = [];
+  if (t.lifecycle) parts.push(escapeHtml(t.lifecycle));
+  if (t.block) parts.push(`<span class="badge" title="${escapeHtml(blockLabel(t.block))}">B${t.block}</span>`);
+  return parts.length ? parts.join(' ') : '—';
+}
+
+function populateLifecycleFilter(tickets) {
+  const sel = document.getElementById('filter-lifecycle');
   const current = sel.value;
-  const phases = [...new Set(tickets.map(t => t.phase).filter(Boolean))].sort();
-  sel.innerHTML = '<option value="">All phases</option>';
-  phases.forEach(p => {
+  const values = [...new Set(tickets.map(t => t.lifecycle).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">All lifecycles</option>';
+  values.forEach(p => {
     const opt = document.createElement('option');
     opt.value = p; opt.textContent = p;
+    sel.appendChild(opt);
+  });
+  sel.value = current;
+}
+
+function populateBlockFilter(tickets) {
+  const sel = document.getElementById('filter-block');
+  const current = sel.value;
+  const used = [...new Set(tickets.map(t => t.block).filter(Boolean))].sort((a, b) => a - b);
+  sel.classList.toggle('hidden', !used.length && !projectBlocks.length);
+  sel.innerHTML = '<option value="">All blocks</option>';
+  used.forEach(n => {
+    const opt = document.createElement('option');
+    opt.value = String(n); opt.textContent = blockLabel(n);
     sel.appendChild(opt);
   });
   sel.value = current;
@@ -983,7 +1073,7 @@ function renderTickets() {
 
 // Work order view: the "Ready now" group (open tickets whose predecessors are
 // all done; they can run in parallel), then the rest of the open work in
-// dependency order with a small stage label. Comes from GET /ready; respects the
+// dependency order with a small wave label. Comes from GET /ready; respects the
 // filters. Each row opens the ticket.
 function renderTicketPlan(visible) {
   const el = document.getElementById('ticket-plan');
@@ -993,7 +1083,7 @@ function renderTicketPlan(visible) {
   const nextIds = new Set((workOrder.next || []).map(w => w.id));
   const ready = (workOrder.ready || []).filter(w => show.has(w.id));
   const rest = [];
-  (workOrder.stages || []).forEach(g => (g.tickets || []).forEach(w => {
+  (workOrder.waves || []).forEach(g => (g.tickets || []).forEach(w => {
     if (show.has(w.id) && !readyIds.has(w.id)) rest.push(w);
   }));
   if (!ready.length && !rest.length) {
@@ -1008,7 +1098,7 @@ function renderTicketPlan(visible) {
     const eff = w.estimated_hours ? ` <span style="color:#aaa;font-size:11px">${fmtHours(w.estimated_hours)}h</span>` : '';
     const who = w.assignee ? ` <span style="color:#94a3b8;font-size:11px">${escapeHtml(w.assignee.split('@')[0])}</span>` : '';
     return `<div class="wo-row" data-id="${escapeHtml(w.id)}" style="cursor:pointer;padding:5px 8px;display:flex;gap:8px;align-items:center;border-radius:4px">
-      <span style="flex:0 0 52px;font-size:11px;color:#64748b" title="Dependency stage: how many open predecessors deep">stage ${Number(w.stage) || 1}</span>
+      <span style="flex:0 0 52px;font-size:11px;color:#64748b" title="Dependency wave: wave 1 has nothing open in front of it, wave 2 waits on wave 1, ...">wave ${Number(w.wave) || 1}</span>
       ${statusBadge(escapeHtml(w.status))}
       <span style="font-weight:600;color:#1565c0">${escapeHtml(w.id)}</span>
       <span style="flex:1;min-width:0">${escapeHtml(w.title)}</span>${who}${eff}${next}${waits}
@@ -1056,7 +1146,8 @@ document.getElementById('view-plan').addEventListener('click', () => setTicketVi
 
 document.getElementById('filter-status').addEventListener('change', loadTickets);
 document.getElementById('filter-type').addEventListener('change', loadTickets);
-document.getElementById('filter-phase').addEventListener('change', loadTickets);
+document.getElementById('filter-lifecycle').addEventListener('change', loadTickets);
+document.getElementById('filter-block').addEventListener('change', loadTickets);
 document.getElementById('filter-tag').addEventListener('change', loadTickets);
 document.getElementById('filter-assignee').addEventListener('change', loadTickets);
 document.getElementById('filter-hide-closed').addEventListener('change', loadTickets);
@@ -1499,7 +1590,8 @@ function renderTicketPanel(t) {
     ['Predecessors', t.predecessors.length ? linkifyTicketRefs(t.predecessors.join(', ')) : '—'],
     ['Parent', `${parentIdOf(t) ? linkifyTicketRefs(parentIdOf(t)) + ' ' : ''}<input class="inline-edit" value="${parentIdOf(t) || ''}" onblur="setParent('${t.id}', this.value)" placeholder="parent ticket id" style="max-width:150px">`],
     ['Tags', `<input class="inline-edit" value="${visibleTags(t).join(', ')}" onblur="setVisibleTags('${t.id}', this.value)" placeholder="comma separated">`],
-    ['Phase', `<input class="inline-edit" value="${t.phase||''}" onblur="editField('${t.id}','phase',this.value.trim()||null)" placeholder="e.g. Discovery">`],
+    ['Lifecycle', `<input class="inline-edit" value="${escapeHtml(t.lifecycle||'')}" onblur="editField('${t.id}','lifecycle',this.value.trim()||null)" placeholder="e.g. Discovery, Build">`],
+    ['Block', blockEditor(t)],
   ];
 
   const activity = [...(t.activity || [])].reverse().slice(0, 20).map(a => {
@@ -2018,7 +2110,7 @@ function loadDashboard() {
   frame.src = `/api/projects/${currentProject.id}/dashboard`;
 }
 
-// ── Phase rollup ─────────────────────────────────────
+// ── Rollup (by lifecycle or block) ───────────────────
 let lastPhaseRollup = null;
 
 document.getElementById('btn-phase-rollup').addEventListener('click', async () => {
@@ -2026,14 +2118,22 @@ document.getElementById('btn-phase-rollup').addEventListener('click', async () =
   const btn = document.getElementById('btn-phase-rollup');
   btn.disabled = true; btn.textContent = 'Σ …';
   try {
-    const report = await API.get(`/api/projects/${currentProject.id}/phase-rollup`);
+    const by = document.getElementById('rollup-by');
+    by.value = projectBlocks.length ? 'block' : 'lifecycle';
+    const report = await API.get(`/api/projects/${currentProject.id}/rollup?by=${by.value}`);
     lastPhaseRollup = report;
     renderPhaseRollup(report);
     document.getElementById('phase-rollup-modal-overlay').classList.remove('hidden');
   } catch (e) { showToast(e.message, 'error'); }
-  finally { btn.disabled = false; btn.textContent = 'Σ Phases'; }
+  finally { btn.disabled = false; btn.textContent = 'Σ Rollup'; }
 });
 
+document.getElementById('rollup-by').addEventListener('change', async (e) => {
+  try {
+    lastPhaseRollup = await API.get(`/api/projects/${currentProject.id}/rollup?by=${e.target.value}`);
+    renderPhaseRollup(lastPhaseRollup);
+  } catch (err) { showToast(err.message, 'error'); }
+});
 document.getElementById('btn-close-phase-rollup').addEventListener('click', () => {
   document.getElementById('phase-rollup-modal-overlay').classList.add('hidden');
 });
@@ -2043,7 +2143,7 @@ document.getElementById('phase-rollup-modal-overlay').addEventListener('click', 
 });
 document.getElementById('btn-phase-rollup-csv').addEventListener('click', () => {
   if (lastPhaseRollup) downloadPhaseRollupCSV(lastPhaseRollup);
-  else showToast('Open a phase rollup first', 'error');
+  else showToast('Open a rollup first', 'error');
 });
 
 function pctText(v) { return (v == null ? 0 : v).toFixed(1) + '%'; }
@@ -2052,7 +2152,7 @@ function fmtHours(v) { return String(+(+(v || 0)).toFixed(2)); }
 
 function renderPhaseRollup(report) {
   const c = document.getElementById('phase-rollup-content');
-  if (!report.phases || !report.phases.length) {
+  if (!report.groups || !report.groups.length) {
     c.innerHTML = `<div style="color:#666">No tickets to roll up yet.</div>`;
     return;
   }
@@ -2061,10 +2161,10 @@ function renderPhaseRollup(report) {
     return `<div style="background:#eee;border-radius:6px;height:8px;width:90px;display:inline-block;vertical-align:middle;overflow:hidden">
       <div style="background:#2e7d32;height:8px;width:${w}%"></div></div>`;
   };
-  const rows = report.phases.map(p => {
+  const rows = report.groups.map(p => {
     const flags = [];
     if (p.blocked_count) flags.push(`<span class="badge s-blocked">${p.blocked_count} blocked</span>`);
-    if (!p.hours_based) flags.push(`<span class="badge s-not_started" title="No estimated hours in this phase — % is by ticket count">count-based</span>`);
+    if (!p.hours_based) flags.push(`<span class="badge s-not_started" title="No estimated hours in this group — % is by ticket count">count-based</span>`);
     if (p.unsized_count) flags.push(`<span style="color:#999;font-size:11px" title="Work tickets with no estimate (invisible to the hours math)">${p.unsized_count} unsized</span>`);
     if (p.cancelled_count) flags.push(`<span style="color:#999;font-size:11px" title="Force-closed / descoped — excluded from %">${p.cancelled_count} descoped</span>`);
     return `<tr style="border-bottom:1px solid #eee">
@@ -2083,23 +2183,23 @@ function renderPhaseRollup(report) {
       <span style="color:#999">— ${report.total_tickets} tickets, ${escapeHtml(report.basis)}</span></div>
     <table style="width:100%;border-collapse:collapse">
       <thead><tr style="text-align:left;border-bottom:2px solid #ddd;color:#555">
-        <th style="padding:6px 8px">Phase</th><th style="padding:6px 8px">Complete</th>
+        <th style="padding:6px 8px">${report.by === 'block' ? 'Block' : 'Lifecycle'}</th><th style="padding:6px 8px">Complete</th>
         <th style="padding:6px 8px">Tickets</th><th style="padding:6px 8px">Est. hours (done/total)</th>
         <th style="padding:6px 8px">Dates</th><th style="padding:6px 8px"></th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <p style="color:#999;font-size:11px;margin-top:10px">Hours-weighted: % = done est. hours ÷ total est. hours (wrap estimates, plus code hours from each feature's CFP).
-      Descoped (force-closed) tickets are excluded; phases with no estimates fall back to ticket count.</p>`;
+      Descoped (force-closed) tickets are excluded; groups with no estimates fall back to ticket count.</p>`;
 }
 
 function downloadPhaseRollupCSV(report) {
-  const head = ['phase', 'percent_complete', 'basis', 'tickets_total', 'tickets_complete',
+  const head = [report.by === 'block' ? 'block' : 'lifecycle', 'percent_complete', 'basis', 'tickets_total', 'tickets_complete',
     'in_progress', 'not_started', 'blocked', 'descoped', 'est_hours_total',
     'est_hours_done', 'unsized_tickets', 'planned_start', 'due_date'];
   const esc = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
   const lines = [head.join(',')];
-  (report.phases || []).forEach(p => {
+  (report.groups || []).forEach(p => {
     lines.push([
       esc(p.label), p.percent_complete, p.hours_based ? 'hours' : 'count',
       p.ticket_count, p.complete_count, p.in_progress_count, p.not_started_count,
@@ -2112,10 +2212,10 @@ function downloadPhaseRollupCSV(report) {
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `phase-rollup-${currentProject.id}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `rollup-by-${report.by}-${currentProject.id}-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
-  showToast('Phase rollup CSV downloaded');
+  showToast('Rollup CSV downloaded');
 }
 
 // ── Excel export ─────────────────────────────────────
@@ -2206,12 +2306,29 @@ document.getElementById('btn-sync').addEventListener('click', async () => {
   }
 });
 
+// Block picker for the ticket panel: the project's blocks (plus the ticket's
+// current one if it's past the list), or a plain number when the project
+// doesn't plan in blocks.
+function blockOptions(selected) {
+  const ns = projectBlocks.map(b => b.n);
+  if (selected && !ns.includes(selected)) ns.push(selected);
+  return '<option value="0">No block</option>' + ns.sort((a, b) => a - b)
+    .map(n => `<option value="${n}"${n === selected ? ' selected' : ''}>${escapeHtml(blockLabel(n))}</option>`).join('');
+}
+function blockEditor(t) {
+  if (!projectBlocks.length && !t.block) return '—';
+  return `<select class="inline-edit" onchange="editField('${t.id}','block',Number(this.value))">${blockOptions(t.block || 0)}</select>`;
+}
+
 // ── New ticket modal ─────────────────────────────────
 document.getElementById('btn-new-ticket').addEventListener('click', () => {
-  // Populate the phase picker with phases already used in this project (type-or-pick).
-  const phases = [...new Set((allTickets || []).map(t => t.phase).filter(Boolean))].sort();
-  const dl = document.getElementById('nt-phase-list');
-  dl.innerHTML = phases.map(p => `<option value="${escapeHtml(p)}"></option>`).join('');
+  // Lifecycle picker: values already used in this project (type-or-pick);
+  // block picker only when the project plans in blocks.
+  const lifecycles = [...new Set((allTickets || []).map(t => t.lifecycle).filter(Boolean))].sort();
+  const dl = document.getElementById('nt-lifecycle-list');
+  dl.innerHTML = lifecycles.map(p => `<option value="${escapeHtml(p)}"></option>`).join('');
+  document.getElementById('nt-block-label').classList.toggle('hidden', !projectBlocks.length);
+  document.getElementById('nt-block').innerHTML = blockOptions(0).replace('value="0"', 'value=""');
   // Parent picker: open tickets that are, or could be, features. Type picker:
   // type:<name> tags already in use in this project.
   const parents = (allTickets || []).filter(t => !isDone(t) && WORKFLOW_TYPES.includes(t.type) && !parentIdOf(t));
@@ -2342,8 +2459,10 @@ document.getElementById('new-ticket-form').addEventListener('submit', async (e) 
   if (type === 'meeting') {
     body.attendees = document.getElementById('nt-attendees').value || undefined;
   }
-  const phaseVal = document.getElementById('nt-phase').value.trim();
-  if (phaseVal) body.phase = phaseVal;
+  const lifecycleVal = document.getElementById('nt-lifecycle').value.trim();
+  if (lifecycleVal) body.lifecycle = lifecycleVal;
+  const blockVal = Number(document.getElementById('nt-block').value || 0);
+  if (blockVal > 0) body.block = blockVal;
   // Class / estimate / parent / COSMIC size (standard types only) → tags plus
   // estimate_hours. A self-contained feature can carry both a class and a CFP.
   if (!isAuto) {
@@ -2987,7 +3106,7 @@ function renderBilling() {
     <tr>
       <td>${e.ticket_id}</td>
       <td>${e.ticket_title}</td>
-      <td>${e.ticket_phase || '—'}</td>
+      <td>${escapeHtml(e.ticket_lifecycle || '—')}${e.ticket_block ? ` · B${e.ticket_block}` : ''}</td>
       <td>${e.date}</td>
       <td style="text-align:right">${normal.toFixed(2)}</td>
       <td style="text-align:right${over > 0 ? ';color:#b45309;font-weight:600' : ';color:#bbb'}">${over.toFixed(2)}</td>
@@ -2999,7 +3118,7 @@ function renderBilling() {
   }).join('');
   container.innerHTML = `
     <table class="billing-table">
-      <thead><tr><th>Ticket</th><th>Title</th><th>Phase</th><th>Date</th><th style="text-align:right">Hours</th><th style="text-align:right">Override</th><th style="text-align:right">Total</th><th>Description</th><th>Author</th><th>Override reason</th></tr></thead>
+      <thead><tr><th>Ticket</th><th>Title</th><th>Lifecycle</th><th>Date</th><th style="text-align:right">Hours</th><th style="text-align:right">Override</th><th style="text-align:right">Total</th><th>Description</th><th>Author</th><th>Override reason</th></tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr>
         <td colspan="4" style="text-align:right;font-weight:700">Total</td>

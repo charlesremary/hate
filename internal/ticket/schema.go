@@ -10,7 +10,7 @@ import (
 )
 
 // SchemaVersion is the current schema version for tickets and config.
-const SchemaVersion = "1.0.0"
+const SchemaVersion = "2.0.0"
 
 // Enum slices matching the Python system exactly.
 var (
@@ -153,7 +153,13 @@ type Ticket struct {
 	// nil = unsized. >= 0.25 in quarter-hour steps.
 	EstimateHours *float64 `json:"estimate_hours,omitempty"`
 	Tags          []string `json:"tags"`
-	Phase         *string  `json:"phase"`
+	// Lifecycle is the kind of work (Discovery, Design, Build, Test, Deploy, or
+	// the project's own names); optional. Format 2 replaced "phase" with
+	// lifecycle + block.
+	Lifecycle *string `json:"lifecycle"`
+	// Block is the planning block the ticket is planned into (1-based; 0 =
+	// none). Labels and dates are computed from the project's block_weeks.
+	Block    int      `json:"block,omitempty"`
 	Assignee      *string  `json:"assignee"`
 	Creator       string   `json:"creator"`
 	Predecessors  []string `json:"predecessors"`
@@ -247,7 +253,7 @@ func BlankTicket(id, ticketType, title, creator string) *Ticket {
 		Priority:      "medium",
 		Effort:        nil,
 		Tags:          []string{},
-		Phase:         nil,
+		Lifecycle:     nil,
 		Assignee:      nil,
 		Creator:       creator,
 		Predecessors:  []string{},

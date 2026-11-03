@@ -35,6 +35,9 @@ func mapError(err error) error {
 	var est *ticket.EstimateValidationError
 	var ext *service.TimeExtensionError
 	switch {
+	case ticket.IsNeedsMigration(err):
+		return toolError{"error": "needs_migration", "detail": err.Error(),
+			"next": "call hate_migrate_project (dry run), show the user the preview, and apply with apply: true only if they agree"}
 	case ticket.IsNewerFormat(err):
 		return toolError{"error": "project_newer_format", "detail": err.Error(),
 			"next": "tell the user to update hate (brew upgrade --cask hate) and restart it; reads still work"}

@@ -12,7 +12,7 @@ import (
 // agent sets while classing, estimating and planning tickets).
 var MultiEditFields = map[string]bool{
 	"title": true, "description": true, "priority": true, "estimate_hours": true,
-	"assignee": true, "phase": true, "planned_start_date": true, "due_date": true,
+	"assignee": true, "lifecycle": true, "block": true, "planned_start_date": true, "due_date": true,
 }
 
 // EditFields applies several field changes and tag additions/removals to one
@@ -31,8 +31,11 @@ func EditFields(repoRoot, ticketID string, fields map[string]interface{}, addTag
 
 	names := make([]string, 0, len(fields))
 	for f := range fields {
+		if f == "phase" {
+			return nil, ErrPhaseRetired
+		}
 		if !MultiEditFields[f] {
-			return nil, fmt.Errorf("field %q can't be set here (allowed: title, description, priority, estimate_hours, assignee, phase, planned_start_date, due_date)", f)
+			return nil, fmt.Errorf("field %q can't be set here (allowed: title, description, priority, estimate_hours, assignee, lifecycle, block, planned_start_date, due_date)", f)
 		}
 		names = append(names, f)
 	}

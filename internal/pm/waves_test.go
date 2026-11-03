@@ -38,10 +38,10 @@ func TestComputeReadyChain(t *testing.T) {
 	if !eqIDs(ids(rep.Ready), "A") || !eqIDs(ids(rep.Next), "B") {
 		t.Fatalf("ready=%v next=%v, want [A] [B]", ids(rep.Ready), ids(rep.Next))
 	}
-	if len(rep.Stages) != 3 || rep.Stages[0].Stage != 1 || !eqIDs(ids(rep.Stages[2].Tickets), "C") || rep.Stages[1].Hours != 2 {
-		t.Errorf("stages = %+v", rep.Stages)
+	if len(rep.Waves) != 3 || rep.Waves[0].Wave != 1 || !eqIDs(ids(rep.Waves[2].Tickets), "C") || rep.Waves[1].Hours != 2 {
+		t.Errorf("waves = %+v", rep.Waves)
 	}
-	if w := rep.Stages[2].Tickets[0]; !eqIDs(w.WaitsOn, "B") || w.Stage != 3 {
+	if w := rep.Waves[2].Tickets[0]; !eqIDs(w.WaitsOn, "B") || w.Wave != 3 {
 		t.Errorf("C = %+v", w)
 	}
 
@@ -77,23 +77,23 @@ func TestComputeReadyRules(t *testing.T) {
 	if len(rep.Next) != 0 {
 		t.Errorf("next = %v, want none", ids(rep.Next))
 	}
-	for _, g := range rep.Stages {
+	for _, g := range rep.Waves {
 		for _, w := range g.Tickets {
 			if w.ID == "F" || w.ID == "BK" {
 				t.Errorf("%s should not be in the work order", w.ID)
 			}
 		}
 	}
-	if st := DependencyStages(tickets); st["BOTH"] != 2 || st["AB"] != 1 || st["F"] != 0 {
-		t.Errorf("stages = %v", st)
+	if st := DependencyWaves(tickets); st["BOTH"] != 2 || st["AB"] != 1 || st["F"] != 0 {
+		t.Errorf("waves = %v", st)
 	}
 }
 
-// A cycle doesn't hang and every ticket still gets a stage.
-func TestDependencyStagesCycle(t *testing.T) {
+// A cycle doesn't hang and every ticket still gets a wave.
+func TestDependencyWavesCycle(t *testing.T) {
 	tickets := []*ticket.Ticket{capT("X", 1, "", "Y"), capT("Y", 1, "", "X")}
-	st := DependencyStages(tickets)
+	st := DependencyWaves(tickets)
 	if len(st) != 2 {
-		t.Errorf("stages = %v", st)
+		t.Errorf("waves = %v", st)
 	}
 }

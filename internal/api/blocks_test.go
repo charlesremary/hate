@@ -140,8 +140,8 @@ func TestReadyAPI(t *testing.T) {
 	if len(rep.Ready) != 1 || rep.Ready[0].ID != "T-a" || len(rep.Next) != 1 || rep.Next[0].ID != "T-b" {
 		t.Fatalf("ready=%+v next=%+v", rep.Ready, rep.Next)
 	}
-	if len(rep.Stages) != 3 || rep.Stages[2].Tickets[0].ID != "T-c" || rep.Stages[2].Stage != 3 {
-		t.Errorf("stages = %+v", rep.Stages)
+	if len(rep.Waves) != 3 || rep.Waves[2].Tickets[0].ID != "T-c" || rep.Waves[2].Wave != 3 {
+		t.Errorf("waves = %+v", rep.Waves)
 	}
 }
 
@@ -181,27 +181,35 @@ func TestDashboardBlocksNoExecPlan(t *testing.T) {
 	}
 }
 
-// HATE-evqw: the phase rollup orders "Block NN" phases numerically and adds
-// each block's dates.
-func TestPhaseRollupBlocksAPI(t *testing.T) {
+// HATE-a7i1: on a block project the rollup defaults to blocks, in number
+// order, with each block's dates; ?by=lifecycle groups by kind of work.
+func TestRollupBlocksAPI(t *testing.T) {
 	h, root := setupCosmicProjects(t)
 	cfg, _ := ticket.ReadConfig(root)
 	cfg.BlockWeeks, cfg.RequestedStart = 2, "2026-11-04"
 	if err := ticket.WriteConfig(root, cfg); err != nil {
 		t.Fatal(err)
 	}
-	ph := func(id, phase string) *ticket.Ticket {
+	bl := func(id string, block int, lc string) *ticket.Ticket {
 		tk := ticket.BlankTicket(id, "task", id, "c@example.com")
-		tk.Phase = &phase
+		tk.Block = block
+		if lc != "" {
+			tk.Lifecycle = &lc
+		}
 		return tk
 	}
-	writeTickets(t, root, ph("T-10", "Block 10 (Mar 8-19)"), ph("T-02", "Block 02 (Nov 16-27)"), ph("T-01", "Block 01 (Nov 2-13)"))
+	writeTickets(t, root, bl("T-10", 10, ""), bl("T-02", 2, "Build"), bl("T-01", 1, "Design"))
 	var rep pm.RollupReport
-	getJSON(t, h, "/api/projects/est/phase-rollup", &rep)
-	if len(rep.Phases) < 3 || rep.Phases[0].Block != 1 || rep.Phases[1].Block != 2 || rep.Phases[2].Block != 10 {
-		t.Fatalf("phases = %+v", rep.Phases)
+	getJSON(t, h, "/api/projects/est/rollup", &rep)
+	if rep.By != "block" || len(rep.Groups) < 3 || rep.Groups[0].Block != 1 || rep.Groups[1].Block != 2 || rep.Groups[2].Block != 10 {
+		t.Fatalf("groups = %+v", rep.Groups)
 	}
-	if p := rep.Phases[1]; p.BlockStart != "2026-11-16" || p.BlockEnd != "2026-11-27" {
-		t.Errorf("Block 02 dates = %s..%s", p.BlockStart, p.BlockEnd)
+	if g := rep.Groups[1]; g.BlockStart != "2026-11-16" || g.BlockEnd != "2026-11-27" || !strings.HasPrefix(g.Label, "Block 02 (") {
+		t.Errorf("Block 02 = %s..%s %q", g.BlockStart, g.BlockEnd, g.Label)
+	}
+	var lc pm.RollupReport
+	getJSON(t, h, "/api/projects/est/rollup?by=lifecycle", &lc)
+	if lc.By != "lifecycle" || len(lc.Groups) < 2 || lc.Groups[0].Key != "Build" {
+		t.Errorf("by lifecycle = %+v", lc.Groups)
 	}
 }

@@ -32,8 +32,10 @@ import (
 // object (time entries, test cases, ...), is: bump the major and add a
 // migration.
 
-// FormatMajor is the newest project format this hate can write.
-const FormatMajor = 1
+// FormatMajor is the project format this hate writes. A project at an older
+// format is readable (translated in memory) but must be migrated before it
+// can be changed; see migrate.go.
+const FormatMajor = 2
 
 // NewerFormatError: the project was changed by a newer hate.
 type NewerFormatError struct {
@@ -53,6 +55,23 @@ func formatLabel(v string) string {
 		return fmt.Sprintf("%d.0", m)
 	}
 	return v
+}
+
+// NeedsMigrationError: the project is at an older format; it must get its
+// one-time update (Migrate) before this hate changes it.
+type NeedsMigrationError struct {
+	Root    string
+	Version string
+}
+
+func (e *NeedsMigrationError) Error() string {
+	return fmt.Sprintf("This project needs a one-time update to the hate %d.0 format before it can be changed. Open it in hate and click Update project (or call hate_migrate_project); you'll see exactly what changes first.", FormatMajor)
+}
+
+// IsNeedsMigration reports whether err is (or wraps) a NeedsMigrationError.
+func IsNeedsMigration(err error) bool {
+	var e *NeedsMigrationError
+	return errors.As(err, &e)
 }
 
 // IsNewerFormat reports whether err is (or wraps) a NewerFormatError.
@@ -94,6 +113,16 @@ func FormatOfConfig(data []byte) string {
 	return v.SchemaVersion
 }
 
+// FormatMajorOf is the format major of a schema_version ("" is format 1); an
+// unparseable version is reported as newer than this hate.
+func FormatMajorOf(version string) int {
+	m, err := formatMajorOf(version)
+	if err != nil {
+		return FormatMajor + 1
+	}
+	return m
+}
+
 // FormatIsNewer reports whether a schema_version is newer than FormatMajor.
 // An unparseable version counts as newer: better read-only than lossy.
 func FormatIsNewer(version string) bool {
@@ -101,11 +130,20 @@ func FormatIsNewer(version string) bool {
 	return err != nil || m > FormatMajor
 }
 
-// CheckWritable returns a *NewerFormatError when the project at repoRoot was
-// changed by a newer hate, else nil (also for a folder with no config yet).
+// CheckWritable returns a *NewerFormatError when a newer hate changed the
+// project at repoRoot, a *NeedsMigrationError when it is at an older format,
+// else nil (also for a folder with no config yet: a project being created).
 func CheckWritable(repoRoot string) error {
-	if v := ProjectFormat(repoRoot); FormatIsNewer(v) {
+	data, err := os.ReadFile(ConfigPath(repoRoot))
+	if err != nil {
+		return nil
+	}
+	v := FormatOfConfig(data)
+	switch m := FormatMajorOf(v); {
+	case m > FormatMajor:
 		return &NewerFormatError{Root: repoRoot, Version: v}
+	case m < FormatMajor:
+		return &NeedsMigrationError{Root: repoRoot, Version: v}
 	}
 	return nil
 }

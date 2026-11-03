@@ -5,8 +5,6 @@ package pm
 
 import (
 	"fmt"
-	"regexp"
-	"strconv"
 	"time"
 
 	"hate/internal/ticket"
@@ -17,9 +15,9 @@ import (
 // starts on the Monday on or before the requested start (else the earliest
 // planned start of an in-scope ticket, else today); each block runs Monday to
 // the Friday of its last week, and the next one starts the Monday after. A
-// ticket is planned into a block by setting its phase to the block label
-// ("Block 01 (Nov 2-13)") and its planned start / due date to the block's
-// bounds. Blocks are derived, never stored: nothing here writes.
+// ticket is planned into a block by setting its block number (and its
+// planned start / due date to the block's bounds). Block labels and dates are
+// derived, never stored: nothing here writes.
 
 // Block is one planning block.
 type Block struct {
@@ -54,21 +52,6 @@ func BlockLabel(n int, start, end time.Time) string {
 	return fmt.Sprintf("Block %02d (%s-%s)", n, start.Format("Jan 2"), end.Format("Jan 2"))
 }
 
-// blockPhaseRe matches a block phase: "Block 01", "Block 7 (Nov 2-13)", ...
-var blockPhaseRe = regexp.MustCompile(`(?i)^\s*block\s+(\d+)\b`)
-
-// ParseBlockPhase returns the block number of a "Block NN ..." phase.
-func ParseBlockPhase(phase string) (int, bool) {
-	m := blockPhaseRe.FindStringSubmatch(phase)
-	if m == nil {
-		return 0, false
-	}
-	n, err := strconv.Atoi(m[1])
-	if err != nil || n <= 0 {
-		return 0, false
-	}
-	return n, true
-}
 
 // BlockAnchor is the start of block 1: the Monday on or before the requested
 // start, else on or before the earliest planned_start_date of an in-scope

@@ -103,6 +103,8 @@ func RegisterProjectRoutes(r chi.Router) {
 		r.Route("/{projectId}", func(r chi.Router) {
 			r.Use(blockWritesWhenNewerFormat)
 			r.Get("/", getProject)
+			r.Get("/migration", getMigration)
+			r.Post("/migration", applyMigration)
 			r.Get("/sync-status", getSyncStatus)
 			r.Post("/sync", syncProject)
 			r.Get("/autosync", getAutoSync)
@@ -149,14 +151,16 @@ func projectSummary(project map[string]interface{}) map[string]interface{} {
 	result["resource_count"] = float64(0)
 	result["closed_at"] = ""
 	result["newer_format"] = false
+	result["needs_migration"] = false
 
 	path, _ := project["path"].(string)
 	if path == "" {
 		return result
 	}
 	if err := ticket.CheckWritable(path); err != nil {
-		result["newer_format"] = true
-		result["newer_format_detail"] = err.Error()
+		result["newer_format"] = ticket.IsNewerFormat(err)
+		result["needs_migration"] = ticket.IsNeedsMigration(err)
+		result["format_detail"] = err.Error()
 	}
 
 	// Ticket count from the ticket files (not index.json, which a fresh clone

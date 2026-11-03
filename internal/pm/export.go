@@ -44,13 +44,13 @@ func labelOr(m map[string]string, k string) string {
 
 // ticketsSheetHeaders are the Tickets sheet columns, in order.
 var ticketsSheetHeaders = []string{
-	"ID", "Title", "Type", "Status", "Priority", "Assignee", "Phase", "Parent",
+	"ID", "Title", "Type", "Status", "Priority", "Assignee", "Lifecycle", "Block", "Parent",
 	"Class", "CFP", "Estimate h", "Logged h", "Planned start", "Due",
 	"Predecessors", "Backlog", "Tags",
 }
 
 // ticketsSheetWidths are the column widths in characters (Title ~60).
-var ticketsSheetWidths = []float64{12, 60, 14, 20, 10, 24, 22, 12, 14, 6, 11, 10, 13, 12, 22, 9, 40}
+var ticketsSheetWidths = []float64{12, 60, 14, 20, 10, 24, 18, 7, 12, 14, 6, 11, 10, 13, 12, 22, 9, 40}
 
 // ProjectWorkbook builds the project's Excel export as .xlsx bytes. snapshot
 // is the schedule the Gantt sheet charts (the one the draw.io export uses),
@@ -77,15 +77,24 @@ func addTicketsSheet(wb *xlsxWorkbook, tickets []*ticket.Ticket, ctx EstimateCon
 	sh.addRow(hdr...)
 
 	sorted := append([]*ticket.Ticket(nil), tickets...)
-	phaseKey := func(t *ticket.Ticket) string {
-		if t.Phase == nil || *t.Phase == "" {
-			return "￿" // sort unphased last
+	blockKey := func(t *ticket.Ticket) int {
+		if t.Block <= 0 {
+			return 1 << 30 // no block last
 		}
-		return *t.Phase
+		return t.Block
+	}
+	lifecycleKey := func(t *ticket.Ticket) string {
+		if t.Lifecycle == nil || *t.Lifecycle == "" {
+			return "\uffff" // no lifecycle last
+		}
+		return *t.Lifecycle
 	}
 	sort.SliceStable(sorted, func(i, j int) bool {
-		if pi, pj := phaseKey(sorted[i]), phaseKey(sorted[j]); pi != pj {
-			return pi < pj
+		if bi, bj := blockKey(sorted[i]), blockKey(sorted[j]); bi != bj {
+			return bi < bj
+		}
+		if li, lj := lifecycleKey(sorted[i]), lifecycleKey(sorted[j]); li != lj {
+			return li < lj
 		}
 		return sorted[i].ID < sorted[j].ID
 	})
@@ -139,7 +148,8 @@ func addTicketsSheet(wb *xlsxWorkbook, tickets []*ticket.Ticket, ctx EstimateCon
 			str(labelOr(statusLabels, t.Status)),
 			str(t.Priority),
 			strp(t.Assignee),
-			strp(t.Phase),
+			strp(t.Lifecycle),
+			blockCell(t.Block),
 			str(ticket.ParentID(t)),
 			str(classLabels[ticket.ClassOf(t)]),
 			cfp,
@@ -156,4 +166,12 @@ func addTicketsSheet(wb *xlsxWorkbook, tickets []*ticket.Ticket, ctx EstimateCon
 	sh.colWidths = ticketsSheetWidths
 	sh.freezeRows = 1
 	sh.autoFilter = "A1:" + xlsxRef(len(ticketsSheetHeaders)-1, len(sh.rows))
+}
+
+// blockCell is a ticket's block number, or an empty cell for none.
+func blockCell(n int) xlsxCell {
+	if n <= 0 {
+		return xlsxCell{}
+	}
+	return xNum(float64(n), 0)
 }

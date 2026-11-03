@@ -532,8 +532,8 @@ func TestNewerSharedCopyNotMerged(t *testing.T) {
 	// pm's hate is "newer": bump the shared config's format.
 	cp := ticket.ConfigPath(pm.root)
 	data, _ := os.ReadFile(cp)
-	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "1.0.0"`, `"schema_version": "2.0.0"`, 1)), 0644)
-	pm.git("commit", "-qam", "migrate to format 2")
+	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "3.0.0"`, 1)), 0644)
+	pm.git("commit", "-qam", "migrate to format 3")
 	pm.git("push", "-q")
 
 	chuck.editTicket("ST-0001", func(tk *ticket.Ticket) { tk.Title = "local edit" })
@@ -553,8 +553,8 @@ func TestNewerSharedCopyFastForwards(t *testing.T) {
 	_, chuck, pm := twoMachines(t)
 	cp := ticket.ConfigPath(pm.root)
 	data, _ := os.ReadFile(cp)
-	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "1.0.0"`, `"schema_version": "2.0.0"`, 1)), 0644)
-	pm.git("commit", "-qam", "migrate to format 2")
+	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "3.0.0"`, 1)), 0644)
+	pm.git("commit", "-qam", "migrate to format 3")
 	pm.git("push", "-q")
 
 	if r := chuck.sync(); r.State != StateSynced || r.Pulled == 0 {
@@ -562,6 +562,28 @@ func TestNewerSharedCopyFastForwards(t *testing.T) {
 	}
 	if !ticket.IsNewerFormat(ticket.CheckWritable(chuck.root)) {
 		t.Error("project should be read-only after catching up to a newer format")
+	}
+	chuck.clean()
+}
+
+// HATE-gswd: both sides changed, in different project formats: no merge.
+func TestCrossFormatChangesNotMerged(t *testing.T) {
+	_, chuck, pm := twoMachines(t)
+	// pm (on 2.0) shares a change; chuck's copy is still format 1 with an
+	// unshared change made by hate 1.x.
+	pm.editTicket("ST-0001", func(tk *ticket.Ticket) { tk.Title = "pm edit" })
+	pm.git("push", "-q")
+	cp := ticket.ConfigPath(chuck.root)
+	data, _ := os.ReadFile(cp)
+	os.WriteFile(cp, []byte(strings.Replace(string(data), `"schema_version": "2.0.0"`, `"schema_version": "1.0.0"`, 1)), 0644)
+	chuck.git("commit", "-qam", "edit from hate 1.x")
+	head := chuck.git("rev-parse", "HEAD")
+	r := chuck.sync()
+	if r.State != StateAttention || !strings.Contains(r.Message, "Update project") {
+		t.Fatalf("sync = %+v", r)
+	}
+	if chuck.git("rev-parse", "HEAD") != head {
+		t.Error("local history changed")
 	}
 	chuck.clean()
 }

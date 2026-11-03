@@ -65,7 +65,8 @@ type newTicketIn struct {
 	EstimateHours    *float64     `json:"estimate_hours,omitempty" jsonschema:"wrap (config / nonfunc) tickets only: hours in quarter-hour steps, >= 0.25"`
 	Assignee         string       `json:"assignee,omitempty" jsonschema:"email of a project resource"`
 	Tags             []string     `json:"tags,omitempty" jsonschema:"class tag (functional, config, nonfunc), cfp:N on a feature parent, type:..., see hate://guide?section=3"`
-	Phase            string       `json:"phase,omitempty" jsonschema:"phase name for the rollup"`
+	Lifecycle        string       `json:"lifecycle,omitempty" jsonschema:"kind of work, e.g. Discovery, Design, Build, Test, Deploy (the project's own names)"`
+	Block            int          `json:"block,omitempty" jsonschema:"planning block number (projects with block_weeks set); 0 = none"`
 	PlannedStartDate string       `json:"planned_start_date,omitempty" jsonschema:"YYYY-MM-DD"`
 	DueDate          string       `json:"due_date,omitempty" jsonschema:"YYYY-MM-DD"`
 	ParentRef        string       `json:"parent_ref,omitempty" jsonschema:"ref of an earlier ticket in this batch to be the parent (adds parent:<id>)"`
@@ -83,6 +84,13 @@ type createProjectIn struct {
 	FolderName  string `json:"folder_name,omitempty" jsonschema:"folder under the projects root (default: tkt-<project id lower-cased>)"`
 }
 
+type migrateProjectIn struct {
+	Project         string `json:"project" jsonschema:"project id, folder name or ticket prefix"`
+	Apply           bool   `json:"apply,omitempty" jsonschema:"false (default) = preview only; true = update the project and commit. Only apply after the user has seen the preview and agreed."`
+	BlocksFromPhase *bool  `json:"blocks_from_phase,omitempty" jsonschema:"override the default rule: true = old 'Block NN ...' phases become block numbers; false = every old phase becomes a lifecycle. Default: true when the project plans in blocks"`
+	Author          string `json:"author,omitempty" jsonschema:"who is applying it (default: the project's git identity)"`
+}
+
 type createTicketsIn struct {
 	Project string        `json:"project" jsonschema:"project id, folder name or ticket prefix"`
 	Tickets []newTicketIn `json:"tickets" jsonschema:"1 to 50 tickets, created in order"`
@@ -95,7 +103,8 @@ type updateFieldsIn struct {
 	Priority         *string  `json:"priority,omitempty"`
 	EstimateHours    *float64 `json:"estimate_hours,omitempty" jsonschema:"quarter-hour steps, >= 0.25 (wrap tickets); use clear_estimate_hours to remove it"`
 	Assignee         *string  `json:"assignee,omitempty" jsonschema:"email; empty string unassigns"`
-	Phase            *string  `json:"phase,omitempty" jsonschema:"empty string clears"`
+	Lifecycle        *string  `json:"lifecycle,omitempty" jsonschema:"kind of work; empty string clears"`
+	Block            *int     `json:"block,omitempty" jsonschema:"planning block number; 0 clears"`
 	PlannedStartDate *string  `json:"planned_start_date,omitempty" jsonschema:"YYYY-MM-DD; empty string clears"`
 	DueDate          *string  `json:"due_date,omitempty" jsonschema:"YYYY-MM-DD; empty string clears"`
 }
@@ -224,6 +233,26 @@ func (w writeTicketIn) ref() writeTicketIn { return w }
 
 func registerWriteTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "hate_migrate_project",
+		Description: "The one-time update of a project to this hate's format (hate 2.0: the old 'phase' becomes 'lifecycle' (kind of work) or 'block' (planning block number)). " +
+			"Writes to an unmigrated project fail with needs_migration. Call without apply for a preview (per-ticket changes, nothing written), show it to the user, " +
+			"and call again with apply: true only if they agree. Applying rewrites every ticket and commits once (git revert undoes it).",
+		Annotations: write("Update project format", false, true),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in migrateProjectIn) (*mcp.CallToolResult, *ticket.MigrationPlan, error) {
+		root, err := service.ResolveProject(in.Project)
+		if err != nil {
+			return nil, nil, mapError(err)
+		}
+		opts := ticket.MigrateOptions{BlocksFromPhase: in.BlocksFromPhase}
+		if !in.Apply {
+			p, err := service.PlanMigration(root, opts)
+			return nil, p, mapError(err)
+		}
+		p, err := service.ApplyMigration(root, opts, author(root, in.Author))
+		return nil, p, mapError(err)
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "hate_create_project",
 		Description: "Create a new, empty hate project in the projects folder: its config, a tickets folder and (when git is installed) a git repo with an initial commit. " +
 			"The project id and ticket prefix must be unused on this machine; an existing folder is never written into. Check hate_list_projects first so you don't make a duplicate. " +
@@ -256,7 +285,7 @@ func registerWriteTools(s *mcp.Server) {
 			}
 			batch[i] = service.BulkTicket{
 				Ref: t.Ref, Type: t.Type, Title: t.Title, Description: t.Description, Priority: t.Priority,
-				EstimateHours: t.EstimateHours, Assignee: t.Assignee, Tags: t.Tags, Phase: t.Phase,
+				EstimateHours: t.EstimateHours, Assignee: t.Assignee, Tags: t.Tags, Lifecycle: t.Lifecycle, Block: t.Block,
 				PlannedStartDate: t.PlannedStartDate, DueDate: t.DueDate, ParentRef: t.ParentRef, ParentID: t.ParentID,
 				PredecessorRefs: t.PredecessorRefs, Predecessors: t.Predecessors, TestCases: cases,
 			}
@@ -275,7 +304,7 @@ func registerWriteTools(s *mcp.Server) {
 
 	ticketTool(s, &mcp.Tool{
 		Name: "hate_update_ticket",
-		Description: "Change several fields and tags of one ticket at once (title, description, priority, estimate_hours, assignee, phase, dates; add_tags / remove_tags). " +
+		Description: "Change several fields and tags of one ticket at once (title, description, priority, estimate_hours, assignee, lifecycle, block, dates; add_tags / remove_tags). " +
 			"All-or-nothing: one bad value and nothing changes. One activity entry per field, one commit. Status changes use promote / demote / block.",
 		Annotations: write("Update ticket", false, true),
 	}, func(root string, in updateTicketIn) (TicketView, error) {
@@ -290,7 +319,10 @@ func registerWriteTools(s *mcp.Server) {
 			set("description", f.Description)
 			set("priority", f.Priority)
 			set("assignee", f.Assignee)
-			set("phase", f.Phase)
+			set("lifecycle", f.Lifecycle)
+			if f.Block != nil {
+				fields["block"] = float64(*f.Block)
+			}
 			set("planned_start_date", f.PlannedStartDate)
 			set("due_date", f.DueDate)
 			if f.EstimateHours != nil {

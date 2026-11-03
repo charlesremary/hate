@@ -11,20 +11,20 @@ import (
 )
 
 // exportFixture: a feature with two code children (one in QA), a closed
-// config ticket, a backlog ticket with an awkward title, and an unphased one.
+// config ticket, a backlog ticket with an awkward title, and one with no lifecycle.
 func exportFixture() []*ticket.Ticket {
 	f := func(v float64) *float64 { return &v }
 	return []*ticket.Ticket{
 		{ID: "T-0001", Type: "task", Status: "not_started", Title: "Feature", Priority: "high",
-			Phase: strptr("01 - Build"), Tags: []string{"cfp:6"}},
+			Lifecycle: strptr("01 - Build"), Tags: []string{"cfp:6"}},
 		{ID: "T-0003", Type: "dev_task", Status: "qa_testing", Title: "Second child", Priority: "medium",
-			Phase: strptr("01 - Build"), Assignee: strptr("ann@x.com"), Tags: []string{"parent:T-0001", "functional"},
+			Lifecycle: strptr("01 - Build"), Assignee: strptr("ann@x.com"), Tags: []string{"parent:T-0001", "functional"},
 			Predecessors: []string{"T-0002"}, PlannedStartDate: strptr("2026-11-02"), DueDate: strptr("2026-11-06"),
 			TimeEntries: []ticket.TimeEntry{{Hours: 1.5}, {Hours: 0.25}}},
 		{ID: "T-0002", Type: "dev_task", Status: "in_progress", Title: "First child", Priority: "medium",
-			Phase: strptr("01 - Build"), Tags: []string{"parent:T-0001", "functional"}},
+			Lifecycle: strptr("01 - Build"), Tags: []string{"parent:T-0001", "functional"}},
 		{ID: "T-0004", Type: "task", Status: "closed", Title: "Configure", Priority: "low",
-			Phase: strptr("00 - Setup"), Tags: []string{"config"}, EstimateHours: f(2)},
+			Lifecycle: strptr("00 - Setup"), Tags: []string{"config"}, EstimateHours: f(2)},
 		{ID: "T-0005", Type: "task", Status: "not_started", Title: `Fix <tag> & "quotes" 🚀`, Priority: "low",
 			Tags: []string{"backlog", "nonfunc"}, EstimateHours: f(0.5)},
 	}
@@ -55,11 +55,11 @@ func TestTicketsSheet(t *testing.T) {
 		t.Error("header row not styled (bold)")
 	}
 	ws := x.parts["xl/worksheets/sheet1.xml"]
-	if !strings.Contains(ws, `ySplit="1"`) || !strings.Contains(ws, `<autoFilter ref="A1:Q6"/>`) {
+	if !strings.Contains(ws, `ySplit="1"`) || !strings.Contains(ws, `<autoFilter ref="A1:R6"/>`) {
 		t.Error("header row not frozen / autofilter missing")
 	}
 
-	// Sorted by phase (unphased last), then id.
+	// Sorted by block, then lifecycle (none last), then id.
 	wantOrder := []string{"T-0004", "T-0001", "T-0002", "T-0003", "T-0005"}
 	for i, id := range wantOrder {
 		if got := c[xlsxRef(0, i+2)].value; got != id {
@@ -68,34 +68,34 @@ func TestTicketsSheet(t *testing.T) {
 	}
 	// T-0003 is row 5.
 	row := func(col string) xlsxReadCell { return c[col+"5"] }
-	checks := map[string]string{"C": "Dev Task", "D": "QA Testing", "F": "ann@x.com", "H": "T-0001", "I": "Code", "O": "T-0002", "P": "No"}
+	checks := map[string]string{"C": "Dev Task", "D": "QA Testing", "F": "ann@x.com", "I": "T-0001", "J": "Code", "P": "T-0002", "Q": "No"}
 	for col, want := range checks {
 		if got := row(col).value; got != want {
 			t.Errorf("T-0003 %s = %q, want %q", col, got, want)
 		}
 	}
 	// Estimate: cfp 6 x rate 1 / 2 code children = 3h; logged 1.75h.
-	if row("K").typ != "" || row("K").value != "3" {
-		t.Errorf("Estimate h = %+v, want number 3", row("K"))
+	if row("L").typ != "" || row("L").value != "3" {
+		t.Errorf("Estimate h = %+v, want number 3", row("L"))
 	}
-	if row("L").typ != "" || row("L").value != "1.75" {
-		t.Errorf("Logged h = %+v, want number 1.75", row("L"))
+	if row("M").typ != "" || row("M").value != "1.75" {
+		t.Errorf("Logged h = %+v, want number 1.75", row("M"))
 	}
-	if row("M").value != "46328" || row("M").style == 0 || row("N").value != "46332" {
-		t.Errorf("dates = %+v / %+v, want serials with a date style", row("M"), row("N"))
+	if row("N").value != "46328" || row("N").style == 0 || row("O").value != "46332" {
+		t.Errorf("dates = %+v / %+v, want serials with a date style", row("N"), row("O"))
 	}
 	// Parent row: CFP as a number, no class, no estimate.
-	if c["J3"].value != "6" || c["J3"].typ != "" || c["I3"].value != "" || c["K3"].value != "" {
-		t.Errorf("feature row: CFP %+v class %+v est %+v", c["J3"], c["I3"], c["K3"])
+	if c["K3"].value != "6" || c["K3"].typ != "" || c["J3"].value != "" || c["L3"].value != "" {
+		t.Errorf("feature row: CFP %+v class %+v est %+v", c["K3"], c["J3"], c["L3"])
 	}
 	// Closed config ticket and backlog ticket.
-	if c["D2"].value != "Closed" || c["I2"].value != "Config" || c["K2"].value != "2" {
-		t.Errorf("config row: %+v %+v %+v", c["D2"], c["I2"], c["K2"])
+	if c["D2"].value != "Closed" || c["J2"].value != "Config" || c["L2"].value != "2" {
+		t.Errorf("config row: %+v %+v %+v", c["D2"], c["J2"], c["L2"])
 	}
-	if c["B6"].value != `Fix <tag> & "quotes" 🚀` || c["P6"].value != "Yes" || c["I6"].value != "Non-functional" {
-		t.Errorf("backlog row: %+v %+v %+v", c["B6"], c["P6"], c["I6"])
+	if c["B6"].value != `Fix <tag> & "quotes" 🚀` || c["Q6"].value != "Yes" || c["J6"].value != "Non-functional" {
+		t.Errorf("backlog row: %+v %+v %+v", c["B6"], c["Q6"], c["J6"])
 	}
-	if c["Q6"].value != "backlog, nonfunc" {
-		t.Errorf("tags = %q", c["Q6"].value)
+	if c["R6"].value != "backlog, nonfunc" {
+		t.Errorf("tags = %q", c["R6"].value)
 	}
 }

@@ -47,7 +47,8 @@ type listTicketsIn struct {
 	Type           string `json:"type,omitempty" jsonschema:"only this ticket type, e.g. dev_task"`
 	Assignee       string `json:"assignee,omitempty" jsonschema:"only tickets assigned to this email"`
 	Tag            string `json:"tag,omitempty" jsonschema:"only tickets with this exact tag"`
-	Phase          string `json:"phase,omitempty" jsonschema:"only this phase"`
+	Lifecycle      string `json:"lifecycle,omitempty" jsonschema:"only this lifecycle (kind of work), e.g. Build"`
+	Block          int    `json:"block,omitempty" jsonschema:"only tickets planned into this block number"`
 	Parent         string `json:"parent,omitempty" jsonschema:"only the children of this feature (tickets tagged parent:<id>)"`
 	IncludeBacklog *bool  `json:"include_backlog,omitempty" jsonschema:"include tickets tagged backlog (default true)"`
 	Limit          int    `json:"limit,omitempty" jsonschema:"max tickets returned (default 200); total counts all matches"`
@@ -82,7 +83,7 @@ func registerReadTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "hate_get_project",
-		Description: "Project details an agent needs before working it: prefix, closed flag, block_weeks (0 = no planning blocks; 2/3 decide the phase convention), " +
+		Description: "Project details an agent needs before working it: prefix, closed flag, block_weeks (0 = no planning blocks; 2 or 3 = plan tickets into numbered blocks), " +
 			"strict_time_enforcement (time logs past a wrap ticket's estimate need authorization), enforce_qa, ticket count, and the team (assignable emails).",
 		Annotations: readOnly("Get project"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in projectIn) (*mcp.CallToolResult, *service.ProjectDetail, error) {
@@ -111,7 +112,7 @@ func registerReadTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "hate_list_tickets",
-		Description: "List a project's tickets with optional filters (status, type, assignee, tag, phase, parent). Each row has the class tag, estimate_hours, " +
+		Description: "List a project's tickets with optional filters (status, type, assignee, tag, lifecycle, block, parent). Each row has the class tag, estimate_hours, " +
 			"the computed estimated_hours and at_risk. Use parent=<feature id> to review a feature's children.",
 		Annotations: readOnly("List tickets"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in listTicketsIn) (*mcp.CallToolResult, listTicketsOut, error) {
@@ -120,7 +121,7 @@ func registerReadTools(s *mcp.Server) {
 			return nil, listTicketsOut{}, mapError(err)
 		}
 		items, err := service.ListTickets(root, service.ListFilter{
-			Status: in.Status, Type: in.Type, Assignee: in.Assignee, Tag: in.Tag, Phase: in.Phase, Parent: in.Parent,
+			Status: in.Status, Type: in.Type, Assignee: in.Assignee, Tag: in.Tag, Lifecycle: in.Lifecycle, Block: in.Block, Parent: in.Parent,
 		})
 		if err != nil {
 			return nil, listTicketsOut{}, mapError(err)
@@ -164,7 +165,7 @@ func registerReadTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "hate_get_ready",
 		Description: "The project's work order from predecessor links: ready (open, unblocked, all predecessors done; work these), next (unlocked once ready finishes) " +
-			"and every open work ticket by dependency stage with hours. Feature parents and backlog are left out.",
+			"and every open work ticket by dependency wave (wave 1 = nothing open in front of it) with hours. Feature parents and backlog are left out.",
 		Annotations: readOnly("Get ready work"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in projectIn) (*mcp.CallToolResult, pm.ReadyReport, error) {
 		root, err := service.ResolveProject(in.Project)

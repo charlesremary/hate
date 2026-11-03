@@ -51,6 +51,10 @@
         <div id="project-closed-banner" class="hidden" style="background:#fff3e0;border-left:4px solid #e65100;padding:8px 14px;margin:0;font-size:13px">
           🔒 <strong>This project is closed</strong> <span id="project-closed-date" style="color:#999"></span>. Ticket changes are blocked — reopen the project under <em>Project List</em> to make changes.
         </div>
+        <div id="project-update-banner" class="project-update-banner hidden">
+          <span><strong>This project needs a one-time update</strong> to the hate 2.0 format ("phase" becomes <em>lifecycle</em> and <em>block</em>). You can look around; changes wait until it's updated.</span>
+          <button type="button" class="btn-primary btn-xs" id="btn-project-update">Review the update…</button>
+        </div>
         <div id="project-newer-banner" class="hidden" style="background:#fdecea;border-left:4px solid #c62828;padding:8px 14px;margin:0;font-size:13px">
           <strong>This project was updated by a newer version of hate.</strong> You can view it, but changes are blocked so nothing gets lost.
           Update hate with <code>brew upgrade --cask hate</code> (or download the latest), then restart it.
@@ -68,7 +72,7 @@
             <span id="sync-status" class="sync-status"></span>
             <button class="btn-secondary" id="btn-sync" title="Pull & push changes">⇅ Sync</button>
             <button class="btn-secondary" id="btn-team" title="Manage team">👤 Team</button>
-            <button class="btn-secondary" id="btn-phase-rollup" title="Roll tickets up by phase — hours-weighted % complete, with CSV export">Σ Phases</button>
+            <button class="btn-secondary" id="btn-phase-rollup" title="Roll tickets up by lifecycle or block: hours-weighted % complete, with CSV export">Σ Rollup</button>
           </div>
         </header>
 
@@ -90,7 +94,8 @@
             <button class="btn-secondary" id="btn-export-xlsx" title="Download every ticket and a Gantt as an Excel workbook">Export to Excel</button>
             <select id="filter-status"><option value="">All statuses</option></select>
             <select id="filter-type"><option value="">All types</option></select>
-            <select id="filter-phase"><option value="">All phases</option></select>
+            <select id="filter-lifecycle" title="Filter by lifecycle (kind of work)"><option value="">All lifecycles</option></select>
+            <select id="filter-block" title="Filter by planning block" class="hidden"><option value="">All blocks</option></select>
             <select id="filter-tag" title="Filter by tag"><option value="">All tags</option></select>
             <select id="filter-assignee" title="Filter by assignee"><option value="">All assignees</option></select>
             <select id="filter-sort" title="Sort tickets by">
@@ -110,7 +115,7 @@
             <table id="ticket-table">
               <thead>
                 <tr>
-                  <th style="width:36px;padding:0" title="Red ✕ = blocked · Blue ! = hours at risk (≥90% of a wrap estimate)"></th><th>ID</th><th>Title</th><th>Phase</th><th>Status</th>
+                  <th style="width:36px;padding:0" title="Red ✕ = blocked · Blue ! = hours at risk (≥90% of a wrap estimate)"></th><th>ID</th><th>Title</th><th>Lifecycle / block</th><th>Status</th>
                   <th>Assignee</th><th title="Hour estimate (wrap tickets). Code is sized from the parent feature's CFP.">Est h</th><th>Planned start</th><th>Due</th>
                 </tr>
               </thead>
@@ -461,8 +466,11 @@
                 wrap ticket: 0.25 or more, in quarter hours. Code tickets have none; they are sized
                 from the parent feature's CFP. (T-shirt <code>effort</code> sizing is retired; an old
                 value shows read-only as <em>legacy</em>.)</li>
-              <li><strong>Phase</strong> — a free-text grouping (e.g. "Discovery", "Sprint 1"). Used
-                to filter the ticket list.</li>
+              <li><strong>Lifecycle</strong> — the kind of work (e.g. Discovery, Design, Build, Test,
+                Deploy, or the project's own names). Optional; the Σ Rollup and filters group by it.</li>
+              <li><strong>Block</strong> — the planning block the ticket is planned into (projects
+                planned in blocks, §9). A number; the label and dates come from the project's
+                block settings, so they never go stale.</li>
               <li><strong>Assignee / Creator</strong> — people from the project's Team list.</li>
               <li><strong>Planned start &amp; Due date</strong> — feed the schedule.</li>
               <li><strong>Predecessors</strong> — dependency links (see §5).</li>
@@ -594,7 +602,7 @@
               promotion once you've saved it. Starting work and the final close don't require it, and
               <strong>Force close</strong> bypasses it entirely. This is <strong>always on</strong>:
               it's what keeps the COSMIC calibration (§7) honest — the hours behind every rate are
-              guaranteed to be there, and every phase transition records what was actually done.</p>
+              guaranteed to be there, and every status change records what was actually done.</p>
           </section>
 
           <!-- 4 -->
@@ -636,8 +644,8 @@
               (see §6).</p>
             <p>The Tickets tab's <strong>Work order</strong> view (beside List) shows them as a to-do
               order: <em>Ready now</em> first (every predecessor done, so they can be worked in
-              parallel), then the rest in dependency order, each with a small <em>stage</em> label
-              (how many open predecessors deep it is).</p>
+              parallel), then the rest in dependency order, each with a small <em>wave</em> label
+              (wave 1 has nothing open in front of it, wave 2 waits on wave 1, and so on).</p>
           </section>
 
           <!-- 6 -->
@@ -895,7 +903,7 @@
               change every day, so they stay out of git: <code>.tkt/pm/.gitignore</code> ignores
               <code>snapshots/</code>.</p>
             <p><strong>Re-baseline.</strong> When the plan genuinely changes (the client moved scope, a
-              new phase was added), click <strong>Re-baseline…</strong> and give a reason of at least 5
+              new work was added), click <strong>Re-baseline…</strong> and give a reason of at least 5
               characters. The current baseline is archived to
               <code>.tkt/pm/baselines/&lt;date&gt;-&lt;n&gt;.json</code> with the reason, who did it and
               when; any unresolved slip events against it are closed as <code>rebaseline</code> with the
@@ -1170,6 +1178,13 @@
               are blocked so nothing gets lost. Sync still brings in their changes, but won't
               combine your unsynced changes with theirs; they stay on this computer until you
               update.</p>
+            <p>When a new major version changes the project format (hate 2.0 replaced
+              <em>phase</em> with <em>lifecycle</em> and <em>block</em>), projects made by the older
+              version show a blue <strong>one-time update</strong> banner. Click <em>Review the
+              update…</em> to see exactly what will change for each ticket; nothing changes until you
+              click <em>Update project</em>, which rewrites the ticket files once and commits that as
+              one change (undo it with git if you need to). Until then the project is read-only. Ask
+              teammates to update hate first, so everyone's on the same version when you do it.</p>
             <h3>Git account and automatic sync</h3>
             <p>Under ⚙ Settings &rarr; <strong>Git account</strong>, paste a GitHub token and click
               <em>Test connection and save</em>. It's kept in this computer's password store
@@ -1205,22 +1220,23 @@
             <p><strong>Claude does the planning.</strong> When it builds (or re-plans) the tickets it
               fills each block up to the team's capacity &mdash; each person's daily hours &times; the
               working days in the block &times; 70% focus &mdash; in dependency order, keeping a
-              feature's tickets together where it can. Each planned ticket gets the block as its
-              <code>phase</code> (<code>Block 01 (Nov 2-13)</code>) and the block's start and end as its
-              planned start and due date. Work that doesn't fit before the requested end stays in the
+              feature's tickets together where it can. Each planned ticket gets its
+              <code>block</code> number and the block's start and end as its planned start and due
+              date. Work that doesn't fit before the requested end stays in the
               backlog. Then the plan is baselined.</p>
             <ul>
               <li><strong>Gantt:</strong> the PM Dashboard shades each block and groups the rows by the
                 block they start in (without blocks, rows are grouped by person).</li>
-              <li><strong>Σ Phases:</strong> the phase rollup lists the blocks in order with their
-                dates, so "Block 03 is 60% done" is one glance.</li>
+              <li><strong>Σ Rollup:</strong> by block (the default for these projects) it lists the
+                blocks in order with their dates, so "Block 03 is 60% done" is one glance; switch to
+                <em>by lifecycle</em> for the kind of work.</li>
               <li><strong>Slips:</strong> at each block boundary Claude re-plans; anything unfinished
                 moves to the next block, which shows up as a slip with a reason.</li>
               <li><strong>Schedule vs request</strong> shows whether the blocks land by the requested
                 end.</li>
             </ul>
-            <p>In a project, <code>phase</code> means <em>either</em> lifecycle stage (Discovery,
-              Build, QA...) <em>or</em> block, never a mix. The rules Claude follows are in
+            <p>A ticket can have both: <em>lifecycle</em> says what kind of work it is,
+              <em>block</em> says when it's planned. The rules Claude follows are in
               <code>docs/ticketing-and-cfp-guide.md</code>, &sect;14 "Planning in blocks".</p>
           </section>
 
@@ -1242,13 +1258,32 @@
       </div>
     </div>
 
-    <!-- Phase rollup modal -->
+    <!-- Project update (migration) modal -->
+    <div id="project-update-modal-overlay" class="modal-overlay-generic hidden">
+      <div style="background:#fff;padding:20px;border-radius:8px;width:820px;max-width:94vw;max-height:85vh;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3 style="margin:0">Update project to the hate 2.0 format</h3>
+          <button class="icon-btn" id="btn-close-project-update">✕</button>
+        </div>
+        <p style="font-size:13px;margin:0 0 8px">Nothing changes until you click <strong>Update project</strong>. It rewrites every ticket file once and commits that as one change, so it can be undone with git.</p>
+        <label style="font-size:13px"><input type="checkbox" id="pu-blocks"> Old phases like "Block 03 (…)" become block numbers (otherwise every old phase becomes a lifecycle)</label>
+        <div id="pu-summary" style="font-size:13px;margin:10px 0"></div>
+        <div id="pu-changes" style="font-size:12px;max-height:45vh;overflow:auto"></div>
+        <div class="form-actions" style="margin-top:12px">
+          <button type="button" class="btn-primary" id="btn-apply-project-update">Update project</button>
+          <button type="button" class="btn-secondary" id="btn-cancel-project-update">Not now</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rollup modal -->
     <div id="phase-rollup-modal-overlay" class="hidden">
       <div id="phase-rollup-modal" style="background:#fff;padding:20px;border-radius:8px;max-width:900px;max-height:85vh;overflow:auto;margin:4% auto">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px">
-          <h3 style="margin:0">Phase rollup — hours-weighted</h3>
+          <h3 style="margin:0">Rollup — hours-weighted
+            <select id="rollup-by" style="margin-left:10px;font-size:13px"><option value="lifecycle">by lifecycle</option><option value="block">by block</option></select></h3>
           <span style="display:flex;gap:8px;align-items:center">
-            <button class="btn-secondary" id="btn-phase-rollup-csv" title="Download one row per phase as CSV">⤓ Download CSV</button>
+            <button class="btn-secondary" id="btn-phase-rollup-csv" title="Download one row per group as CSV">⤓ Download CSV</button>
             <button class="icon-btn" id="btn-close-phase-rollup">✕</button>
           </span>
         </div>
@@ -1384,8 +1419,9 @@
           <div id="nt-fields-time" class="hidden">
             <label>Hours <input type="number" id="nt-hours" step="0.25" min="0.25" placeholder="1.5"></label>
           </div>
-          <label>Phase <input type="text" id="nt-phase" list="nt-phase-list" placeholder="Pick an existing phase or type a new one"></label>
-          <datalist id="nt-phase-list"></datalist>
+          <label>Lifecycle <input type="text" id="nt-lifecycle" list="nt-lifecycle-list" placeholder="Kind of work: pick one used here or type a new one"></label>
+          <datalist id="nt-lifecycle-list"></datalist>
+          <label id="nt-block-label" class="hidden">Block <select id="nt-block"><option value="">No block</option></select></label>
           <div class="form-actions">
             <button type="submit" class="btn-primary">Create</button>
             <button type="button" class="btn-secondary" id="btn-cancel-ticket">Cancel</button>

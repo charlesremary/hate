@@ -35,7 +35,7 @@ func TestHelpPlanningInBlocks(t *testing.T) {
 
 // HATE-evqw tc1 (UI) and HATE-43sr tc4 (UI): Settings has the Planning blocks
 // select; the Tickets tab's second view is "Work order", fed by GET /ready
-// (no client-side stage computation left).
+// (no client-side wave computation left).
 func TestUIBlocksAndWorkOrder(t *testing.T) {
 	html, js := staticFile(t, "index.html"), staticFile(t, "app.js")
 	for _, want := range []string{`id="block-weeks"`, `<option value="2">2 weeks</option>`, `<option value="3">3 weeks</option>`, `>Work order</button>`} {
@@ -46,18 +46,44 @@ func TestUIBlocksAndWorkOrder(t *testing.T) {
 	if strings.Contains(html, `>Plan</button>`) {
 		t.Error("the Plan view button wasn't renamed")
 	}
-	for _, want := range []string{"/block-weeks", "/ready`", "Ready now", "stage ${"} {
+	for _, want := range []string{"/block-weeks", "/ready`", "Ready now", "wave ${"} {
 		if !strings.Contains(js, want) {
 			t.Errorf("app.js missing %q", want)
 		}
 	}
 	for _, bad := range []string{"computeExecPlan", "computeWorkOrder", "waveOf"} {
 		if strings.Contains(js, bad) {
-			t.Errorf("app.js still has client-side stage logic %q", bad)
+			t.Errorf("app.js still has client-side wave logic %q", bad)
 		}
 	}
 	// The view's markup puts the Ready now group first, then the rest.
 	if r, d := strings.Index(js, "${readyHtml}"), strings.Index(js, "${restHtml}"); r < 0 || d < 0 || r > d {
 		t.Error("Ready now should come before the dependency order")
+	}
+}
+
+// HATE-a7i1 / HATE-ui7x (UI): lifecycle and block replace phase; the
+// one-time update banner opens a preview and only its button applies it.
+func TestUILifecycleBlockAndUpdate(t *testing.T) {
+	html, js := staticFile(t, "index.html"), staticFile(t, "app.js")
+	for _, want := range []string{`id="filter-lifecycle"`, `id="filter-block"`, `id="nt-lifecycle"`, `id="nt-block"`, `id="project-update-banner"`, `id="btn-apply-project-update"`, `id="rollup-by"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("index.html missing %q", want)
+		}
+	}
+	for _, bad := range []string{`id="filter-phase"`, `id="nt-phase"`, "Σ Phases"} {
+		if strings.Contains(html, bad) {
+			t.Errorf("index.html still has %q", bad)
+		}
+	}
+	for _, want := range []string{"/migration`", "/rollup?by=", "'lifecycle'", "'block'"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("app.js missing %q", want)
+		}
+	}
+	for _, bad := range []string{"t.phase", "/phase-rollup", "body.phase", "workOrder.stages"} {
+		if strings.Contains(js, bad) {
+			t.Errorf("app.js still uses %q", bad)
+		}
 	}
 }

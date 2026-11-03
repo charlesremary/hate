@@ -9,48 +9,48 @@ import (
 	"hate/internal/ticket"
 )
 
-// TestPhaseRollup exercises the hours-weighted percentage, cancelled-ticket
-// exclusion, the unsized count fallback, date rollup, and the "(no phase)"
+// TestRollupLifecycle exercises the hours-weighted percentage, cancelled-ticket
+// exclusion, the unsized count fallback, date rollup, and the "(no lifecycle)"
 // bucket — the decisions a stakeholder-facing number depends on.
-func TestPhaseRollup(t *testing.T) {
+func TestRollupLifecycle(t *testing.T) {
 	m := "m" // legacy: 3 days = 24h
 	cancel := "duplicate of AMPL-0001"
 	wrap := []string{ticket.ClassConfig}
 
 	tickets := []*ticket.Ticket{
 		// Phase "01 - Build": hours-weighted. 64 of 104 in-scope hours done.
-		{ID: "B1", Phase: strp("01 - Build"), Tags: wrap, EstimateHours: f64(64), Status: "complete",
+		{ID: "B1", Lifecycle: strp("01 - Build"), Tags: wrap, EstimateHours: f64(64), Status: "complete",
 			PlannedStartDate: strp("2026-01-05"), DueDate: strp("2026-01-20")},
-		{ID: "B2", Phase: strp("01 - Build"), Effort: &m, Status: "in_progress", // legacy unclassed → 24h
+		{ID: "B2", Lifecycle: strp("01 - Build"), Effort: &m, Status: "in_progress", // legacy unclassed → 24h
 			PlannedStartDate: strp("2026-01-10"), DueDate: strp("2026-02-01")},
-		{ID: "B3", Phase: strp("01 - Build"), Tags: wrap, EstimateHours: f64(16), Status: "not_started"},
+		{ID: "B3", Lifecycle: strp("01 - Build"), Tags: wrap, EstimateHours: f64(16), Status: "not_started"},
 		// Force-closed → descoped: excluded from scope and percentage.
-		{ID: "B4", Phase: strp("01 - Build"), Tags: wrap, EstimateHours: f64(40), Status: "closed",
+		{ID: "B4", Lifecycle: strp("01 - Build"), Tags: wrap, EstimateHours: f64(40), Status: "closed",
 			CancellationReason: &cancel},
 
 		// Phase "02 - QA": no estimates anywhere → count-based fallback.
-		{ID: "Q1", Phase: strp("02 - QA"), Status: "complete"},
-		{ID: "Q2", Phase: strp("02 - QA"), Status: "not_started"},
+		{ID: "Q1", Lifecycle: strp("02 - QA"), Status: "complete"},
+		{ID: "Q2", Lifecycle: strp("02 - QA"), Status: "not_started"},
 		// A meeting is never sized, so it doesn't count as unsized.
-		{ID: "Q3", Phase: strp("02 - QA"), Type: "meeting", Status: "complete"},
+		{ID: "Q3", Lifecycle: strp("02 - QA"), Type: "meeting", Status: "complete"},
 
-		// No phase: a blocked, sized ticket → "(no phase)" bucket, sorts last.
+		// No phase: a blocked, sized ticket → "(no lifecycle)" bucket, sorts last.
 		{ID: "X1", Tags: wrap, EstimateHours: f64(16), Status: "blocked"},
 	}
 
-	rep := PhaseRollup(tickets, NewEstimateContext(tickets, 0, nil))
+	rep := Rollup(tickets, NewEstimateContext(tickets, 0, nil), RollupByLifecycle)
 
 	if rep.Basis != "hours-weighted" {
 		t.Errorf("basis = %q, want hours-weighted", rep.Basis)
 	}
-	if len(rep.Phases) != 3 {
-		t.Fatalf("got %d phases, want 3: %+v", len(rep.Phases), rep.Phases)
+	if len(rep.Groups) != 3 {
+		t.Fatalf("got %d phases, want 3: %+v", len(rep.Groups), rep.Groups)
 	}
 
 	// Phase 1 — hours-weighted, cancelled excluded.
-	p := rep.Phases[0]
-	if p.Phase != "01 - Build" {
-		t.Fatalf("phases[0] = %q, want '01 - Build' (sort order wrong)", p.Phase)
+	p := rep.Groups[0]
+	if p.Key != "01 - Build" {
+		t.Fatalf("phases[0] = %q, want '01 - Build' (sort order wrong)", p.Key)
 	}
 	if !p.HoursBased || p.PercentComplete != 61.5 {
 		t.Errorf("phase 1: hoursBased=%v pct=%v, want true / 61.5 (64 of 104 hours)",
@@ -69,9 +69,9 @@ func TestPhaseRollup(t *testing.T) {
 	}
 
 	// Phase 2 — no estimates → count-based fallback.
-	q := rep.Phases[1]
-	if q.Phase != "02 - QA" {
-		t.Fatalf("phases[1] = %q, want '02 - QA'", q.Phase)
+	q := rep.Groups[1]
+	if q.Key != "02 - QA" {
+		t.Fatalf("phases[1] = %q, want '02 - QA'", q.Key)
 	}
 	if q.HoursBased {
 		t.Errorf("phase 2 should be count-based (no estimates)")
@@ -82,9 +82,9 @@ func TestPhaseRollup(t *testing.T) {
 	}
 
 	// No-phase bucket — labeled and last.
-	x := rep.Phases[2]
-	if x.Phase != "" || x.Label != "(no phase)" {
-		t.Errorf("phases[2]: phase=%q label=%q, want '' / '(no phase)'", x.Phase, x.Label)
+	x := rep.Groups[2]
+	if x.Key != "" || x.Label != "(no lifecycle)" {
+		t.Errorf("phases[2]: phase=%q label=%q, want '' / '(no lifecycle)'", x.Key, x.Label)
 	}
 	if x.BlockedCount != 1 || x.PercentComplete != 0 {
 		t.Errorf("no-phase: blocked=%d pct=%v, want 1 / 0", x.BlockedCount, x.PercentComplete)
@@ -99,19 +99,19 @@ func TestPhaseRollup(t *testing.T) {
 	}
 }
 
-// TestPhaseRollupFunctionalWeighting: functional children are weighted by their
+// TestRollupLifecycleFunctionalWeighting: functional children are weighted by their
 // share of the parent's CFP x rate; the parent itself carries no hours and isn't
 // counted as unsized.
-func TestPhaseRollupFunctionalWeighting(t *testing.T) {
+func TestRollupLifecycleFunctionalWeighting(t *testing.T) {
 	ph := strp("01")
 	tickets := []*ticket.Ticket{
-		{ID: "F", Phase: ph, Status: "in_progress", Tags: []string{"cfp:40"}},
-		{ID: "a", Phase: ph, Status: "complete", Tags: []string{"parent:F", ticket.ClassFunctional}},
-		{ID: "b", Phase: ph, Status: "not_started", Tags: []string{"parent:F", ticket.ClassFunctional}},
-		{ID: "w", Phase: ph, Status: "not_started", Tags: []string{"parent:F", ticket.ClassConfig}, EstimateHours: f64(10)},
+		{ID: "F", Lifecycle: ph, Status: "in_progress", Tags: []string{"cfp:40"}},
+		{ID: "a", Lifecycle: ph, Status: "complete", Tags: []string{"parent:F", ticket.ClassFunctional}},
+		{ID: "b", Lifecycle: ph, Status: "not_started", Tags: []string{"parent:F", ticket.ClassFunctional}},
+		{ID: "w", Lifecycle: ph, Status: "not_started", Tags: []string{"parent:F", ticket.ClassConfig}, EstimateHours: f64(10)},
 	}
-	rep := PhaseRollup(tickets, NewEstimateContext(tickets, 0.25, nil))
-	p := rep.Phases[0]
+	rep := Rollup(tickets, NewEstimateContext(tickets, 0.25, nil), RollupByLifecycle)
+	p := rep.Groups[0]
 	// 40 CFP x 0.25 = 10h over 2 functional children → 5h each; wrap 10h.
 	if p.EstHoursTotal != 20 || p.EstHoursDone != 5 || p.PercentComplete != 25 || p.UnsizedCount != 0 {
 		t.Errorf("got total=%g done=%g pct=%v unsized=%d, want 20/5/25/0",
@@ -119,39 +119,40 @@ func TestPhaseRollupFunctionalWeighting(t *testing.T) {
 	}
 }
 
-// HATE-evqw: "Block NN" phases sort by block number (Block 10 after Block 9),
-// ahead of other phases, and carry their block's dates.
-func TestPhaseRollupBlocks(t *testing.T) {
+// HATE-wgxl: by block, groups sort by block number (Block 10 after Block 9),
+// "no block" last, and carry their block's dates and dated label.
+func TestRollupByBlock(t *testing.T) {
 	wrap := []string{ticket.ClassConfig}
 	tickets := []*ticket.Ticket{
-		{ID: "a", Phase: strp("Block 10 (Mar 8-19)"), Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
-		{ID: "b", Phase: strp("Block 09 (Feb 22-Mar 5)"), Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
-		{ID: "c", Phase: strp("Block 2"), Tags: wrap, EstimateHours: f64(1), Status: "complete"},
-		{ID: "d", Phase: strp("Admin"), Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
-		{ID: "e", Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
+		{ID: "a", Block: 10, Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
+		{ID: "b", Block: 9, Lifecycle: strp("Build"), Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
+		{ID: "c", Block: 2, Tags: wrap, EstimateHours: f64(1), Status: "complete"},
+		{ID: "d", Lifecycle: strp("Admin"), Tags: wrap, EstimateHours: f64(1), Status: "not_started"},
 	}
-	rep := PhaseRollup(tickets, NewEstimateContext(tickets, 0, nil))
-	var got []string
-	for _, p := range rep.Phases {
-		got = append(got, p.Phase)
+	rep := Rollup(tickets, NewEstimateContext(tickets, 0, nil), RollupByBlock)
+	if rep.By != RollupByBlock {
+		t.Errorf("by = %q", rep.By)
 	}
-	want := []string{"Block 2", "Block 09 (Feb 22-Mar 5)", "Block 10 (Mar 8-19)", "Admin", ""}
-	if len(got) != len(want) {
-		t.Fatalf("phases = %q", got)
+	var got []int
+	for _, g := range rep.Groups {
+		got = append(got, g.Block)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("phases = %q, want %q", got, want)
-		}
+	if len(got) != 4 || got[0] != 2 || got[1] != 9 || got[2] != 10 || got[3] != 0 {
+		t.Fatalf("blocks = %v, want [2 9 10 0]", got)
 	}
-	if rep.Phases[0].Block != 2 || rep.Phases[3].Block != 0 {
-		t.Errorf("block numbers: %d %d", rep.Phases[0].Block, rep.Phases[3].Block)
+	if rep.Groups[3].Label != "(no block)" || rep.Groups[0].Label != "Block 02" {
+		t.Errorf("labels %q %q", rep.Groups[0].Label, rep.Groups[3].Label)
 	}
 	ApplyBlockDates(&rep, BuildBlocks(2, day("2026-11-02"), day("2026-11-20")))
-	if p := rep.Phases[0]; p.BlockStart != "2026-11-16" || p.BlockEnd != "2026-11-27" {
-		t.Errorf("Block 2 dates = %s..%s, want 2026-11-16..2026-11-27", p.BlockStart, p.BlockEnd)
+	if g := rep.Groups[0]; g.BlockStart != "2026-11-16" || g.BlockEnd != "2026-11-27" || g.Label != "Block 02 (Nov 16-27)" {
+		t.Errorf("Block 2 = %s..%s %q", g.BlockStart, g.BlockEnd, g.Label)
 	}
-	if p := rep.Phases[2]; p.BlockStart != "" {
-		t.Errorf("Block 10 is past the block list, got dates %s", p.BlockStart)
+	if g := rep.Groups[2]; g.BlockStart != "" {
+		t.Errorf("Block 10 is past the block list, got dates %s", g.BlockStart)
+	}
+	// By lifecycle, the same tickets group by kind of work.
+	lc := Rollup(tickets, NewEstimateContext(tickets, 0, nil), RollupByLifecycle)
+	if len(lc.Groups) != 3 || lc.Groups[0].Key != "Admin" || lc.Groups[1].Key != "Build" || lc.Groups[2].Key != "" {
+		t.Errorf("lifecycle groups = %+v", lc.Groups)
 	}
 }

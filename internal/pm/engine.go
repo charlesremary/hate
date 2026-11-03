@@ -100,7 +100,7 @@ type SnapshotTask struct {
 	Title          string       `json:"title"`
 	Owner          string       `json:"owner"`
 	Status         string       `json:"status"`
-	Phase          string       `json:"phase,omitempty"` // project phase, for within-group ordering
+	Lifecycle      string       `json:"lifecycle,omitempty"` // for within-group ordering (snapshots before hate 2.0 had "phase")
 	Dependencies   []string     `json:"dependencies"`
 	IsMilestone    bool         `json:"is_milestone"`
 	Baseline       BaselineInfo `json:"baseline"`

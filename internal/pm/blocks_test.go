@@ -68,12 +68,15 @@ func TestBuildBlocks(t *testing.T) {
 	}
 }
 
-func TestParseBlockPhase(t *testing.T) {
+func TestPhaseToFormat2(t *testing.T) {
 	for in, want := range map[string]int{"Block 01 (Nov 2-13)": 1, "block 10": 10, "Block 7": 7, "01 - Build": 0, "Blocks": 0, "Block 0": 0} {
-		n, ok := ParseBlockPhase(in)
-		if (want > 0) != ok || n != want {
-			t.Errorf("ParseBlockPhase(%q) = %d %v, want %d", in, n, ok, want)
+		lc, n := ticket.PhaseToFormat2(in, true)
+		if n != want || (want == 0) != (lc != "") {
+			t.Errorf("PhaseToFormat2(%q, true) = %q %d, want block %d", in, lc, n, want)
 		}
+	}
+	if lc, n := ticket.PhaseToFormat2("Block 03", false); lc != "Block 03" || n != 0 {
+		t.Errorf("without blocks: %q %d", lc, n)
 	}
 }
 

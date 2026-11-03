@@ -132,8 +132,8 @@ func TestToolsList(t *testing.T) {
 		return res.Tools
 	}
 	a, b := list(), list()
-	if len(a) != 19 {
-		t.Errorf("%d tools, want 19", len(a))
+	if len(a) != 20 {
+		t.Errorf("%d tools, want 20", len(a))
 	}
 	ro := map[string]bool{}
 	for _, n := range readTools {
@@ -339,9 +339,9 @@ func TestOtherWriteTools(t *testing.T) {
 	cs := connect(t)
 
 	up := mustOK(t, cs, "hate_update_ticket", map[string]any{"ticket_id": a,
-		"fields": map[string]any{"phase": "02 - Build", "estimate_hours": 1.5}, "add_tags": []string{"config"}})
-	if up["phase"] != "02 - Build" || up["estimate_hours"].(float64) != 1.5 {
-		t.Errorf("update = phase %v estimate %v", up["phase"], up["estimate_hours"])
+		"fields": map[string]any{"lifecycle": "Build", "block": 2, "estimate_hours": 1.5}, "add_tags": []string{"config"}})
+	if up["lifecycle"] != "Build" || up["block"] != float64(2) || up["estimate_hours"].(float64) != 1.5 {
+		t.Errorf("update = lifecycle %v block %v estimate %v", up["lifecycle"], up["block"], up["estimate_hours"])
 	}
 	if up := mustOK(t, cs, "hate_update_ticket", map[string]any{"ticket_id": a, "clear_estimate_hours": true}); up["estimate_hours"] != nil {
 		t.Errorf("clear estimate: %v", up["estimate_hours"])

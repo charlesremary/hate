@@ -27,7 +27,9 @@ type BulkTicket struct {
 	EstimateHours    *float64          `json:"estimate_hours,omitempty"`
 	Assignee         string            `json:"assignee,omitempty"`
 	Tags             []string          `json:"tags,omitempty"`
-	Phase            string            `json:"phase,omitempty"`
+	Lifecycle        string            `json:"lifecycle,omitempty"`
+	Block            int               `json:"block,omitempty"`
+	Phase            string            `json:"phase,omitempty"` // retired in 2.0: non-empty is refused
 	PlannedStartDate string            `json:"planned_start_date,omitempty"`
 	DueDate          string            `json:"due_date,omitempty"`
 	Severity         string            `json:"severity,omitempty"`
@@ -90,7 +92,7 @@ func CreateTickets(root string, batch []BulkTicket, author string) (*BulkResult,
 		}
 		tk, err := ticket.CreateTicket(root, ticket.CreateTicketParams{
 			Type: b.Type, Title: b.Title, Creator: author, Priority: b.Priority,
-			EstimateHours: b.EstimateHours, Assignee: b.Assignee, Tags: tags, Phase: b.Phase,
+			EstimateHours: b.EstimateHours, Assignee: b.Assignee, Tags: tags, Lifecycle: b.Lifecycle, Block: b.Block,
 			Predecessors: preds, PlannedStartDate: b.PlannedStartDate, DueDate: b.DueDate,
 			Severity: b.Severity, Description: b.Description, Hours: b.Hours, Attendees: b.Attendees,
 		})
@@ -147,6 +149,12 @@ func validateBatch(root string, batch []BulkTicket) error {
 		}
 		if strings.TrimSpace(b.Effort) != "" {
 			return wrap(ErrInvalidInput, ticket.ErrEffortRetired)
+		}
+		if strings.TrimSpace(b.Phase) != "" {
+			return wrap(ErrInvalidInput, ticket.ErrPhaseRetired)
+		}
+		if b.Block < 0 {
+			return bad(i, "block must be 0 (none) or a block number")
 		}
 		if err := ticket.ValidateEstimateHours(b.EstimateHours); err != nil {
 			return bad(i, "%v", err)

@@ -73,14 +73,14 @@ func TestMultiFieldEdit(t *testing.T) {
 	}
 
 	code, out := do(t, h, "PATCH", url, map[string]interface{}{
-		"fields":   map[string]interface{}{"estimate_hours": 1.5, "phase": "02 - Build", "title": "A2"},
+		"fields":   map[string]interface{}{"estimate_hours": 1.5, "lifecycle": "Build", "block": 2, "title": "A2"},
 		"add_tags": []string{"config"}, "remove_tags": []string{"x"}, "author": "agent@x",
 	})
 	if code != http.StatusOK {
 		t.Fatalf("multi edit: %d %v", code, out)
 	}
 	tk, _ = ticket.ReadTicket(root, a)
-	if tk.Title != "A2" || tk.Phase == nil || *tk.Phase != "02 - Build" || tk.EstimateHours == nil || *tk.EstimateHours != 1.5 {
+	if tk.Title != "A2" || tk.Lifecycle == nil || *tk.Lifecycle != "Build" || tk.Block != 2 || tk.EstimateHours == nil || *tk.EstimateHours != 1.5 {
 		t.Errorf("fields not applied: %+v", tk)
 	}
 	if len(tk.Tags) != 1 || tk.Tags[0] != "config" {
@@ -92,8 +92,8 @@ func TestMultiFieldEdit(t *testing.T) {
 			edits++
 		}
 	}
-	if edits != 4 {
-		t.Errorf("edited activity entries = %d, want 4 (3 fields + tags)", edits)
+	if edits != 5 {
+		t.Errorf("edited activity entries = %d, want 5 (4 fields + tags)", edits)
 	}
 
 	// The single-field body still works; mixing both shapes is refused.

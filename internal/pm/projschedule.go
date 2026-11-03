@@ -126,7 +126,7 @@ func ownerOf(t *ticket.Ticket) string {
 }
 
 // isOpenWork reports whether a ticket still needs its owner's hours: committed
-// (not cancelled or backlog) and not yet past the build stage. dev_complete and
+// (not cancelled or backlog) and not yet past development. dev_complete and
 // later count as done here; QA time burns the separate QA pool.
 func isOpenWork(t *ticket.Ticket) bool {
 	return !IsFunctionalDoneStatus(t.Status) && !isCancelled(t) && !ticket.IsBacklog(t)
@@ -375,9 +375,9 @@ func ScheduleCapacity(tickets []*ticket.Ticket, resources []ticket.Resource, ctx
 		}
 	}
 
-	// Work order: dependency stage (the longest chain of open explicit
+	// Work order: dependency wave (the longest chain of open explicit
 	// predecessors; ready = 0), shared with the Work order view and /ready.
-	depth := DependencyStages(tickets)
+	depth := DependencyWaves(tickets)
 	less := func(a, b *CapacityItem) bool {
 		if ra, rb := priorityRank(a.Ticket.Priority), priorityRank(b.Ticket.Priority); ra != rb {
 			return ra < rb
@@ -544,9 +544,9 @@ func (p *CapacityPlan) Snapshot(projectID, projectName string) *Snapshot {
 	}
 	for _, it := range p.Items {
 		t := it.Ticket
-		phase := ""
-		if t.Phase != nil {
-			phase = *t.Phase
+		lifecycle := ""
+		if t.Lifecycle != nil {
+			lifecycle = *t.Lifecycle
 		}
 		var deps []string
 		for _, d := range t.Predecessors {
@@ -565,7 +565,7 @@ func (p *CapacityPlan) Snapshot(projectID, projectName string) *Snapshot {
 			Title:        t.Title,
 			Owner:        ownerOf(t),
 			Status:       ganttStatus(t.Status),
-			Phase:        phase,
+			Lifecycle:    lifecycle,
 			Dependencies: deps,
 			Baseline: BaselineInfo{
 				PlannedStart: fmtDate(it.StartD),

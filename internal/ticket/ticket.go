@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"hate/internal/fsutil"
@@ -26,7 +27,8 @@ type CreateTicketParams struct {
 	EstimateHours    *float64 // wrap (config/nonfunc) hours estimate; nil = unsized
 	Assignee         string
 	Tags             []string
-	Phase            string
+	Lifecycle        string
+	Block            int
 	Predecessors     []string
 	PlannedStartDate string
 	DueDate          string
@@ -60,6 +62,8 @@ func ReadTicket(repoRoot, ticketID string) (*Ticket, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ticket %s: %w", ticketID, err)
 	}
+	major, bw := projectReadContext(repoRoot)
+	translateOnRead(tp, major, bw)
 	t := *tp
 	// Ensure slices are not nil for JSON compatibility
 	if t.Tags == nil {
@@ -84,6 +88,7 @@ func ReadTicket(repoRoot, ticketID string) (*Ticket, error) {
 
 // ReadAllTickets reads all ticket files sorted by ID.
 func ReadAllTickets(repoRoot string) ([]*Ticket, error) {
+	major, bw := projectReadContext(repoRoot)
 	tdir := TicketsDir(repoRoot)
 	entries, err := os.ReadDir(tdir)
 	if err != nil {
@@ -114,6 +119,7 @@ func ReadAllTickets(repoRoot string) ([]*Ticket, error) {
 			log.Printf("skipping ticket file %s: invalid JSON: %v", path, err)
 			continue
 		}
+		translateOnRead(tp, major, bw)
 		t := *tp
 		if t.Tags == nil {
 			t.Tags = []string{}
@@ -197,9 +203,13 @@ func CreateTicket(repoRoot string, params CreateTicketParams) (*Ticket, error) {
 	if len(params.Tags) > 0 {
 		t.Tags = params.Tags
 	}
-	if params.Phase != "" {
-		t.Phase = &params.Phase
+	if params.Lifecycle != "" {
+		t.Lifecycle = &params.Lifecycle
 	}
+	if params.Block < 0 {
+		return nil, fmt.Errorf("block must be 0 (none) or a block number")
+	}
+	t.Block = params.Block
 	if params.Description != "" {
 		t.Description = params.Description
 	}
@@ -590,11 +600,13 @@ func getFieldValue(t *Ticket, field string) interface{} {
 		return nil
 	case "tags":
 		return t.Tags
-	case "phase":
-		if t.Phase != nil {
-			return *t.Phase
+	case "lifecycle":
+		if t.Lifecycle != nil {
+			return *t.Lifecycle
 		}
 		return nil
+	case "block":
+		return t.Block
 	case "assignee":
 		if t.Assignee != nil {
 			return *t.Assignee
@@ -725,20 +737,29 @@ func setFieldValue(t *Ticket, field string, value interface{}) error {
 			return nil
 		}
 		return fmt.Errorf("tags must be a list of strings")
-	case "phase":
+	case "lifecycle":
 		if value == nil {
-			t.Phase = nil
+			t.Lifecycle = nil
 			return nil
 		}
 		if s, ok := value.(string); ok {
-			if s == "" {
-				t.Phase = nil
+			if s = strings.TrimSpace(s); s == "" {
+				t.Lifecycle = nil
 			} else {
-				t.Phase = StringPtr(s)
+				t.Lifecycle = StringPtr(s)
 			}
 			return nil
 		}
-		return fmt.Errorf("phase must be a string")
+		return fmt.Errorf("lifecycle must be a string")
+	case "block":
+		n, err := blockValue(value)
+		if err != nil {
+			return err
+		}
+		t.Block = n
+		return nil
+	case "phase":
+		return ErrPhaseRetired
 	case "assignee":
 		if value == nil {
 			t.Assignee = nil
@@ -986,4 +1007,36 @@ func RemovePredecessor(repoRoot, ticketID, predecessorID, author string) (*Ticke
 		return nil, err
 	}
 	return t, nil
+}
+
+// ErrPhaseRetired: hate 2.0 split "phase" into lifecycle and block.
+var ErrPhaseRetired = errors.New(`"phase" was replaced by "lifecycle" (kind of work: Discovery, Build, ...) and "block" (planning block number) in hate 2.0`)
+
+// blockValue parses a block number from JSON (number, numeric string, or
+// null/"" for none).
+func blockValue(value interface{}) (int, error) {
+	var f float64
+	switch v := value.(type) {
+	case nil:
+		return 0, nil
+	case float64:
+		f = v
+	case int:
+		f = float64(v)
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return 0, nil
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return 0, fmt.Errorf("block must be a whole number (0 = none)")
+		}
+		f = float64(n)
+	default:
+		return 0, fmt.Errorf("block must be a whole number (0 = none)")
+	}
+	if f < 0 || f != float64(int(f)) || f > 1000 {
+		return 0, fmt.Errorf("block must be a whole number from 0 (none) to 1000")
+	}
+	return int(f), nil
 }

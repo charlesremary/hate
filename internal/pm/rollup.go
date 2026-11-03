@@ -4,16 +4,30 @@
 package pm
 
 import (
+	"fmt"
 	"math"
 	"sort"
+	"strconv"
 
 	"hate/internal/ticket"
 )
 
-// PhaseProgress is the hours-weighted rollup for a single phase.
-type PhaseProgress struct {
-	Phase string `json:"phase"` // raw phase value; "" for tickets with no phase
-	Label string `json:"label"` // human-readable; "(no phase)" when Phase is ""
+// Rollup groupings.
+const (
+	RollupByLifecycle = "lifecycle"
+	RollupByBlock     = "block"
+)
+
+// GroupProgress is the hours-weighted rollup for one group: a lifecycle
+// value or a planning block.
+type GroupProgress struct {
+	Key   string `json:"key"`   // the lifecycle text, or the block number; "" = none
+	Label string `json:"label"` // human-readable; "(no lifecycle)" / "(no block)" for ""
+	// Block is the block number when grouping by block (0 = no block);
+	// BlockStart / BlockEnd are its dates (see ApplyBlockDates).
+	Block      int    `json:"block,omitempty"`
+	BlockStart string `json:"block_start,omitempty"`
+	BlockEnd   string `json:"block_end,omitempty"`
 
 	TicketCount     int `json:"ticket_count"`      // tickets in scope (excludes cancelled)
 	CompleteCount   int `json:"complete_count"`    // reached a non-cancelled terminal status
@@ -27,26 +41,20 @@ type PhaseProgress struct {
 	UnsizedCount  int     `json:"unsized_count"`   // in-scope work tickets with no estimate
 
 	PercentComplete float64 `json:"percent_complete"` // 0..100
-	HoursBased      bool    `json:"hours_based"`      // false → % fell back to ticket count
+	HoursBased      bool    `json:"hours_based"`      // false -> % fell back to ticket count
 
-	PlannedStart string `json:"planned_start"` // earliest planned_start_date in phase
-	DueDate      string `json:"due_date"`      // latest due_date in phase
-
-	// Block is N for a "Block NN ..." phase (0 otherwise); BlockStart /
-	// BlockEnd are that block's dates when the project plans in blocks (see
-	// ApplyBlockDates).
-	Block      int    `json:"block,omitempty"`
-	BlockStart string `json:"block_start,omitempty"`
-	BlockEnd   string `json:"block_end,omitempty"`
+	PlannedStart string `json:"planned_start"` // earliest planned_start_date in the group
+	DueDate      string `json:"due_date"`      // latest due_date in the group
 }
 
-// RollupReport is the per-phase progress rollup for a project.
+// RollupReport is the progress rollup for a project, by lifecycle or block.
 type RollupReport struct {
 	GeneratedAt     string          `json:"generated_at"`
+	By              string          `json:"by"`               // RollupByLifecycle or RollupByBlock
 	Basis           string          `json:"basis"`            // "hours-weighted"
 	TotalTickets    int             `json:"total_tickets"`    // in-scope (cancelled excluded)
 	PercentComplete float64         `json:"percent_complete"` // project-level, hours-weighted
-	Phases          []PhaseProgress `json:"phases"`
+	Groups          []GroupProgress `json:"groups"`
 }
 
 // isCancelled reports whether a ticket was force-closed / descoped rather than
@@ -62,9 +70,9 @@ func isComplete(t *ticket.Ticket) bool {
 	return ticket.Contains(ticket.ClosedStatuses, t.Status) && !isCancelled(t)
 }
 
-// PhaseRollup groups tickets by their phase field and computes an
-// hours-weighted percent-complete per phase, plus a status breakdown and
-// rolled-up start/due dates.
+// Rollup groups tickets by lifecycle (by = RollupByLifecycle) or planning
+// block (RollupByBlock) and computes an hours-weighted percent-complete per
+// group, plus a status breakdown and rolled-up start/due dates.
 //
 // Decisions baked in (see the article series / README for the why):
 //   - Percent is hours-weighted: done estimated hours ÷ total estimated hours,
@@ -74,39 +82,49 @@ func isComplete(t *ticket.Ticket) bool {
 //     CancelledCount and excluded from the scope and the percentage.
 //   - Tickets with no estimate contribute nothing to the hours math. Work
 //     tickets among them are surfaced via UnsizedCount (parents, meetings, and
-//     admin are never sized, so they aren't counted). A phase with no estimated
+//     admin are never sized, so they aren't counted). A group with no estimated
 //     hours has no denominator, so its percentage falls back to ticket count
 //     (HoursBased=false) rather than reporting a misleading zero.
 //
 // The algorithm is read-only.
-func PhaseRollup(tickets []*ticket.Ticket, ctx EstimateContext) RollupReport {
+func Rollup(tickets []*ticket.Ticket, ctx EstimateContext, by string) RollupReport {
 	ctx = ctx.prepared()
-	byPhase := map[string]*PhaseProgress{}
+	if by != RollupByBlock {
+		by = RollupByLifecycle
+	}
+	byKey := map[string]*GroupProgress{}
 	earliest := map[string]string{}
 	latest := map[string]string{}
 
-	get := func(phase string) *PhaseProgress {
-		p, ok := byPhase[phase]
-		if !ok {
-			label := phase
-			if phase == "" {
-				label = "(no phase)"
+	get := func(t *ticket.Ticket) (string, *GroupProgress) {
+		key, label, block := "", "", 0
+		if by == RollupByBlock {
+			if t.Block > 0 {
+				block = t.Block
+				key = strconv.Itoa(block)
+				label = fmt.Sprintf("Block %02d", block)
+			} else {
+				label = "(no block)"
 			}
-			p = &PhaseProgress{Phase: phase, Label: label}
-			if n, ok := ParseBlockPhase(phase); ok {
-				p.Block = n
+		} else {
+			if t.Lifecycle != nil {
+				key = *t.Lifecycle
 			}
-			byPhase[phase] = p
+			label = key
+			if key == "" {
+				label = "(no lifecycle)"
+			}
 		}
-		return p
+		p, ok := byKey[key]
+		if !ok {
+			p = &GroupProgress{Key: key, Label: label, Block: block}
+			byKey[key] = p
+		}
+		return key, p
 	}
 
 	for _, t := range tickets {
-		phase := ""
-		if t.Phase != nil {
-			phase = *t.Phase
-		}
-		p := get(phase)
+		phase, p := get(t)
 
 		if isCancelled(t) {
 			p.CancelledCount++
@@ -145,10 +163,10 @@ func PhaseRollup(tickets []*ticket.Ticket, ctx EstimateContext) RollupReport {
 		}
 	}
 
-	var phases []PhaseProgress
+	var phases []GroupProgress
 	var projTotalHours, projDoneHours float64
 	var projTotalTickets, projDoneTickets int
-	for phase, p := range byPhase {
+	for phase, p := range byKey {
 		p.PlannedStart = earliest[phase]
 		p.DueDate = latest[phase]
 		switch {
@@ -156,7 +174,7 @@ func PhaseRollup(tickets []*ticket.Ticket, ctx EstimateContext) RollupReport {
 			p.PercentComplete = round1(p.EstHoursDone / p.EstHoursTotal * 100)
 			p.HoursBased = true
 		case p.TicketCount > 0:
-			// No estimates anywhere in this phase — fall back to ticket count.
+			// No estimates anywhere in this group: fall back to ticket count.
 			p.PercentComplete = round1(float64(p.CompleteCount) / float64(p.TicketCount) * 100)
 			p.HoursBased = false
 		}
@@ -168,27 +186,25 @@ func PhaseRollup(tickets []*ticket.Ticket, ctx EstimateContext) RollupReport {
 		projDoneTickets += p.CompleteCount
 	}
 
-	// "Block NN" phases first, by block number (so Block 10 follows Block 9),
-	// then the other phases by phase string; "(no phase)" sorts last.
+	// Blocks by number (Block 10 after Block 9), lifecycles by text; the
+	// "none" group last.
 	sort.SliceStable(phases, func(i, j int) bool {
 		a, b := phases[i], phases[j]
-		if (a.Phase == "") != (b.Phase == "") {
-			return b.Phase == ""
-		}
-		if (a.Block > 0) != (b.Block > 0) {
-			return a.Block > 0
+		if (a.Key == "") != (b.Key == "") {
+			return b.Key == ""
 		}
 		if a.Block != b.Block {
 			return a.Block < b.Block
 		}
-		return a.Phase < b.Phase
+		return a.Key < b.Key
 	})
 
 	report := RollupReport{
 		GeneratedAt:  ticket.NowISO(),
+		By:           by,
 		Basis:        "hours-weighted",
 		TotalTickets: projTotalTickets,
-		Phases:       phases,
+		Groups:       phases,
 	}
 	switch {
 	case projTotalHours > 0:
@@ -196,22 +212,24 @@ func PhaseRollup(tickets []*ticket.Ticket, ctx EstimateContext) RollupReport {
 	case projTotalTickets > 0:
 		report.PercentComplete = round1(float64(projDoneTickets) / float64(projTotalTickets) * 100)
 	}
-	if report.Phases == nil {
-		report.Phases = []PhaseProgress{}
+	if report.Groups == nil {
+		report.Groups = []GroupProgress{}
 	}
 	return report
 }
 
-// ApplyBlockDates fills BlockStart / BlockEnd on each "Block NN" phase from the
-// project's blocks (by number). No-op when blocks is empty.
+// ApplyBlockDates fills BlockStart / BlockEnd and the dated label on each
+// block group from the project's blocks (by number). No-op when blocks is
+// empty or the rollup is by lifecycle.
 func ApplyBlockDates(rep *RollupReport, blocks []Block) {
 	byN := map[int]Block{}
 	for _, b := range blocks {
 		byN[b.N] = b
 	}
-	for i := range rep.Phases {
-		if b, ok := byN[rep.Phases[i].Block]; ok && rep.Phases[i].Block > 0 {
-			rep.Phases[i].BlockStart, rep.Phases[i].BlockEnd = b.Start, b.End
+	for i := range rep.Groups {
+		g := &rep.Groups[i]
+		if b, ok := byN[g.Block]; ok && g.Block > 0 {
+			g.BlockStart, g.BlockEnd, g.Label = b.Start, b.End, b.Label
 		}
 	}
 }
