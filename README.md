@@ -140,7 +140,7 @@ The full status set is global:
 ```
 not_started → in_progress → dev_complete → qa_testing →
 submitted_for_review → approved → complete → closed
-(plus rework and blocked)
+(plus rework; blocked is a flag, not a status)
 ```
 
 What differs per ticket **type** is the *path* through those statuses. Each type
@@ -158,15 +158,22 @@ defines `promote` / `demote` transitions (`internal/ticket/config.go`):
 
 Other rules:
 
-- **`blocked`** is reachable from any state via a direct status change; promoting or
-  demoting a blocked ticket resolves to `_previous` — the status it held before
-  (recovered from the activity log).
+- **Blocked** (hate 3.0) is a flag (`blocked: {reason, waits_on, since, by}`),
+  not a status: the ticket keeps its status and the time gate isn't reset. A
+  blocked ticket can't be promoted; `POST …/unblock` clears it. Ticket ids in
+  `waits_on` clear the flag when they all finish (`ticket.ClearWaitsOn`).
 - Reaching a **closed status** (`complete`, `closed`) stamps `closed_at`; leaving it
   clears it. `closed` is **terminal** — you cannot promote out of it.
 - Moving into `in_progress` stamps `actual_start_date` if not already set.
 - **Force-close** (`ForceClose`) jumps a ticket straight to `closed`, skipping the
-  workflow, for dropped/duplicate/out-of-scope work. It requires a reason
-  (≥5 chars), which is stored in `cancellation_reason`.
+  workflow, with a `close_category` (`done`, `descoped`, `duplicate`, `wont_do`)
+  and a reason (≥5 chars, in `cancellation_reason`). `done` counts as finished
+  work; the others leave every number (`ticket.IsDescoped`).
+- **Rework** (hate 3.0): closed tickets are never reopened. `POST …/rework`
+  creates a new ticket tagged `rework-of:<id>` with `rework_category`,
+  `introduced_by` (agent | human) and optional `broken_by`; it's sized by its
+  own `estimate_hours`, never takes a share of the parent's CFP, and is left
+  out of calibration (`ComputeCosmic`) and estimate accuracy.
 
 `GET /api/projects/{projectId}/tickets/{ticketId}` (and every ticket write
 response) returns a computed `workflow` object, never stored:
@@ -185,8 +192,7 @@ All mutations go through `internal/ticket` and are recorded in the ticket's
 - **Create** — `CreateTicket` allocates an ID, fills defaults
   (`status: not_started`, `priority: medium`), validates, and writes the file.
 - **Promote / Demote** — advance or step back along the type's workflow.
-- **Change status** — direct status set for transitions the workflow has no path
-  into (e.g. `blocked`).
+- **Block / Unblock** — set or clear the blocked flag.
 - **Assign**, **Add comment**, **Edit field** (title, description, priority,
   estimate_hours, tags, lifecycle, block, assignee, dates, type-specific fields).
 - **Predecessors** — add/remove dependency links (validated to exist).

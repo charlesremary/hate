@@ -806,7 +806,7 @@ Any write to a project a newer hate changed answers **409** with `newer_format: 
 | `POST …/tickets` | Create a ticket (see §1 for the full body). A non-empty `effort` → 400. | see §1 |
 | `POST …/tickets/bulk` | Create up to 50 tickets in one write and one commit (the easy path for a whole feature). Each ticket takes the §1 fields plus `ref` (a handle for this batch), `parent_ref` (an earlier ticket's ref; adds `parent:<id>`) or `parent_id`, `predecessor_refs` (earlier refs) and/or `predecessors` (existing ids), and `test_cases:[{step, expected}]`. Every ticket is validated before any is written (422 / 404 and nothing created). Returns `{created:[{ref, id}], tickets:[…], commit_warning}`. | `{tickets:[…], author?}` |
 | `GET …/tickets/billing` | Billing rollup (logged hours × rates). | — |
-| `GET …/tickets/{ticketId}` | Full ticket JSON, plus a computed (never stored) `workflow`: `{promote_to, demote_to, path}`. `promote_to` / `demote_to` are the statuses Promote / Demote would move it to now (`_previous` resolved for `blocked`; `null` when there is no transition); `path` is the type's main line from `not_started`. Read `promote_to` before promoting to know the next status. No `workflow` key for meeting / administration. Ticket write responses (promote, demote, block, edit…) carry the updated `workflow` too. | — |
+| `GET …/tickets/{ticketId}` | Full ticket JSON, plus a computed (never stored) `workflow`: `{promote_to, demote_to, path}`. `promote_to` / `demote_to` are the statuses Promote / Demote would move it to now (`null` when there is no transition); `path` is the type's main line from `not_started`. Read `promote_to` before promoting to know the next status. No `workflow` key for meeting / administration. Ticket write responses (promote, demote, block, edit…) carry the updated `workflow` too. | — |
 | `PATCH …/tickets/{ticketId}` | Edit one field (title, description, priority, `estimate_hours`, tags, dates, …). Setting `effort` → 400; clearing it to `null` is allowed. Or edit several at once: `fields` (any of title, description, priority, `estimate_hours`, assignee, `lifecycle`, `block`, `planned_start_date`, `due_date`) plus `add_tags` / `remove_tags`, applied all-or-nothing (one bad value → 422 and nothing changes), one activity entry per field, one commit. Don't send both shapes. | `{field, value, author?}` or `{fields:{…}, add_tags?:[…], remove_tags?:[…], author?}` |
 
 ### Ticket actions
@@ -815,8 +815,10 @@ Any write to a project a newer hate changed answers **409** with `newer_format: 
 |---|---|---|
 | `POST …/tickets/{ticketId}/promote` | Advance status along the type's workflow. Gated on logged time in work statuses. The first promote out of `not_started` runs the class/estimate checks in §3 (422 on failure). | optional `?author=` or `{author}` (body wins) |
 | `POST …/tickets/{ticketId}/demote` | Move status back one step. | optional `?author=` or `{author}` (body wins) |
-| `POST …/tickets/{ticketId}/block` | Set status to `blocked`. | optional `{reason, author}`; `?author=` also accepted (body wins) |
-| `POST …/tickets/{ticketId}/force-close` | Skip the workflow to `closed`, recording a reason (marks it descoped/cancelled). | `{reason, author?}`; `?author=` also accepted |
+| `POST …/tickets/{ticketId}/block` | Flag the ticket blocked (hate 3.0: the status stays). A blocked ticket can't be promoted. Ticket ids in `waits_on` clear the flag when they all finish. | `{reason, waits_on?:[…], author?}`; `?author=` also accepted (body wins) |
+| `POST …/tickets/{ticketId}/unblock` | Clear the blocked flag. | `{note?, author?}` |
+| `POST …/tickets/{ticketId}/force-close` | Skip the workflow to `closed` with a `category`: `done` (delivered outside the normal path: counts as finished), `descoped`, `duplicate`, `wont_do` (these leave every number). | `{category, reason, author?}`; `?author=` also accepted |
+| `POST …/tickets/{ticketId}/rework` | Redo a closed ticket: a NEW ticket tagged `rework-of:<id>` (closed tickets are never reopened), copying parent, class, lifecycle, assignee; in the current block. `category`: `defect`, `missed_requirement`, `misunderstood_requirement`, `incomplete`, `regression`, `environment` (a changed request is refused: create a new ticket). `introduced_by`: `agent` or `human`. Returns `{ticket, original, commit_warning}`. | `{category, introduced_by, reason, broken_by?, title?, estimate_hours?, author?}` |
 | `POST …/tickets/{ticketId}/comment` | Add a comment to the activity log. Each comment gets an `id` (`c1`, `c2`, … per ticket). | `{message, author?}` |
 | `PATCH …/tickets/{ticketId}/comments/{commentId}` | Edit a comment's text (fixing a typo or a wrong statement). Sets `edited_at` on the comment and appends a `comment_edited` entry holding the comment id and the previous text, so history is kept. Only comments can be edited (other entries → 422); empty message → 422; unknown id → 404. Comments can't be deleted. | `{message, author?}` |
 | `POST …/tickets/{ticketId}/time` | Log a time entry (hours round to 0.25). | `{date, hours, description, author?}` |
@@ -1051,6 +1053,22 @@ cases), then pull `/ready` again: the `next` tickets are now ready. Repeat
 until `ready` is empty. Blocked tickets never show as ready; unblock them
 first.
 
+### Blocked, force-close and rework (hate 3.0)
+
+- **Blocked is a flag.** `POST …/block` with a reason (and `waits_on` ticket
+  ids when it waits on other work) leaves the status as it is. Don't promote a
+  blocked ticket (it's refused); unblock it when the cause is gone, or let
+  `waits_on` clear it.
+- **Force-close needs a category.** Use `done` only for work that really was
+  delivered but couldn't go through promotion (no time could be logged, say);
+  otherwise finish work by promoting. `descoped`, `duplicate` and `wont_do`
+  take it out of every number.
+- **Never reopen; rework.** When finished work turns out wrong, `POST …/rework`
+  on the closed ticket with the honest `category` and `introduced_by`: `agent`
+  when an agent wrote what's being fixed. A client changing their mind is not
+  rework: create a new ticket. Give rework its own `estimate_hours` if it's
+  more than trivial.
+
 ## 15. Using hate from an MCP client
 
 The running hate app serves an MCP server (protocol 2026-07-28, older
@@ -1109,8 +1127,9 @@ Tools (all named `hate_*`):
 | `hate_create_tickets` | 1-50 tickets in one commit, with `ref` / `parent_ref` / `predecessor_refs` and inline test cases. |
 | `hate_update_ticket` | Several fields + `add_tags` / `remove_tags`, all-or-nothing. |
 | `hate_promote_ticket` · `hate_demote_ticket` | Next / previous status (gates apply). |
-| `hate_block_ticket` | Mark blocked with a reason. |
-| `hate_force_close_ticket` | Descope a ticket (destructive; not how work is finished). |
+| `hate_block_ticket` · `hate_unblock_ticket` | Flag blocked (reason, `waits_on`) / clear it. The status stays. |
+| `hate_force_close_ticket` | Close skipping the workflow, with a category (`done` counts as finished; `descoped` / `duplicate` / `wont_do` don't). Confirm with the user. |
+| `hate_rework_ticket` | Redo a closed ticket as a new linked ticket, with the category and `introduced_by` (agent or human). |
 | `hate_log_time` | Log hours with a description (date defaults to today). |
 | `hate_add_comment` · `hate_edit_comment` | Comment; fix a comment (old text kept). |
 | `hate_add_test_cases` · `hate_update_test_case` | Add cases; record pass / fail. |
