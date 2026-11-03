@@ -3,20 +3,23 @@
 #   brew install --cask charlesremary/hate/hate
 #
 # `make release` signs, notarizes and zips the binary, then runs `make cask`,
-# which rewrites version and sha256 below from AppVersion and the zip. Upload
-# that exact zip to the v<version> GitHub release before pushing this file.
+# which rewrites version and sha256 below from AppVersion and the tarball of
+# the notarized binary. `make publish` commits that tarball as
+# releases/hate-darwin-arm64.tar.gz, tags v<version> and pushes over SSH; the
+# url reads it at that tag, so every version keeps its own download.
 cask "hate" do
-  version "1.0.19"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  version "1.0.20"
+  sha256 "e0c42ea837e81f47e094e51b50047e0d1f7fbcd21d1c0c8873f26efab7d5200c"
 
-  url "https://github.com/charlesremary/hate/releases/download/v#{version}/hate-darwin-arm64.zip"
+  url "https://raw.githubusercontent.com/charlesremary/hate/v#{version}/releases/hate-darwin-arm64.tar.gz",
+      verified: "raw.githubusercontent.com/charlesremary/hate/"
   name "hate"
   desc "Git-backed ticketing for humans and agents, with a built-in MCP server"
   homepage "https://github.com/charlesremary/hate"
 
   livecheck do
-    url :url
-    strategy :github_latest
+    url "https://github.com/charlesremary/hate.git"
+    strategy :git
   end
 
   depends_on arch: :arm64
