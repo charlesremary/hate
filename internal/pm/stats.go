@@ -363,7 +363,14 @@ func fmtNum(v float64, digits int) string {
 func RenderStatsHTML(st ProjectStats, scheduleAnchor string) string {
 	esc := html.EscapeString
 	card := func(label, value, sub string) string {
-		return fmt.Sprintf(`<div class="st-card"><div class="st-label">%s</div><div class="st-value">%s</div><div class="st-sub">%s</div></div>`, label, value, sub)
+		info := ""
+		if tip := statTips[strings.SplitN(label, " ", 2)[0]]; tip != "" {
+			if strings.HasPrefix(label, "Accuracy: code") {
+				tip = statTips["AccuracyCode"]
+			}
+			info = fmt.Sprintf(`<span class="st-i" tabindex="0" role="note" aria-label="%s">i<span class="st-tip">%s</span></span>`, esc(tip), esc(tip))
+		}
+		return fmt.Sprintf(`<div class="st-card"><div class="st-label">%s%s</div><div class="st-value">%s</div><div class="st-sub">%s</div></div>`, label, info, value, sub)
 	}
 	ratio := func(s Stat, what string) string {
 		if s.N == 0 {
@@ -401,6 +408,15 @@ func RenderStatsHTML(st ProjectStats, scheduleAnchor string) string {
 .st-good { color: #15803d; } .st-bad { color: #b91c1c; } .st-warn { color: #b45309; }
 .st-none { font-size: 15px; color: #94a3b8; font-weight: 400; }
 .st-sub a { color: #1565c0; }
+.st-card { position: relative; }
+.st-i { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 6px;
+  border: 1px solid #94a3b8; border-radius: 50%; font: italic 600 10px Georgia, serif; color: #64748b; cursor: help;
+  text-transform: none; letter-spacing: 0; vertical-align: 1px; }
+.st-i:hover, .st-i:focus { border-color: #1565c0; color: #1565c0; outline: none; }
+.st-tip { display: none; position: absolute; top: 34px; left: 6px; right: 6px; z-index: 50; padding: 10px 12px;
+  background: #0f172a; color: #f1f5f9; border-radius: 6px; font: 400 12px/1.45 -apple-system, BlinkMacSystemFont, sans-serif;
+  text-transform: none; letter-spacing: 0; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+.st-i:hover .st-tip, .st-i:focus .st-tip { display: block; }
 </style>
 <div class="st-wrap"><div class="st-head">Project stats &middot; `)
 	b.WriteString(esc(st.WindowLabel))
@@ -455,4 +471,22 @@ func RenderStatsHTML(st ProjectStats, scheduleAnchor string) string {
 	}
 	b.WriteString(`</div></div>`)
 	return b.String()
+}
+
+// statTips explain each card (the ⓘ), keyed by the label's first word.
+var statTips = map[string]string{
+	"Complete": "Estimated hours of finished tickets divided by estimated hours of every ticket in scope, so a big ticket counts more than a small one. " +
+		"Backlog and force-closed tickets are left out. The arrow compares with the end of last week (or the previous block).",
+	"Remaining": "Estimated hours of the tickets not finished yet. It's the estimate, not hours still to log: a ticket counts in full until it's done.",
+	"Accuracy:": "Wrap work (config and non-functional tickets, estimated by hand in hours): hours actually logged divided by hours estimated, " +
+		"over every finished wrap ticket with time logged. 1.0x is on estimate, 1.5x took 50% longer, 0.5x took half as long.",
+	"AccuracyCode": "Code work, per finished feature: hours logged on its code tickets divided by the feature's estimate (its CFP times the hours-per-CFP rate). " +
+		"A feature counts once all its code tickets are done. Above 1.0x means the code took longer than the CFP estimate.",
+	"Finished": "Tickets that reached complete or closed in this period (this week, or this block on a block project), and their estimated hours. " +
+		"The arrow compares with the period before.",
+	"Cycle": "Average calendar days from starting a ticket (in progress) to finishing it, over tickets finished in the last 28 days. Lower is faster; " +
+		"the arrow compares with the 28 days before.",
+	"Blocked": "Tickets in the blocked state right now, and the one that has been blocked the longest.",
+	"Scope": "Tickets created since the baseline was taken (or this week, without a baseline), backlog excluded. Steady growth here is scope creep.",
+	"Tests": "Of the test cases that have a result, the share that passed. Cases not run yet are counted separately.",
 }
