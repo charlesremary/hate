@@ -17,7 +17,7 @@ LDFLAGS := -s -w
 GOFLAGS := -trimpath -ldflags "$(LDFLAGS)"
 VERSION := $(shell grep -oE 'AppVersion = "[^"]+"' internal/config/config.go | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 
-.PHONY: all native windows clean sign release cask
+.PHONY: all native windows clean sign release cask publish
 
 all: native windows
 
@@ -44,10 +44,14 @@ clean:
 #
 #   make release      sign + zip + notarize dist/hate-darwin-arm64, then `make cask`
 #   make cask         write AppVersion and the zip's sha256 into Casks/hate.rb
+#   make publish      commit the cask + signed binary, tag v<AppVersion>, create
+#                     the GitHub release with the zip, push main
 #
-# Then: git tag v$(VERSION), gh release create v$(VERSION) $(ZIP), commit and
-# push Casks/hate.rb (in that order, so the cask never points at a missing zip).
+# A release: bump AppVersion (and its pin in internal/api/plan_test.go), commit,
+# then `make release` and `make publish`.
 # ---------------------------------------------------------------------------
+GIT_NAME       ?= Chuck Emary
+GIT_EMAIL      ?= you@example.com
 IDENTITY       ?= Developer ID Application: CHARLES ROBERT EMARY (8G48C7PL22)
 NOTARY_PROFILE ?= hate-notary
 BUNDLE_ID      := com.charlesemary.hate
@@ -78,3 +82,29 @@ cask:
 	sed -i '' -E 's/^  version "[^"]*"/  version "$(VERSION)"/' $(CASK)
 	sed -i '' -E "s/^  sha256 \"[0-9a-f]*\"/  sha256 \"$$(shasum -a 256 $(ZIP) | cut -d' ' -f1)\"/" $(CASK)
 	@grep -E '^  (version|sha256) ' $(CASK)
+
+# Publish the release built by `make release`. Refuses to run unless: on main,
+# gh is logged in, the tag is new, the only changes are the cask and the dist
+# binaries, the cask matches AppVersion and the zip, and Apple confirms the
+# binary is notarized (codesign -R notarized; spctl can't be used, it rejects
+# every bare binary as "not an app"). Order: commit, tag, push the tag, create
+# the GitHub release with the zip, and only then push main, so the cask on main
+# never points at a zip that isn't uploaded yet.
+publish:
+	@test -f $(ZIP) || { echo "no $(ZIP): run make release first"; exit 1; }
+	@test "$$(git rev-parse --abbrev-ref HEAD)" = main || { echo "not on main"; exit 1; }
+	@gh auth status >/dev/null 2>&1 || { echo "gh is not logged in: run gh auth login"; exit 1; }
+	@! git rev-parse -q --verify refs/tags/v$(VERSION) >/dev/null || { echo "tag v$(VERSION) already exists: bump AppVersion"; exit 1; }
+	@test -z "$$(git ls-remote --tags origin v$(VERSION))" || { echo "tag v$(VERSION) already exists on origin"; exit 1; }
+	@test -z "$$(git status --porcelain -- . ':!$(CASK)' ':!$(DIST)')" || { echo "uncommitted changes besides the cask and dist/: commit them first"; git status --short; exit 1; }
+	@grep -q '^  version "$(VERSION)"' $(CASK) || { echo "$(CASK) is not at v$(VERSION): run make cask"; exit 1; }
+	@grep -q "^  sha256 \"$$(shasum -a 256 $(ZIP) | cut -d' ' -f1)\"" $(CASK) || { echo "$(CASK) sha256 doesn't match $(ZIP): run make cask"; exit 1; }
+	@codesign --verify --check-notarization -R="notarized" build/release/$(BINARY) 2>/dev/null || { echo "build/release/$(BINARY) is not notarized: run make release"; exit 1; }
+	git add $(CASK)
+	git add -u $(DIST)
+	git -c user.name="$(GIT_NAME)" -c user.email="$(GIT_EMAIL)" commit -m "Release v$(VERSION)"
+	git tag -a v$(VERSION) -m "hate v$(VERSION)"
+	git push origin v$(VERSION)
+	gh release create v$(VERSION) $(ZIP) --verify-tag --title "hate v$(VERSION)" --generate-notes
+	git push origin main
+	@echo "published v$(VERSION): brew update && brew upgrade --cask hate"
