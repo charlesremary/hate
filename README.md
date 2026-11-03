@@ -269,6 +269,12 @@ every dashboard view:
   (`internal/pm/waves.go`: longest chain of open predecessors; wave 1 has
   nothing open in front of it) orders the capacity schedule, the Tickets tab's
   Work order view, and `GET …/ready` (`ready`, `next`, `waves`) for agents.
+- **Project stats.** `internal/pm/stats.go` (`GET …/stats`, MCP
+  `hate_get_stats`, the PM Dashboard's stats panel): % complete, remaining
+  hours, estimate accuracy (wrap per ticket, code per finished feature),
+  finished this period, cycle time, blocked, scope added, test pass rate. Each
+  has a trend against a week (or the previous block) earlier, rebuilt from the
+  tickets' own dates, so nothing is stored.
 - **Excel export.** `GET /api/projects/{projectId}/export.xlsx` (the PM
   Dashboard's Export to Excel button) downloads `<projectId>-<YYYY-MM-DD>.xlsx` with
   two sheets: **Tickets** (every ticket, closed and backlog included: status,
