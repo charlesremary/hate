@@ -404,7 +404,7 @@ func TestHeaderAndHelp(t *testing.T) {
 			t.Errorf("Help does not mention %q", want)
 		}
 	}
-	if config.AppVersion != "1.0.19" { // HATE-ry6s: the MCP server build is v1.0.19
+	if config.AppVersion != "1.0.20" { // HATE-5yth: hate_create_project build is v1.0.20
 		t.Errorf("AppVersion = %s", config.AppVersion)
 	}
 }
