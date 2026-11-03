@@ -109,7 +109,8 @@ fields:
 | `estimate_hours` | Hours estimate for a wrap ticket (`config` / `nonfunc` tag), or null. ≥ 0.25 in quarter-hour steps. Code (`functional`) tickets have none; they're sized by the parent's `cfp:`. |
 | `effort` | **Legacy.** Old t-shirt size `xs`..`xl`, read-only. Setting it is rejected (400); clearing it is allowed. Used only to convert old tickets that have no estimate. |
 | `tags` | List of free-text labels. |
-| `phase` | Optional grouping/phase label. |
+| `lifecycle` | Optional kind of work (Discovery, Build, ...). |
+| `block` | Planning block number (0 / absent = none); label and dates are computed. |
 | `assignee` | Person responsible, or null (unassigned). |
 | `creator` | Who created the ticket. |
 | `predecessors` | List of ticket IDs that must precede this one (dependency links). |
@@ -187,7 +188,7 @@ All mutations go through `internal/ticket` and are recorded in the ticket's
 - **Change status** — direct status set for transitions the workflow has no path
   into (e.g. `blocked`).
 - **Assign**, **Add comment**, **Edit field** (title, description, priority,
-  estimate_hours, tags, phase, assignee, dates, type-specific fields).
+  estimate_hours, tags, lifecycle, block, assignee, dates, type-specific fields).
 - **Predecessors** — add/remove dependency links (validated to exist).
 - **Time** — add/delete time entries (hours rounded to 0.25).
 - **Attachments** — files stored under `attachments/<ticket-id>/` and committed
@@ -259,18 +260,19 @@ every dashboard view:
   `PUT …/block-weeks`, committed). Block 1 starts on the Monday on or before the
   requested start (else the earliest planned start, else today);
   `GET …/blocks` lists them (`internal/pm/blocks.go`). Claude plans tickets into
-  blocks by phase (`Block 01 (Nov 2-13)`) and dates
+  blocks by setting each ticket's `block` number and dates
   (`docs/ticketing-and-cfp-guide.md` §14). The Gantt (and draw.io export) groups
   rows by block with shaded block bands; without blocks it groups rows by person
-  (the capacity lanes). The phase rollup sorts block phases by number.
-- **Dependency stages / work order.** One stage function
-  (`internal/pm/stages.go`: longest chain of open predecessors) orders the
-  capacity schedule, the Tickets tab's Work order view, and
-  `GET …/ready` (`ready`, `next`, `stages`) for agents.
+  (the capacity lanes). The rollup (`GET …/rollup?by=block|lifecycle`) lists
+  blocks by number with their dates.
+- **Dependency waves / work order.** One wave function
+  (`internal/pm/waves.go`: longest chain of open predecessors; wave 1 has
+  nothing open in front of it) orders the capacity schedule, the Tickets tab's
+  Work order view, and `GET …/ready` (`ready`, `next`, `waves`) for agents.
 - **Excel export.** `GET /api/projects/{projectId}/export.xlsx` (the Tickets
   tab's Export to Excel button) downloads `<projectId>-<YYYY-MM-DD>.xlsx` with
   two sheets: **Tickets** (every ticket, closed and backlog included: status,
-  type, assignee, phase, parent, class, CFP, estimated and logged hours, planned
+  type, assignee, lifecycle, block, parent, class, CFP, estimated and logged hours, planned
   start and due as real dates, predecessors, tags; bold frozen header with an
   autofilter) and **Gantt** (a colored cell grid, one column per working day, or
   per week past 130 days, rows grouped like the dashboard Gantt, critical path
@@ -378,7 +380,16 @@ banner), and sync won't merge local changes into it (a fast-forward is fine).
 Within a major, top-level ticket and config fields an older hate doesn't know
 are kept on write and through sync merges, so **adding** a field is a minor
 release. Renaming, removing or re-meaning a field, or adding one inside a
-nested object, is a format change: bump the major and add a migration.
+nested object, is a format change: bump the major and add a migration step
+(`internal/ticket/migrate.go`: numbered steps on the raw JSON, run in order).
+
+A project at an older format is readable (translated in memory) but
+read-only until the user applies its one-time update: a banner with a preview
+in the UI, `GET/POST …/migration` over REST, `hate_migrate_project` over MCP.
+Applying rewrites every ticket and commits once (git revert undoes it). Nothing
+migrates on its own. Format 2 (hate 2.0) split `phase` into `lifecycle` (kind
+of work) and `block` (planning block number), and renamed dependency "stage"
+to "wave".
 
 Once a day (`internal/update`) hate reads the version line of `Casks/hate.rb`
 on main (no API, no token, nothing sent but the GET), caches it in the app

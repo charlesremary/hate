@@ -26,7 +26,7 @@ or nonfunc) carries an hours estimate:
   "estimate_hours": 2,
   "assignee": "dev@example.com",
   "tags": ["parent:AMPL-7k3x", "config"],
-  "phase": "02 - Build",
+  "lifecycle": "Build",
   "predecessors": ["AMPL-2b8c"],
   "planned_start_date": "2026-07-01",
   "due_date": "2026-07-02",
@@ -43,7 +43,7 @@ parent's `cfp:`:
   "title": "Wire Bedrock KB retrieval into the chat handler",
   "description": "…",
   "tags": ["parent:AMPL-7k3x", "functional"],
-  "phase": "02 - Build",
+  "lifecycle": "Build",
   "creator": "claude@example.com"
 }
 ```
@@ -426,40 +426,48 @@ a tracked deliverable kind). They answer different questions.
 Tag a ticket `backlog` if it's in the project but **not committed**. Backlog
 tickets are excluded from completion %, the baseline/projected end date,
 capacity, and the estimate. Remove the tag to commit a ticket into scope. Do
-**not** park backlog by abusing `phase` — use the tag.
+**not** park backlog in a lifecycle or block — use the tag.
 
 ---
 
-## 8. Phases (for the rollup)
+## 8. Lifecycle and block (for the rollup)
 
-Set a **`phase`** on every committed ticket. Phase is the unit the PM **phase
-rollup** groups by (the **Σ Phases** view and its CSV export) — it's how you hand
-a stakeholder "Phase 2 is 40% done" without them ever seeing individual tickets.
+Two separate fields say where a ticket sits (hate 2.0 replaced the old
+`phase`, which meant one or the other depending on the project):
 
-- **Use a small, consistent, ordered set of phase names.** Phases are matched by
-  exact string, so `Build`, `build`, and `Building` become three separate phases.
-  Pick one spelling per phase and reuse it on every ticket in that phase.
-- **Number the phases if execution order matters.** The rollup lists phases
-  alphabetically by the phase string, so prefix them to force order:
-  `01 - Discovery`, `02 - Build`, `03 - QA`. (Otherwise `Build` sorts before
-  `Design`.)
+- **`lifecycle`**: the **kind of work**, as text: `Discovery`, `Design`,
+  `Build`, `Test`, `Deploy`, or the project's own names. Optional.
+- **`block`**: the **planning block** the ticket is planned into, as a number
+  (`3`), only on projects that plan in blocks (§14). `0` / absent = none. The
+  label and dates (`Block 03 (Nov 30-Dec 11)`) come from `GET /{projectId}/blocks`;
+  never write them into the ticket.
+- And **wave**: dependency order, computed by `/ready` (wave 1 = nothing open
+  in front of it). Never set by hand.
+
+A ticket can have both a lifecycle and a block ("Build, block 3").
+
+The **rollup** (`GET /{projectId}/rollup?by=lifecycle|block`, the **Σ Rollup**
+view and its CSV) groups by either; it's how you hand a stakeholder "Build is
+40% done" or "Block 03 is 60% done" without them seeing individual tickets.
+Block projects default to `by=block`.
+
+- **Use a small, consistent set of lifecycle names.** They're matched by exact
+  string, so `Build`, `build`, and `Building` become three groups. Reuse the
+  names already in the project (`GET …/tickets` shows them).
+- **Number them if order matters.** The rollup lists lifecycles alphabetically,
+  so `01 - Discovery`, `02 - Build`, `03 - QA` force the order.
 - **The rollup is weighted by estimated hours** (% = done estimated hours ÷ total
   estimated hours). Wrap tickets count their `estimate_hours`; code tickets count
   their share of the parent feature's CFP-based estimate (§11). A ticket with no
-  estimate is invisible to the percentage, and a phase of entirely unsized
-  tickets falls back to a plain ticket count. So phase **and** a complete
-  estimate (class + `estimate_hours` on wrap, `cfp:` on the parent) are what make
-  the number meaningful.
-- Tickets with no phase land in a **`(no phase)`** bucket — fine for stray items,
-  but don't leave committed work there.
-- Don't park out-of-scope work in a phase — that's the `backlog` tag (§7).
-  Descoped/force-closed tickets are excluded from the rollup automatically.
-- **Per project, `phase` means EITHER the lifecycle stage OR the planning
-  block, never a mix.** Check `GET /{projectId}/block-weeks` first. Unset
-  (`null`): use stage phases as above (`01 - Discovery`, `02 - Build`, ...).
-  Set (2 or 3): the phase is the block label (`Block 01 (Nov 2-13)`), assigned
-  when you plan the blocks (§14); leave new tickets unphased until then. The
-  rollup sorts `Block NN` phases by number and shows each block's dates.
+  estimate is invisible to the percentage, and a group of entirely unsized
+  tickets falls back to a plain ticket count.
+- Tickets with no lifecycle (or block) land in a **`(no lifecycle)`** /
+  **`(no block)`** group — fine for stray items, but don't leave committed work
+  there.
+- Don't park out-of-scope work in a lifecycle or block — that's the `backlog`
+  tag (§7). Descoped/force-closed tickets are excluded automatically.
+- Sending `phase` anywhere (create, edit, bulk) is refused with a message
+  saying it was replaced.
 
 ---
 
@@ -509,8 +517,8 @@ PROJ-100  "Semantic search over docs"   tags: cfp:18   (E/X/R/W breakdown in the
 - [ ] No hours logged on parents.
 - [ ] Recurring deliverables have a `type:<name>` (on the parent, or on the wrap
       child for per-item history).
-- [ ] Every committed ticket has a consistent `phase` (stage phases, or block
-      phases when the project plans in blocks; never both, §8).
+- [ ] Every committed ticket has a consistent `lifecycle` (and, on a project
+      that plans in blocks, a `block` once the blocks are planned, §8, §14).
 - [ ] If the project plans in blocks (`block_weeks` set), the blocks are
       planned and baselined (§14).
 - [ ] Anything not committed is tagged `backlog`.
@@ -524,7 +532,7 @@ PROJ-100  "Semantic search over docs"   tags: cfp:18   (E/X/R/W breakdown in the
 ### How each ticket gets its hours
 
 One function supplies "how many hours is this ticket expected to take" to the
-capacity-aware schedule, the Load table, the phase rollup, the baseline, and the
+capacity-aware schedule, the Load table, the rollup, the baseline, and the
 Hours Budget checks:
 
 | Ticket | Estimated hours |
@@ -794,12 +802,12 @@ Any write to a project a newer hate changed answers **409** with `newer_format: 
 
 | Method & path | What it does | Body |
 |---|---|---|
-| `GET …/tickets` | List all tickets. Filters (all optional, exact match): `?status=`, `type=`, `assignee=`, `tag=`, `phase=`, `parent=<id>` (the children of a feature: tickets tagged `parent:<id>`). | — |
+| `GET …/tickets` | List all tickets. Filters (all optional, exact match): `?status=`, `type=`, `assignee=`, `tag=`, `lifecycle=`, `block=<n>`, `parent=<id>` (the children of a feature: tickets tagged `parent:<id>`). | — |
 | `POST …/tickets` | Create a ticket (see §1 for the full body). A non-empty `effort` → 400. | see §1 |
 | `POST …/tickets/bulk` | Create up to 50 tickets in one write and one commit (the easy path for a whole feature). Each ticket takes the §1 fields plus `ref` (a handle for this batch), `parent_ref` (an earlier ticket's ref; adds `parent:<id>`) or `parent_id`, `predecessor_refs` (earlier refs) and/or `predecessors` (existing ids), and `test_cases:[{step, expected}]`. Every ticket is validated before any is written (422 / 404 and nothing created). Returns `{created:[{ref, id}], tickets:[…], commit_warning}`. | `{tickets:[…], author?}` |
 | `GET …/tickets/billing` | Billing rollup (logged hours × rates). | — |
 | `GET …/tickets/{ticketId}` | Full ticket JSON, plus a computed (never stored) `workflow`: `{promote_to, demote_to, path}`. `promote_to` / `demote_to` are the statuses Promote / Demote would move it to now (`_previous` resolved for `blocked`; `null` when there is no transition); `path` is the type's main line from `not_started`. Read `promote_to` before promoting to know the next status. No `workflow` key for meeting / administration. Ticket write responses (promote, demote, block, edit…) carry the updated `workflow` too. | — |
-| `PATCH …/tickets/{ticketId}` | Edit one field (title, description, priority, `estimate_hours`, tags, dates, …). Setting `effort` → 400; clearing it to `null` is allowed. Or edit several at once: `fields` (any of title, description, priority, `estimate_hours`, assignee, phase, `planned_start_date`, `due_date`) plus `add_tags` / `remove_tags`, applied all-or-nothing (one bad value → 422 and nothing changes), one activity entry per field, one commit. Don't send both shapes. | `{field, value, author?}` or `{fields:{…}, add_tags?:[…], remove_tags?:[…], author?}` |
+| `PATCH …/tickets/{ticketId}` | Edit one field (title, description, priority, `estimate_hours`, tags, dates, …). Setting `effort` → 400; clearing it to `null` is allowed. Or edit several at once: `fields` (any of title, description, priority, `estimate_hours`, assignee, `lifecycle`, `block`, `planned_start_date`, `due_date`) plus `add_tags` / `remove_tags`, applied all-or-nothing (one bad value → 422 and nothing changes), one activity entry per field, one commit. Don't send both shapes. | `{field, value, author?}` or `{fields:{…}, add_tags?:[…], remove_tags?:[…], author?}` |
 
 ### Ticket actions
 
@@ -829,7 +837,7 @@ Any write to a project a newer hate changed answers **409** with `newer_format: 
 |---|---|---|
 | `GET /{projectId}/dashboard` | **HTML** PM dashboard (the Plan strip — baseline, last snapshot, unresolved slips, Re-baseline — then the Schedule vs request card, Load table, hours budget vs cap, estimate variance, project cost, status/slip; the capacity-aware projected Gantt before a baseline). The Gantt groups rows by planning block, with shaded block bands, when `block_weeks` is set, else by person. With a baseline and no snapshot for today, it first takes today's snapshot (at most once a day, per-project lock) and commits `slip_events.json` if new slips were found. | — |
 | `GET /{projectId}/gantt.drawio` | Download the Gantt as an editable draw.io file. Uses the baseline if there is one, otherwise the capacity-aware projected schedule from `?start=YYYY-MM-DD` (default today). | `?start=` optional |
-| `GET /{projectId}/export.xlsx` | Download the project as an Excel workbook, `<projectId>-<YYYY-MM-DD>.xlsx` (the Tickets tab's **Export to Excel** button). Sheet **Tickets**: one row per ticket (closed, force-closed and backlog included), sorted by phase then id, with ID, Title, Type, Status (UI labels), Priority, Assignee, Phase, Parent, Class, CFP, Estimate h, Logged h, Planned start, Due (real dates), Predecessors, Backlog, Tags; bold frozen header and an autofilter. Sheet **Gantt**: a colored cell grid with the same rows and groups as the dashboard Gantt (by block or person), one column per working day (per week past 130 working days), bars in the dashboard status colors, slip days, milestones as ◆, critical path marked `!`, and a legend. Like `gantt.drawio`, the Gantt uses the baseline if there is one (note: "Baseline of <date>"), otherwise the projected schedule from `?start=` ("Projected from <start>, not baselined"). 404 for an unknown project. | `?start=` optional |
+| `GET /{projectId}/export.xlsx` | Download the project as an Excel workbook, `<projectId>-<YYYY-MM-DD>.xlsx` (the Tickets tab's **Export to Excel** button). Sheet **Tickets**: one row per ticket (closed, force-closed and backlog included), sorted by block, then lifecycle, then id, with ID, Title, Type, Status (UI labels), Priority, Assignee, Lifecycle, Block, Parent, Class, CFP, Estimate h, Logged h, Planned start, Due (real dates), Predecessors, Backlog, Tags; bold frozen header and an autofilter. Sheet **Gantt**: a colored cell grid with the same rows and groups as the dashboard Gantt (by block or person), one column per working day (per week past 130 working days), bars in the dashboard status colors, slip days, milestones as ◆, critical path marked `!`, and a legend. Like `gantt.drawio`, the Gantt uses the baseline if there is one (note: "Baseline of <date>"), otherwise the projected schedule from `?start=` ("Projected from <start>, not baselined"). 404 for an unknown project. | `?start=` optional |
 | `GET /{projectId}/snapshot` · `POST …/snapshot` | Read latest / take a new slip snapshot. POST commits `.tkt/pm/slip_events.json` when new slip events were detected (only that file, plus `.tkt/pm/.gitignore` the first time). Snapshot files themselves are never committed: `.tkt/pm/.gitignore` ignores `snapshots/`. 404 without a baseline. | — |
 | `POST /{projectId}/baseline` | Create the schedule baseline from a template; committed. 409 if one exists (use `/rebaseline`). | `{project_name, template_id, start_date, owner_assignments, duration_adjustments, created_by?}` |
 | `POST /{projectId}/baseline-now` | Baseline directly from current tickets (no template). Commits `baseline.json` and `.tkt/pm/.gitignore`. 409 if one exists. `created_by` defaults to the project's git identity. | optional `{author}` |
@@ -840,9 +848,11 @@ Any write to a project a newer hate changed answers **409** with `newer_format: 
 | `GET /{projectId}/requested-dates` · `PUT …/requested-dates` | Read / set the optional requested start and end (the dates the client asked for). PUT validates the dates and start ≤ end (400), saves `requested_start` / `requested_end` to `.tkt/config.json` (dropping a legacy `target_date`) and commits when changed; `null` clears a date. GET reads an old `target_date` as the requested end. | PUT: `{"requested_start": "2026-11-02", "requested_end": "2027-01-29"}` |
 | `GET /{projectId}/target-date` · `PUT …/target-date` | Alias for the requested end (kept for v1.0.6 clients): `{"target_date": …}` reads / sets `requested_end`, keeping the start. | PUT: `{"target_date": "2026-10-30"}` or `{"target_date": null}` |
 | `GET /{projectId}/forecast` | The Schedule vs request card as JSON: `requested_start`, `requested_end`, `actual_start`, `start_variance_days`, `schedule_start`, `likely_finish`, `p85_finish`, `p85_factor`, `finish_variance_days`, `p85_finish_variance_days`, `remaining_hours`, `unsized`, `working_days_left`, `needs_per_day`, `has_per_day`, `hours_to_cut`, `spare_hours`, `status` (`ON TRACK` / `AT RISK` / `LATE`, empty without a requested end), and `history`. Records the forecast history like the dashboard (one entry per day, committed when it changes). | — |
-| `GET /{projectId}/phase-rollup` | % complete per phase, weighted by estimated hours. `Block NN` phases sort by number and carry `block`, `block_start`, `block_end`. | — |
+| `GET /{projectId}/rollup` | % complete per group, weighted by estimated hours: `?by=lifecycle` or `?by=block` (default: block when the project plans in blocks). `{by, groups:[{key, label, block, block_start, block_end, …}]}`; blocks sort by number and carry their dates. | `?by=` optional |
+| `GET /{projectId}/migration` | Preview of the one-time update to the current project format (nothing written): `{needed, from_version, to_version, blocks_from_phase, tickets, to_block, to_lifecycle, changes:[{ticket_id, title, from, lifecycle, block}]}`. `?blocks_from_phase=true|false` overrides the default rule. | — |
+| `POST /{projectId}/migration` | Apply the update (only when the user chose it): every ticket rewritten, one commit. Until then every write to that project answers 409 `needs_migration`. | `{blocks_from_phase?, author?}` |
 | `GET /{projectId}/blocks` | The planning blocks `[{n, label, start, end}]` (e.g. `{"n":1,"label":"Block 01 (Nov 2-13)","start":"2026-11-02","end":"2026-11-13"}`), from block 1 to the later of the requested end and the projected finish, plus one block. `[]` when `block_weeks` is unset. Read-only. | — |
-| `GET /{projectId}/ready` | The work order from the dependency stages: `ready` (open tickets whose predecessors are all done, not blocked: work them in parallel), `next` (tickets unlocked once the ready set finishes), `stages` (`[{stage, hours, tickets}]`, every open work ticket in dependency order). Each ticket: `id, title, status, priority, assignee, phase, stage, estimated_hours, waits_on`. Feature parents, backlog, and done tickets are left out. Read-only. | — |
+| `GET /{projectId}/ready` | The work order from the dependency waves: `ready` (open tickets whose predecessors are all done, not blocked: work them in parallel), `next` (tickets unlocked once the ready set finishes), `waves` (`[{wave, hours, tickets}]`, every open work ticket in dependency order). Each ticket: `id, title, status, priority, assignee, lifecycle, block, wave, estimated_hours, waits_on`. Feature parents, backlog, and done tickets are left out. Read-only. | — |
 | `GET /{projectId}/test-summary` | Per-ticket test-case tallies (pass / fail / untested) plus the cases, for the Test cases tab. | — |
 | `POST /{projectId}/report` | **Not implemented** (returns 501). | — |
 
@@ -970,8 +980,8 @@ planning ticket. It contains:
 Use this when the project's `block_weeks` is set (2 or 3). It comes **after**
 the tickets exist (§13 creates them): you plan the committed tickets into
 fixed blocks so the baseline, slips, velocity, and Schedule vs request all
-read in blocks. A block is just a phase named for its dates; there is no
-other block object to create.
+read in blocks. A block is a number on the ticket (`block`); its label and
+dates come from `GET /{projectId}/blocks`. There is no block object to create.
 
 ### The rules
 
@@ -979,12 +989,12 @@ other block object to create.
    project doesn't plan in blocks), `GET /{projectId}/blocks` for the block
    list, `GET /{projectId}/resources` for the people and their
    `daily_hours_available` (8 when unset), `GET /{projectId}/requested-dates`,
-   and `GET /{projectId}/ready` for the dependency stages.
+   and `GET /{projectId}/ready` for the dependency waves.
 2. **Capacity per person per block** = daily hours × working days in the block
    (Mon-Fri between `start` and `end`, so 10 for a 2-week block, 15 for a
    3-week block, fewer for a block cut short by a holiday the team names)
    × **0.7** focus. Example: 8 h/day, 2-week block → 8 × 10 × 0.7 = 56 h.
-3. **Fill in stage order.** Walk the work order from `/ready` (`stages`, in
+3. **Fill in wave order.** Walk the work order from `/ready` (`waves`, in
    order). A ticket goes into the earliest block that has room for its
    assignee's `estimated_hours` and that starts no earlier than the block of
    every predecessor (a predecessor in the same block is fine if it fits
@@ -992,30 +1002,30 @@ other block object to create.
 4. **Keep a feature's tickets together** where possible: when one child of a
    parent lands in a block, try its siblings in the same block before moving
    on. Don't split a feature just to top a block up with unrelated work.
-5. **Set the plan on each ticket** (`PATCH …/tickets/{ticketId}`, one field at
-   a time): `phase` = the block `label` exactly as `/blocks` gives it,
+5. **Set the plan on each ticket** (`PATCH …/tickets/{ticketId}` with
+   `fields`, one call per ticket): `block` = the block's `n`,
    `planned_start_date` = the block `start`, `due_date` = the block `end`.
-   Feature parents get no block phase (they finish with their children).
+   Leave `lifecycle` as it is. Feature parents get no block (they finish with
+   their children).
 6. **Overflow stays backlog.** Work that doesn't fit in a block that ends on
-   or before the requested end gets the `backlog` tag and no block phase; list
+   or before the requested end gets the `backlog` tag and no block; list
    it for the human, with the hours, as the scope to cut or the date to move.
    Don't pack blocks past capacity to make the date.
 7. **Baseline after planning.** `POST /{projectId}/baseline-now` (or
    `POST /{projectId}/rebaseline` with a reason if one exists) freezes the
    block plan.
 8. **Re-plan at each block boundary.** After a block ends: for every ticket
-   in it that isn't done, move it to the next block (new `phase`,
+   in it that isn't done, move it to the next block (new `block`,
    `planned_start_date`, `due_date`), re-check the next block's capacity, and
    push the lowest-priority work it displaces forward the same way. Then
    `POST /{projectId}/snapshot`; each moved due date is a slip event.
    `GET /{projectId}/slip` and resolve each new one with
    `PATCH /{projectId}/slip/{slipEventId}` and a real reason (category +
    narrative: what took longer and why). Velocity is the done estimated hours
-   per block, from `GET /{projectId}/phase-rollup`.
+   per block, from `GET /{projectId}/rollup?by=block`.
 
-Per project, `phase` means a block **or** a lifecycle stage, never both
-(§8). If the project already has stage phases, replace them all when you
-plan blocks.
+Blocks and lifecycle are independent (§8): planning blocks never touches a
+ticket's lifecycle.
 
 ### The exact calls
 
@@ -1023,10 +1033,8 @@ plan blocks.
 GET   /api/projects/{projectId}/block-weeks          -> {"block_weeks": 2}
 GET   /api/projects/{projectId}/blocks               -> [{"n":1,"label":"Block 01 (Nov 2-13)","start":"2026-11-02","end":"2026-11-13"}, ...]
 GET   /api/projects/{projectId}/resources            -> [{"email":..., "daily_hours_available": 6}, ...]
-GET   /api/projects/{projectId}/ready                -> {"ready":[...], "next":[...], "stages":[{"stage":1,"hours":..,"tickets":[...]}]}
-PATCH /api/projects/{projectId}/tickets/{ticketId}   {"field":"phase","value":"Block 01 (Nov 2-13)"}
-PATCH /api/projects/{projectId}/tickets/{ticketId}   {"field":"planned_start_date","value":"2026-11-02"}
-PATCH /api/projects/{projectId}/tickets/{ticketId}   {"field":"due_date","value":"2026-11-13"}
+GET   /api/projects/{projectId}/ready                -> {"ready":[...], "next":[...], "waves":[{"wave":1,"hours":..,"tickets":[...]}]}
+PATCH /api/projects/{projectId}/tickets/{ticketId}   {"fields":{"block":1,"planned_start_date":"2026-11-02","due_date":"2026-11-13"}}
 PATCH /api/projects/{projectId}/tickets/{ticketId}   {"field":"tags","value":[..., "backlog"]}        (overflow)
 POST  /api/projects/{projectId}/baseline-now
 POST  /api/projects/{projectId}/snapshot                                                           (at a boundary)
@@ -1080,7 +1088,9 @@ Rules of the road:
   `not_found`, `ambiguous_project` (with `candidates`), `invalid_input`,
   `conflict` (the folder, project id or prefix already exists),
   `project_newer_format` (a newer hate changed the project: reads work, writes
-  don't; tell the user to update hate).
+  don't; tell the user to update hate), `needs_migration` (the project is at
+  an older format: call `hate_migrate_project`, show the user the preview, and
+  apply only if they agree).
 
 Tools (all named `hate_*`):
 
@@ -1088,11 +1098,12 @@ Tools (all named `hate_*`):
 |---|---|
 | `hate_list_projects` | Projects with id, prefix, folder, closed flag, ticket count. |
 | `hate_create_project` | New empty project (git repo + initial commit); id and prefix must be unused. |
+| `hate_migrate_project` | The one-time update of an older project to this hate's format: preview by default, `apply: true` only after the user agrees. |
 | `hate_get_project` | Gates (strict time, enforce-QA), `block_weeks`, team. |
 | `hate_search_tickets` | Search every project by ticket id or title. |
 | `hate_list_tickets` | A project's tickets; filters incl. `parent` (a feature's children). |
 | `hate_get_ticket` | One ticket in full, with `workflow.promote_to`. |
-| `hate_get_ready` | The work order: ready / next / stages. |
+| `hate_get_ready` | The work order: ready / next / waves. |
 | `hate_create_tickets` | 1-50 tickets in one commit, with `ref` / `parent_ref` / `predecessor_refs` and inline test cases. |
 | `hate_update_ticket` | Several fields + `add_tags` / `remove_tags`, all-or-nothing. |
 | `hate_promote_ticket` · `hate_demote_ticket` | Next / previous status (gates apply). |
