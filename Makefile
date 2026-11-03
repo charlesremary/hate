@@ -75,7 +75,7 @@ release: sign
 	ditto -c -k build/release/$(BINARY) $(ZIP)
 	xcrun notarytool submit $(ZIP) --keychain-profile "$(NOTARY_PROFILE)" --wait
 	@$(MAKE) --no-print-directory cask
-	@echo "released $(ZIP) (v$(VERSION)); next: tag v$(VERSION), gh release create, push $(CASK)"
+	@echo "released $(ZIP) (v$(VERSION)); next: make publish"
 
 cask:
 	@test -f $(ZIP) || { echo "no $(ZIP): run make release first"; exit 1; }
