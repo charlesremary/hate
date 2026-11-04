@@ -2711,10 +2711,53 @@ document.getElementById('new-ticket-form').addEventListener('submit', async (e) 
 });
 
 // ── New project modal ────────────────────────────────
-document.getElementById('btn-new-project').addEventListener('click', () => {
+document.getElementById('btn-new-project').addEventListener('click', async () => {
   document.getElementById('new-project-modal-overlay').classList.remove('hidden');
-  document.getElementById('np-folder').focus();
+  npTouched.id = npTouched.folder = false;
+  try { npTakenPrefixes = new Set((await API.get('/api/projects')).map(p => (p.prefix || '').toUpperCase())); } catch { npTakenPrefixes = new Set(); }
+  suggestNewProject();
+  document.getElementById('np-name').focus();
 });
+
+// ── Ticket prefix suggestion ─────────────────────────
+// The prefix is the fixed part of every ticket id (search, agents, commit
+// messages and links rely on it), so it's suggested from the name instead of
+// typed: initials of a multi-word name ("Billing Portal" -> BP), the start of
+// a single word ("Klearcom" -> KLEA), made unique against existing projects.
+// Typing in the prefix or folder field stops the suggestion for that field.
+let npTakenPrefixes = new Set();
+const npTouched = { id: false, folder: false };
+function suggestPrefix(name) {
+  const words = (name || '').toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').trim().split(/\s+/).filter(Boolean)
+    .filter((w, i, all) => all.length === 1 || !['THE', 'A', 'AN', 'OF', 'AND', 'FOR'].includes(w));
+  const alpha = words.filter(w => /^[A-Z]/.test(w)); // initials come from words, not numbers
+  if (!alpha.length) return '';
+  let p = alpha.length === 1 ? alpha[0].slice(0, 4) : alpha.map(w => w[0]).join('').slice(0, 6);
+  if (p.length < 2 && alpha[0].length > 1) p = alpha[0].slice(0, 3);
+  let out = p, n = 2;
+  while (npTakenPrefixes.has(out) && n < 100) out = (p.slice(0, 7 - String(n).length) + n), n++;
+  return out;
+}
+function suggestNewProject() {
+  const name = document.getElementById('np-name').value;
+  const idEl = document.getElementById('np-id');
+  if (!npTouched.id) idEl.value = suggestPrefix(name);
+  const id = idEl.value.toUpperCase();
+  if (!npTouched.folder) document.getElementById('np-folder').value = id ? 'tkt-' + id.toLowerCase() : '';
+  const hint = document.getElementById('np-id-hint');
+  const taken = id && npTakenPrefixes.has(id);
+  hint.style.color = taken ? '#b91c1c' : '#888';
+  hint.innerHTML = taken
+    ? `<strong>${escapeHtml(id)}</strong> is already used by another project: pick another.`
+    : `${npTouched.id ? 'Your prefix.' : 'Suggested from the name.'} Tickets will be numbered like <code>${escapeHtml(id || 'BP')}-1a2b</code>; the prefix can't change later, the name can.`;
+}
+document.getElementById('np-name').addEventListener('input', suggestNewProject);
+document.getElementById('np-id').addEventListener('input', (e) => {
+  npTouched.id = e.target.value.trim() !== '';
+  e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  suggestNewProject();
+});
+document.getElementById('np-folder').addEventListener('input', (e) => { npTouched.folder = e.target.value.trim() !== ''; });
 document.getElementById('btn-cancel-project').addEventListener('click', () => {
   document.getElementById('new-project-modal-overlay').classList.add('hidden');
 });

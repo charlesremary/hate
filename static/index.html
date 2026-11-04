@@ -417,7 +417,11 @@
               file. Inside it, every ticket is its own JSON file under <code>tickets/</code>, and an
               <code>index.json</code> keeps a fast summary of them all.</p>
             <ul>
-              <li><strong>+ New Project</strong> creates a fresh project folder inside your projects root.</li>
+              <li><strong>+ New Project</strong> creates a fresh project folder inside your projects root.
+                Type the name and hate suggests the <em>ticket prefix</em> (Billing Portal &rarr;
+                <code>BP</code>, so tickets are <code>BP-1a2b</code>) and the folder; change either if you
+                like. The name can be changed later in Settings; the prefix can't, because ticket ids,
+                links, commit messages and agents all rely on it.</li>
               <li><strong>Open Existing…</strong> registers a project that already exists on disk —
                 e.g. a repository a teammate cloned. Point it at the folder that contains the
                 <code>.tkt</code> directory.</li>
@@ -1549,10 +1553,11 @@
       <div id="new-project-modal">
         <h3>New Project</h3>
         <form id="new-project-form">
-          <label>Client <input type="text" id="np-client" placeholder="Amplify, Better Tactic, Personal"></label>
-          <label>Folder name <input type="text" id="np-folder" required placeholder="my-project"></label>
-          <label>Project name <input type="text" id="np-name" required placeholder="My Project"></label>
-          <label>Project ID / prefix <input type="text" id="np-id" required placeholder="PROJ" maxlength="8"></label>
+          <label>Project name <input type="text" id="np-name" required placeholder="e.g. Billing Portal"></label>
+          <label>Client <input type="text" id="np-client" placeholder="e.g. Acme, Personal"></label>
+          <label>Ticket prefix <input type="text" id="np-id" required placeholder="BP" maxlength="8" pattern="[A-Za-z][A-Za-z0-9]{0,7}" title="1 to 8 letters or digits, starting with a letter">
+            <span id="np-id-hint" style="display:block;font-size:12px;color:#888;font-weight:400;margin-top:3px">Suggested from the name. Tickets will be numbered like <code>BP-1a2b</code>; the prefix can't change later, the name can.</span></label>
+          <label>Folder name <input type="text" id="np-folder" required placeholder="tkt-bp"></label>
           <div class="form-actions">
             <button type="submit" class="btn-primary">Create</button>
             <button type="button" class="btn-secondary" id="btn-cancel-project">Cancel</button>
