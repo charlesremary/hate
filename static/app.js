@@ -297,6 +297,17 @@ function statusBadge(s) {
   return `<span class="badge s-${s}">${STATUS_LABELS[s] || s}</span>`;
 }
 
+// The red Blocked pill shown next to a ticket's status (HATE-6snq). Since 3.0
+// blocked is a flag, not a status, so statusBadge alone no longer shows it.
+// t.blocked is the flag object (ticket list) or true (/ready work items; the
+// reason then comes from the loaded ticket list).
+function blockedBadge(t) {
+  if (!t || !t.blocked) return '';
+  const flag = typeof t.blocked === 'object' ? t.blocked : ((allTickets.find(x => x.id === t.id) || {}).blocked || {});
+  const why = flag.reason ? ': ' + flag.reason : '';
+  return ` <span class="badge s-blocked" title="Blocked${escapeHtml(why)}">✕ Blocked</span>`;
+}
+
 function resolveResourceName(emailOrName) {
   if (!emailOrName) return '—';
   const r = projectResources.find(r => r.email === emailOrName);
@@ -852,7 +863,7 @@ function depBadge(t, byId) {
   if (isDone(t)) return '';
   const { state, blocking } = predecessorState(t, byId);
   if (state === 'ready') return ' <span class="badge dep-ready">Ready</span>';
-  if (state === 'blocked') return ` <span class="badge dep-blocked">Blocked · ${blocking}</span>`;
+  if (state === 'blocked') return ` <span class="badge dep-blocked" title="Waiting on ${blocking} unfinished predecessor${blocking === 1 ? '' : 's'}">Waits on · ${blocking}</span>`;
   return '';
 }
 
@@ -946,7 +957,7 @@ function renderTicketTable(tickets) {
       <td><strong>${t.id}</strong></td>
       <td>${t.title}${isBacklogTicket(t) ? ' <span class="badge backlog-badge">Backlog</span>' : ''}${reworkBadge(t)}${depBadge(t, byId)}${kidCount.get(t.id) ? ` <span class="badge child-badge" title="${kidCount.get(t.id)} child ticket(s)">↳ ${kidCount.get(t.id)}</span>` : ''}${estimateGapBadge(t)}</td>
       <td>${lifecycleBlockCell(t)}</td>
-      <td>${statusBadge(t.status)}</td>
+      <td style="white-space:nowrap">${statusBadge(t.status)}${blockedBadge(t)}</td>
       <td>${t.assignee ? t.assignee.split('@')[0] : '—'}</td>
       <td style="white-space:nowrap">${estHoursCell(t)}</td>
       <td>${t.planned_start_date || '—'}</td>
@@ -1258,7 +1269,7 @@ function renderTicketPlan(visible) {
     const who = w.assignee ? ` <span style="color:#94a3b8;font-size:11px">${escapeHtml(w.assignee.split('@')[0])}</span>` : '';
     return `<div class="wo-row" data-id="${escapeHtml(w.id)}" style="cursor:pointer;padding:5px 8px;display:flex;gap:8px;align-items:center;border-radius:4px">
       <span style="flex:0 0 52px;font-size:11px;color:#64748b" title="Dependency wave: wave 1 has nothing open in front of it, wave 2 waits on wave 1, ...">wave ${Number(w.wave) || 1}</span>
-      ${statusBadge(escapeHtml(w.status))}
+      ${statusBadge(escapeHtml(w.status))}${blockedBadge(w)}
       <span style="font-weight:600;color:#1565c0">${escapeHtml(w.id)}</span>
       <span style="flex:1;min-width:0">${escapeHtml(w.title)}</span>${who}${eff}${next}${waits}
     </div>`;
@@ -1799,7 +1810,7 @@ function renderTicketPanel(t) {
     <div class="panel-section" style="margin-top:16px">
       <h4>Children <span style="font-size:12px;color:#999;font-weight:normal">(${kids.length}${kidsDone ? ` · ${kidsDone} done` : ''})</span></h4>
       <ul class="child-list">
-        ${kids.map(c => `<li>${linkifyTicketRefs(c.id)} <span class="child-title">${escapeHtml(c.title)}</span> ${statusBadge(c.status)}</li>`).join('')}
+        ${kids.map(c => `<li>${linkifyTicketRefs(c.id)} <span class="child-title">${escapeHtml(c.title)}</span> ${statusBadge(c.status)}${blockedBadge(c)}</li>`).join('')}
       </ul>
     </div>` : '';
 
