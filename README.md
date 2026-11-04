@@ -87,7 +87,9 @@ A project is an ordinary Git repository. HATE owns a few paths inside it:
 - **`.tkt/config.json`** holds the project config (`ProjectConfig`): client,
   project name/id, ticket-ID `prefix`, team `resources`, linked `repos`,
   hour budget pools, estimate inputs, the legacy `effort_to_days` mapping,
-  optional project-local git identity, and `closed_at`.
+  and `closed_at`. It never holds a personal identity: an older hate's
+  `git_identity` is read only as a fill-in (see "Working as" below) and is
+  dropped on the next config write.
 
 Ticket IDs are `<PREFIX>-<4 base36 chars>`, e.g. `AMPL-7k3x`. The prefix comes
 from the project config (default `TKT`); the suffix is random and collision-checked
@@ -375,6 +377,16 @@ There is no server-side database — the Git repo *is* the shared state
   Without one, nothing syncs in the background (Chuck's SSH flow is unchanged).
 - **Add from GitHub…** lists the repos the token can see (hate projects
   marked), or takes a pasted URL, and clones into the projects root.
+- **Working as** (the header badge; `ticket.EffectiveIdentity`) is per machine,
+  never in the shared config. hate commits and authors as: the signed-in Git
+  account for this repo, else the repo-local git user (`git config --local`),
+  else the global git user, else, only when the machine has none at all, the
+  legacy shared `git_identity` an older hate wrote. Team & Identity > You on this project
+  writes the repo-local git config only. When the repo-local identity differs
+  from this computer's own (signed-in account or global git user) and wasn't
+  chosen here, the badge turns red ("hate is set to work as X, but you are Y on
+  this computer") with one-click "Work as Y" / "Keep X"; writes are not
+  refused, and each commit logs a warning (HATE-5t80).
 
 The PM-facing walkthrough (install, first launch on Mac/Windows, sign in, add a
 project, the status light) and the owner's "grant access" checklist are in

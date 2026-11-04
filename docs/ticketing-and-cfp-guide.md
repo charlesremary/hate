@@ -781,7 +781,7 @@ Any write to a project a newer hate changed answers **409** with `newer_format: 
 | `GET /{projectId}/autosync` | The header status light: `enabled`, `state` (`synced`/`syncing`/`offline`/`attention`/`idle`/`local`), `label`, `message`, `notes`, `last_sync`, `head`. No network. | — |
 | `POST /{projectId}/autosync/open` | The app opened the project: start a background sync (with a Git account). | — |
 | `GET /{projectId}/git-status` | Working-tree git status. | — |
-| `GET /{projectId}/git-identity` · `POST …/git-identity` | Read / set the project's git author identity. | POST: `{name, email}` |
+| `GET /{projectId}/git-identity` · `POST …/git-identity` · `POST …/git-identity/confirm` | Read / set who this machine works as (per machine: the repo-local git config, never `.tkt/config.json`). GET (and `whoami`) return `git_identity`, `source` (account / local / global / shared), `machine` (this computer's own identity), `mismatch`, `from_shared` and `message`. `confirm` keeps the repo-local identity on purpose so it isn't flagged. | POST: `{name, email}` |
 | `GET /{projectId}/resources` | List team resources (assignable people + capacity). | — |
 | `POST /{projectId}/resources` | Add a resource. | `{name, email, git_user, role, daily_hours_available?}` |
 | `PATCH /{projectId}/resources/{email}` | Update a resource. | resource fields |
@@ -852,6 +852,7 @@ Any write to a project a newer hate changed answers **409** with `newer_format: 
 | `GET /{projectId}/target-date` · `PUT …/target-date` | Alias for the requested end (kept for v1.0.6 clients): `{"target_date": …}` reads / sets `requested_end`, keeping the start. | PUT: `{"target_date": "2026-10-30"}` or `{"target_date": null}` |
 | `GET /{projectId}/forecast` | The Schedule vs request card as JSON: `requested_start`, `requested_end`, `actual_start`, `start_variance_days`, `schedule_start`, `likely_finish`, `p85_finish`, `p85_factor`, `finish_variance_days`, `p85_finish_variance_days`, `remaining_hours`, `unsized`, `working_days_left`, `needs_per_day`, `has_per_day`, `hours_to_cut`, `spare_hours`, `status` (`ON TRACK` / `AT RISK` / `LATE`, empty without a requested end), and `history`. Records the forecast history like the dashboard (one entry per day, committed when it changes). | — |
 | `GET /{projectId}/stats` | The PM Dashboard's live numbers, each as `{value, prev, has_prev, n}` (prev = a week ago, or the previous block on a block project): `percent_complete`, `remaining_hours`, `accuracy_wrap` / `accuracy_code` (actual ÷ estimate on finished work, `n` = sample), `finished` (this period), `cycle_days` (start to done, last 28 days), `test_pass_rate`; plus `blocked_now`, `longest_blocked`, `scope_added` since the baseline. Use it for status summaries. | — |
+| `GET /{projectId}/hours-budget` | The Hours budget card as JSON: `work`, `admin`, `qa` pools (`budget` (null when unset), `spent`, `remaining`, `percent_used`) and `by_contributor`: `[{author, name, work, admin, qa, total}]`, most hours first; the per-person hours add up to the pool spends. MCP: `hate_get_hours_budget`. | — |
 | `GET /{projectId}/rollup` | % complete per group, weighted by estimated hours: `?by=lifecycle` or `?by=block` (default: block when the project plans in blocks). `{by, groups:[{key, label, block, block_start, block_end, …}]}`; blocks sort by number and carry their dates. | `?by=` optional |
 | `GET /{projectId}/migration` | Preview of the one-time update to the current project format (nothing written): `{needed, from_version, to_version, blocks_from_phase, tickets, to_block, to_lifecycle, changes:[{ticket_id, title, from, lifecycle, block}]}`. `?blocks_from_phase=true|false` overrides the default rule. | — |
 | `POST /{projectId}/migration` | Apply the update (only when the user chose it): every ticket rewritten, one commit. Until then every write to that project answers 409 `needs_migration`. | `{blocks_from_phase?, author?}` |
@@ -1108,8 +1109,9 @@ Rules of the road:
 - **Local only.** Requests from other machines get 403, even with
   `-listen 0.0.0.0`. No token. Start with `-no-mcp` (or `HATE_NO_MCP=1`) to
   turn the endpoint off.
-- **Author** defaults to the project's git identity; pass `author` to record
-  someone else.
+- **Author** defaults to this machine's identity (signed-in Git account, else
+  the repo-local git user, else the global one; never a teammate's from the
+  shared config); pass `author` to record someone else.
 - **`project`** takes an id, folder name or ticket prefix (`HATE`). Ticket tools
   can leave it out: it's taken from the ticket id.
 - **Errors** an agent can act on come back as tool errors whose text is JSON
@@ -1136,6 +1138,7 @@ Tools (all named `hate_*`):
 | `hate_get_ticket` | One ticket in full, with `workflow.promote_to`. |
 | `hate_get_ready` | The work order: ready / next / waves. |
 | `hate_get_stats` | The PM Dashboard's live numbers with trends (as `GET /stats`). |
+| `hate_get_hours_budget` | Logged hours vs the work / admin / QA pools, plus `by_contributor` (each person's hours per pool, most first; as `GET /hours-budget`). |
 | `hate_create_tickets` | 1-50 tickets in one commit, with `ref` / `parent_ref` / `predecessor_refs` and inline test cases. |
 | `hate_update_ticket` | Several fields + `add_tags` / `remove_tags`, all-or-nothing. |
 | `hate_promote_ticket` · `hate_demote_ticket` | Next / previous status (gates apply). |

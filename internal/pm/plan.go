@@ -96,30 +96,17 @@ func commitPlan(projectRoot string, paths []string, message string) string {
 	return ticket.CommitWarning(ticket.CommitFiles(projectRoot, files, message))
 }
 
-// ResolveAuthor returns the requested author, else the signed-in Git
-// account's email (when the repo syncs through it), else the project's git
-// identity (email, then name), else "unknown".
+// ResolveAuthor returns the requested author, else this machine's identity
+// (ticket.EffectiveIdentity: signed-in Git account, repo-local git user,
+// global git user, then the legacy shared git_identity only as a fill-in;
+// email, then name), else "unknown".
 func ResolveAuthor(projectRoot, requested string) string {
 	if a := strings.TrimSpace(requested); a != "" {
 		return a
 	}
-	if _, email, ok := ticket.AccountIdentity(projectRoot); ok {
-		return email
-	}
-	if cfg, err := ticket.ReadConfig(projectRoot); err == nil && cfg.GitIdentityV != nil {
-		if cfg.GitIdentityV.Email != "" {
-			return cfg.GitIdentityV.Email
-		}
-		if cfg.GitIdentityV.Name != "" {
-			return cfg.GitIdentityV.Name
-		}
-	}
-	id := ticket.GitUserIdentity(projectRoot)
-	if id["email"] != "" {
-		return id["email"]
-	}
-	if id["name"] != "" {
-		return id["name"]
+	cfg, _ := ticket.ReadConfig(projectRoot)
+	if a := ticket.EffectiveIdentity(projectRoot, cfg).Author(); a != "" {
+		return a
 	}
 	return "unknown"
 }

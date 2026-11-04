@@ -89,8 +89,9 @@ func applyMigration(w http.ResponseWriter, r *http.Request) {
 	}
 	author := strings.TrimSpace(req.Author)
 	if author == "" {
-		if id := ticket.GitUserIdentity(root); id["email"] != "" {
-			author = id["email"]
+		cfg, _ := ticket.ReadConfig(root)
+		if id := ticket.EffectiveIdentity(root, cfg); id.Email != "" {
+			author = id.Email
 		} else {
 			author = "hate"
 		}

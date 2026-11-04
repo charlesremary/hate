@@ -265,6 +265,20 @@ func ApplyMigration(root string, opts ticket.MigrateOptions, author string) (*ti
 	return p, nil
 }
 
+// HoursBudget is the PM Dashboard's hours budget card: logged hours vs the
+// work, admin/meeting and QA pools, plus the per-contributor split.
+func HoursBudget(root string) (pm.HoursBudget, error) {
+	tickets, err := ticket.ReadAllTickets(root)
+	if err != nil {
+		return pm.HoursBudget{}, wrap(ErrInternal, err)
+	}
+	cfg, err := ticket.ReadConfig(root)
+	if err != nil {
+		return pm.ComputeHoursBudget(tickets, nil, nil, nil, nil), nil
+	}
+	return pm.ComputeHoursBudget(tickets, cfg.Resources, cfg.EffectiveWorkHours(), cfg.AdminHours, cfg.QAHours), nil
+}
+
 // Stats is the PM Dashboard's live numbers (pm.ComputeStats).
 func Stats(root string) (pm.ProjectStats, error) {
 	tickets, err := ticket.ReadAllTickets(root)

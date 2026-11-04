@@ -114,6 +114,24 @@ func registerReadTools(s *mcp.Server) {
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "hate_get_hours_budget",
+		Description: "The PM Dashboard's hours budget card: logged hours vs the work, admin/meeting and QA pools (budget, spent, remaining, percent_used; budget null when unset), " +
+			"plus by_contributor: each person who logged time (author, name) with their work / admin / qa hours and total, most hours first. " +
+			"The per-person hours add up to the pool spends (as GET /hours-budget).",
+		Annotations: readOnly("Get hours budget"),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in projectIn) (*mcp.CallToolResult, *pm.HoursBudget, error) {
+		root, err := service.ResolveProject(in.Project)
+		if err != nil {
+			return nil, nil, mapError(err)
+		}
+		b, err := service.HoursBudget(root)
+		if err != nil {
+			return nil, nil, mapError(err)
+		}
+		return nil, &b, nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "hate_search_tickets",
 		Description: "Search tickets across every project by id or title (case-insensitive). Ranked: exact id, id prefix, id contains, title contains; open tickets first. " +
 			"Use it to find a ticket when you know part of its id or title but not its project.",

@@ -24,15 +24,15 @@ func write(title string, destructive, idempotent bool) *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{Title: title, DestructiveHint: d, IdempotentHint: idempotent, OpenWorldHint: falseP}
 }
 
-// author is the explicit author, else the project's git identity (the one the
-// UI commits as), else a fixed MCP marker.
+// author is the explicit author, else this machine's identity (the one the UI
+// works as, see ticket.EffectiveIdentity), else a fixed MCP marker.
 func author(root, explicit string) string {
 	if a := strings.TrimSpace(explicit); a != "" {
 		return a
 	}
-	id := ticket.GitUserIdentity(root)
-	if id["email"] != "" {
-		return id["email"]
+	cfg, _ := ticket.ReadConfig(root)
+	if id := ticket.EffectiveIdentity(root, cfg); id.Email != "" {
+		return id.Email
 	}
 	return "mcp@hate.local"
 }

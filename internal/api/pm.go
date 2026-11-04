@@ -73,6 +73,7 @@ func RegisterPMSubRoutes(r chi.Router) {
 	r.Put("/block-weeks", updateBlockWeeks)
 	r.Get("/blocks", getBlocks)
 	r.Get("/ready", getReady)
+	r.Get("/hours-budget", getHoursBudget)
 	r.Get("/test-summary", getTestSummary)
 	r.Get("/cosmic", getCosmic)
 	r.Put("/cosmic-estimate", updateCosmicEstimate)
@@ -322,7 +323,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 		blocks := pm.BlocksForProject(cfg, tickets, estCtx, time.Now())
 		reportsHTML := pm.RenderProjectedGanttHTML(projectID, projectName, tickets, resources, estCtx, start, exportURL, blocks) +
 			pm.RenderLoadHTML(pm.ComputeLoad(tickets, resources, estCtx, time.Now(), targetDate)) +
-			pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, workHours, adminHours, qaHours)) +
+			pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(tickets, resources, workHours, adminHours, qaHours)) +
 			pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(tickets, estCtx)) +
 			pm.RenderBlockedHTML(pm.ComputeBlocked(tickets)) +
 			pm.RenderTestSummaryLineHTML(pm.ComputeTestSummary(tickets)) +
@@ -366,7 +367,7 @@ func getDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	estCtx := pm.ProjectEstimateContext(root, costTickets, cfg)
 	reportsHTML := pm.RenderLoadHTML(pm.ComputeLoad(costTickets, resources, estCtx, time.Now(), targetDate)) +
-		pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, workHours, adminHours, qaHours)) +
+		pm.RenderHoursBudgetHTML(pm.ComputeHoursBudget(costTickets, resources, workHours, adminHours, qaHours)) +
 		pm.RenderHoursAtRiskHTML(pm.ComputeHoursAtRisk(costTickets, estCtx)) +
 		pm.RenderBlockedHTML(pm.ComputeBlocked(costTickets)) +
 		pm.RenderTestSummaryLineHTML(pm.ComputeTestSummary(costTickets)) +

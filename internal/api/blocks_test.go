@@ -145,6 +145,35 @@ func TestReadyAPI(t *testing.T) {
 	}
 }
 
+// HATE-478u: GET /hours-budget carries the pools and the per-contributor split.
+func TestHoursBudgetAPI(t *testing.T) {
+	h, root := setupCosmicProjects(t)
+	if err := os.RemoveAll(ticket.TicketsDir(root)); err != nil {
+		t.Fatal(err)
+	}
+	a := ticket.BlankTicket("T-a", "task", "Work", "c@example.com")
+	a.TimeEntries = []ticket.TimeEntry{
+		{Author: "bob@x.com", Bucket: "work", Hours: 3},
+		{Author: "sally@x.com", Bucket: "qa", Hours: 5},
+	}
+	m := ticket.BlankTicket("T-m", "meeting", "Sync", "c@example.com")
+	m.TimeEntries = []ticket.TimeEntry{{Author: "bob@x.com", Hours: 1}} // legacy -> admin
+	writeTickets(t, root, a, m)
+
+	var b pm.HoursBudget
+	getJSON(t, h, "/api/projects/est/hours-budget", &b)
+	if b.Work.Spent != 3 || b.Admin.Spent != 1 || b.QA.Spent != 5 {
+		t.Errorf("pools = %+v / %+v / %+v", b.Work, b.Admin, b.QA)
+	}
+	if len(b.ByContributor) != 2 || b.ByContributor[0].Name != "sally" || b.ByContributor[0].QA != 5 ||
+		b.ByContributor[1].Author != "bob@x.com" || b.ByContributor[1].Work != 3 || b.ByContributor[1].Admin != 1 || b.ByContributor[1].Total != 4 {
+		t.Errorf("by_contributor = %+v", b.ByContributor)
+	}
+	if html := getHTML(t, h, "/api/projects/est/dashboard"); !strings.Contains(html, "Logged by contributor") {
+		t.Error("dashboard hours budget card has no contributor breakdown")
+	}
+}
+
 // HATE-43sr tc1 + HATE-evqw tc3: the PM dashboard has no Execution plan card
 // and no stage headers; with blocks set its Gantt has block bands, without
 // them it groups by person.

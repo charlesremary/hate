@@ -2410,19 +2410,41 @@ async function refreshCommitAs() {
   if (!currentProject) return;
   const el = document.getElementById('commit-as');
   try {
+    // The identity is per machine (HATE-5t80): the server resolves it
+    // (Git account, repo-local git user, global git user, legacy shared
+    // fill-in) and reports a mismatch with this computer's own identity.
     const data = await API.get(`/api/projects/${currentProject.id}/git-identity`);
-    const cfg = data.configured;
-    const cur = data.current;
-    const gitUser = (cfg && cfg.name) ? cfg.name : (cur && cur.name) ? cur.name : null;
-    const gitEmail = (cfg && cfg.email) ? cfg.email : (cur && cur.email) ? cur.email : null;
-    if (gitUser) {
+    const gi = data.git_identity || {};
+    const gitUser = gi.name || null;
+    const gitEmail = gi.email || null;
+    if (data.mismatch || data.from_shared) {
+      const m = data.machine || {};
+      el.className = 'commit-as active ' + (data.mismatch ? 'mismatch' : 'warning');
+      el.title = 'Fix it in Team & Identity > You on this project';
+      let html = escapeHtml(data.message || '');
+      if (data.mismatch && m.name && m.email) {
+        html += ` <button class="btn-link" id="btn-identity-use-mine">Work as ${escapeHtml(m.name)}</button>`;
+        html += ` <button class="btn-link" id="btn-identity-keep">Keep ${escapeHtml(gitUser || gitEmail || '')}</button>`;
+      } else {
+        html += ` <button class="btn-link" id="btn-identity-keep">That's me</button>`;
+        html += ` <button class="btn-link" id="btn-identity-set">Set mine</button>`;
+      }
+      el.innerHTML = html;
+      const useMine = document.getElementById('btn-identity-use-mine');
+      if (useMine) useMine.onclick = () => fixIdentity(m.name, m.email);
+      const keep = document.getElementById('btn-identity-keep');
+      if (keep) keep.onclick = () => keepIdentity();
+      const set = document.getElementById('btn-identity-set');
+      if (set) set.onclick = () => document.getElementById('btn-team').click();
+      document.getElementById('gi-name').value = gi.name || '';
+      document.getElementById('gi-email').value = gi.email || '';
+    } else if (gitUser) {
       el.className = 'commit-as active';
+      el.title = 'Git identity for this project (this computer only)';
       el.textContent = `Working as: ${gitUser}${gitEmail ? ' <' + gitEmail + '>' : ''}`;
       // Pre-fill team modal fields
-      if (cfg && cfg.name) {
-        document.getElementById('gi-name').value = cfg.name;
-        document.getElementById('gi-email').value = cfg.email;
-      }
+      document.getElementById('gi-name').value = gi.name || '';
+      document.getElementById('gi-email').value = gi.email || '';
     } else {
       el.className = 'commit-as active warning';
       el.textContent = 'No Git identity set';
@@ -2432,6 +2454,36 @@ async function refreshCommitAs() {
   } catch (e) { el.className = 'commit-as'; }
 }
 
+// Re-reads who this machine works as (after the identity changed).
+async function refreshCurrentUser() {
+  if (!currentProject) return;
+  try {
+    const whoami = await API.get(`/api/projects/${currentProject.id}/whoami`);
+    currentUser = whoami.resource || { name: whoami.git_identity.name, email: whoami.git_identity.email };
+  } catch (e) { /* keep the previous one */ }
+}
+
+// One click on a mismatch: set this repo's identity to this computer's own.
+async function fixIdentity(name, email) {
+  if (!currentProject) return;
+  try {
+    await API.post(`/api/projects/${currentProject.id}/git-identity`, { name, email });
+    showToast(`Now working as ${name}`);
+    await refreshCurrentUser();
+    refreshCommitAs();
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+// Keep the repo-local identity on purpose (it is this person, e.g. a work email).
+async function keepIdentity() {
+  if (!currentProject) return;
+  try {
+    await API.post(`/api/projects/${currentProject.id}/git-identity/confirm`, {});
+    showToast('Identity kept for this project on this computer');
+    refreshCommitAs();
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
 document.getElementById('btn-set-identity').addEventListener('click', async () => {
   if (!currentProject) return;
   const name = document.getElementById('gi-name').value.trim();
@@ -2439,7 +2491,8 @@ document.getElementById('btn-set-identity').addEventListener('click', async () =
   if (!name || !email) { showToast('Name and email are required', 'error'); return; }
   try {
     await API.post(`/api/projects/${currentProject.id}/git-identity`, { name, email });
-    showToast(`Identity saved: ${name}`);
+    showToast(`Identity saved for this computer: ${name}`);
+    await refreshCurrentUser();
     refreshCommitAs();
     refreshTeamModal();
   } catch (e) { showToast(e.message, 'error'); }
@@ -3169,16 +3222,19 @@ async function refreshTeamModal() {
     const gi = whoami.git_identity || { name: '', email: '' };
     document.getElementById('gi-name').value = gi.name || '';
     document.getElementById('gi-email').value = gi.email || '';
-    renderIdentityStatus(gi, whoami.resource);
+    renderIdentityStatus(gi, whoami.resource, whoami);
     renderTeamList(whoami.resource);
     populateAssigneeSelect();
   } catch (e) { showToast(e.message, 'error'); }
 }
 
 // Shows whether the saved identity is set, and whether it links to a team member.
-function renderIdentityStatus(gi, matched) {
+function renderIdentityStatus(gi, matched, state) {
   const el = document.getElementById('identity-status');
-  if (!gi.name && !gi.email) {
+  if (state && state.mismatch) {
+    el.className = 'identity-status warn mismatch';
+    el.textContent = '⚠ ' + (state.message || '') + ' Save your own name and email below (this computer only).';
+  } else if (!gi.name && !gi.email) {
     el.className = 'identity-status warn';
     el.innerHTML = "⚠ No identity set — your commits and time entries won't be attributed to anyone.";
   } else if (matched) {

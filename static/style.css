@@ -128,6 +128,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 .commit-as.active { display: inline-block; }
 .commit-as.warning { color: #e65100; font-weight: 500; }
+.commit-as.mismatch { color: #c62828; font-weight: 600; }
 .sync-status {
   font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500;
   white-space: nowrap; display: none;
@@ -508,6 +509,7 @@ form input:focus, form select:focus, form textarea:focus {
 .identity-status:empty { display: none; }
 .identity-status.ok { background: #e8f5e9; color: #2e7d32; }
 .identity-status.warn { background: #fff8e1; color: #b26a00; }
+.identity-status.mismatch { background: #ffebee; color: #c62828; font-weight: 500; }
 
 .you-tag {
   display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: .04em;

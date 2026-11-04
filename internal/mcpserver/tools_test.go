@@ -118,7 +118,7 @@ func newTicket(t *testing.T, root string, p ticket.CreateTicketParams) string {
 	return res.Ticket.ID
 }
 
-var readTools = []string{"hate_get_project", "hate_get_ready", "hate_get_stats", "hate_get_ticket", "hate_list_projects", "hate_list_tickets", "hate_search_tickets"}
+var readTools = []string{"hate_get_hours_budget", "hate_get_project", "hate_get_ready", "hate_get_stats", "hate_get_ticket", "hate_list_projects", "hate_list_tickets", "hate_search_tickets"}
 
 // HATE-28gd tc3 (+ HATE-t546 annotations): stable order, hints as specified.
 func TestToolsList(t *testing.T) {
@@ -132,8 +132,8 @@ func TestToolsList(t *testing.T) {
 		return res.Tools
 	}
 	a, b := list(), list()
-	if len(a) != 23 {
-		t.Errorf("%d tools, want 23", len(a))
+	if len(a) != 24 {
+		t.Errorf("%d tools, want 24", len(a))
 	}
 	ro := map[string]bool{}
 	for _, n := range readTools {
@@ -209,6 +209,15 @@ func TestReadTools(t *testing.T) {
 		t.Errorf("search = %v", hits)
 	}
 	mustOK(t, cs, "hate_get_ready", map[string]any{"project": "est"})
+
+	if _, err := service.LogTime(root, a, service.LogTimeParams{Date: "2026-11-02", Hours: 2, Description: "built it", Author: "bob@x.com"}); err != nil {
+		t.Fatal(err)
+	}
+	hb := mustOK(t, cs, "hate_get_hours_budget", map[string]any{"project": "est"})
+	by, _ := hb["by_contributor"].([]any)
+	if len(by) != 1 || by[0].(map[string]any)["author"] != "bob@x.com" || by[0].(map[string]any)["total"].(float64) != 2 {
+		t.Errorf("hours budget = %v", hb)
+	}
 }
 
 // HATE-28gd tc4: the guide resource, whole and by section; the overview.

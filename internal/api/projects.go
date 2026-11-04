@@ -113,6 +113,7 @@ func RegisterProjectRoutes(r chi.Router) {
 			r.Get("/git-status", getGitStatus)
 			r.Get("/git-identity", getGitIdentity)
 			r.Post("/git-identity", setGitIdentity)
+			r.Post("/git-identity/confirm", confirmGitIdentity)
 			r.Get("/resources", listResources)
 			r.Post("/resources", addResource)
 			r.Patch("/resources/{email}", updateResource)
@@ -489,10 +490,28 @@ func getGitIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"configured": cfg.GitIdentityV,
-		"current":    ticket.GitUserIdentity(root),
-	})
+	respondJSON(w, http.StatusOK, identityPayload(root, cfg))
+}
+
+// identityPayload is the Working-as state shared by git-identity and whoami.
+// "configured" is kept for older clients: it is now the identity this machine
+// works as (never the shared config's), as is "git_identity".
+func identityPayload(root string, cfg *ticket.ProjectConfig) map[string]interface{} {
+	check := ticket.CheckIdentity(root, cfg)
+	var configured interface{}
+	if !check.Working.IsZero() {
+		configured = check.Working
+	}
+	return map[string]interface{}{
+		"configured":   configured,
+		"current":      ticket.GitUserIdentity(root),
+		"git_identity": map[string]string{"name": check.Working.Name, "email": check.Working.Email},
+		"source":       check.Working.Source,
+		"machine":      check.Machine,
+		"mismatch":     check.Mismatch,
+		"from_shared":  check.FromShared,
+		"message":      check.Message,
+	}
 }
 
 // setGitIdentity handles POST /api/projects/{projectId}/git-identity
@@ -516,27 +535,18 @@ func setGitIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := ticket.ReadConfig(root)
-	if err != nil {
+	// Per machine only (HATE-5t80): the repo-local git config, never the
+	// shared, committed .tkt/config.json, so setting it can't change who a
+	// teammate's machine works as.
+	if err := ticket.SetMachineIdentity(root, name, email); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	cfg.GitIdentityV = &ticket.GitIdentity{
-		Name:  name,
-		Email: email,
-	}
-	if err := ticket.WriteConfig(root, cfg); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Apply immediately
-	ticket.SetGitIdentity(root, name, email)
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"name":  name,
-		"email": email,
-	})
+	cfg, _ := ticket.ReadConfig(root)
+	out := identityPayload(root, cfg)
+	out["name"] = name
+	out["email"] = email
+	respondJSON(w, http.StatusOK, out)
 }
 
 // listResources handles GET /api/projects/{projectId}/resources
@@ -743,38 +753,50 @@ func whoami(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prefer the project's configured git identity over the live git config,
-	// matching how the "Working as" banner resolves identity. Otherwise a repo
-	// with no local git identity falls through to the global config, which may
-	// be a different person entirely.
-	identity := ticket.GitUserIdentity(root)
-	if name, email, ok := ticket.AccountIdentity(root); ok {
-		// Signed in to the Git account this repo syncs through: that's who
-		// commits (see ticket.EnsureProjectIdentity).
-		identity = map[string]string{"name": name, "email": email}
-	} else if cfg.GitIdentityV != nil && cfg.GitIdentityV.Email != "" {
-		identity = map[string]string{
-			"name":  cfg.GitIdentityV.Name,
-			"email": cfg.GitIdentityV.Email,
-		}
-	}
-
+	// Who this machine works as: the signed-in Git account, else the
+	// repo-local git user, else the global one, else (fill-in only) the legacy
+	// shared git_identity. See ticket.EffectiveIdentity. A mismatch with this
+	// computer's own identity is reported, not resolved silently.
+	out := identityPayload(root, cfg)
+	identity := out["git_identity"].(map[string]string)
 	identityEmail := identity["email"]
 	identityName := identity["name"]
 
 	var matched *ticket.Resource
 	for _, res := range cfg.Resources {
-		if res.Email == identityEmail || res.GitUser == identityName {
+		if (identityEmail != "" && strings.EqualFold(res.Email, identityEmail)) ||
+			(identityName != "" && res.GitUser == identityName) {
 			r := res
 			matched = &r
 			break
 		}
 	}
+	out["resource"] = matched
+	respondJSON(w, http.StatusOK, out)
+}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"git_identity": identity,
-		"resource":     matched,
-	})
+// confirmGitIdentity handles POST /api/projects/{projectId}/git-identity/confirm:
+// keep the repo-local identity even though it differs from this computer's
+// global git user (a per-repo work email, say), so it is no longer reported
+// as a mismatch.
+func confirmGitIdentity(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectId")
+	root, ok := getProjectRoot(w, projectID)
+	if !ok {
+		return
+	}
+	defer ticket.LockProject(root)()
+	local := ticket.LocalIdentity(root)
+	if local.Email == "" {
+		respondError(w, http.StatusUnprocessableEntity, "There is no repo-local Git identity to keep. Set one in Team & Identity > You on this project.")
+		return
+	}
+	if err := ticket.ConfirmLocalIdentity(root, local.Email); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cfg, _ := ticket.ReadConfig(root)
+	respondJSON(w, http.StatusOK, identityPayload(root, cfg))
 }
 
 // validEffortSizes is the retired t-shirt size set. The effort_to_days map now

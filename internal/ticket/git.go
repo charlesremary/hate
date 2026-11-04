@@ -63,10 +63,13 @@ func AccountIdentity(repoRoot string) (name, email string, ok bool) {
 	return gitacct.CommitIdentity(repoRoot)
 }
 
-// EnsureProjectIdentity sets the repo-local commit identity: the signed-in Git
-// account's when the repo syncs through it (the PM commits as themselves, even
-// when the shared config carries someone else's git_identity), else the
-// project's git_identity when set.
+// EnsureProjectIdentity makes the repo-local commit identity this machine's
+// (see EffectiveIdentity): the signed-in Git account's when the repo syncs
+// through it. Otherwise it leaves the machine's own git user alone; the legacy
+// shared git_identity is copied in only when the machine has no git user at
+// all (no local or global name and email), never over an existing one
+// (HATE-5t80). A mismatch between the local and global user is reported by
+// CheckIdentity, not resolved here.
 func EnsureProjectIdentity(repoRoot string, cfg *ProjectConfig) {
 	if name, email, ok := AccountIdentity(repoRoot); ok {
 		current := GitUserIdentity(repoRoot)
@@ -75,17 +78,16 @@ func EnsureProjectIdentity(repoRoot string, cfg *ProjectConfig) {
 		}
 		return
 	}
-	if cfg == nil || cfg.GitIdentityV == nil {
-		return
-	}
-	gi := cfg.GitIdentityV
-	if gi.Name == "" || gi.Email == "" {
+	shared := LegacySharedIdentity(cfg)
+	if shared.Name == "" || shared.Email == "" {
 		return
 	}
 	current := GitUserIdentity(repoRoot)
-	if current["name"] != gi.Name || current["email"] != gi.Email {
-		_ = SetGitIdentity(repoRoot, gi.Name, gi.Email)
+	if current["name"] != "" || current["email"] != "" {
+		return
 	}
+	_ = SetGitIdentity(repoRoot, shared.Name, shared.Email)
+	log.Printf("identity (%s): no git user on this machine; using %s from the shared project settings", repoRoot, shared)
 }
 
 // CommitFiles is the one commit path for everything hate writes: it applies
@@ -99,6 +101,9 @@ func EnsureProjectIdentity(repoRoot string, cfg *ProjectConfig) {
 func CommitFiles(repoRoot string, files []string, message string) error {
 	cfg, _ := ReadConfig(repoRoot)
 	EnsureProjectIdentity(repoRoot, cfg)
+	if c := CheckIdentity(repoRoot, cfg); c.Mismatch {
+		log.Printf("identity warning (%s): %s Fix it in Team & Identity > You on this project.", repoRoot, c.Message)
+	}
 	if _, err := UntrackIndex(repoRoot); err != nil {
 		log.Printf("commit (%s): untrack index.json: %v", repoRoot, err)
 	}

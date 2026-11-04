@@ -271,10 +271,13 @@ func DecodeConfig(data []byte) (*ProjectConfig, error) {
 	return &c, nil
 }
 
-// EncodeConfig is config.json's bytes, like EncodeTicket.
+// EncodeConfig is config.json's bytes, like EncodeTicket. It never writes the
+// legacy git_identity: the identity is per machine, not shared (HATE-5t80).
 func EncodeConfig(c *ProjectConfig) ([]byte, error) {
 	type plain ProjectConfig
-	return encodeIndented(plain(*c), c.extra)
+	p := plain(*c)
+	p.LegacyGitIdentity = nil
+	return encodeIndented(p, c.extra)
 }
 
 func encodeIndented(v any, extra extraFields) ([]byte, error) {

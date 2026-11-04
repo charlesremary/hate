@@ -4,6 +4,7 @@
 package pm
 
 import (
+	"strings"
 	"testing"
 
 	"hate/internal/ticket"
@@ -25,7 +26,7 @@ func TestComputeHoursBudget(t *testing.T) {
 	}
 
 	work, admin := 50.0, 8.0
-	b := ComputeHoursBudget(tickets, &work, &admin, nil)
+	b := ComputeHoursBudget(tickets, nil, &work, &admin, nil)
 	if b.Work.Spent != 40 || b.Work.Remaining != 10 || b.Work.PercentUsed != 80 { // 40/50
 		t.Errorf("work = spent %.1f/rem %.1f/pct %.1f, want 40/10/80", b.Work.Spent, b.Work.Remaining, b.Work.PercentUsed)
 	}
@@ -34,12 +35,97 @@ func TestComputeHoursBudget(t *testing.T) {
 	}
 
 	// No budgets set: pools still total their spend, nothing to burn against.
-	nb := ComputeHoursBudget(tickets, nil, nil, nil)
+	nb := ComputeHoursBudget(tickets, nil, nil, nil, nil)
 	if nb.Work.Budget != nil || nb.Work.Spent != 40 || nb.Work.PercentUsed != 0 {
 		t.Errorf("no-budget work = %+v, want spent 40, pct 0, nil budget", nb.Work)
 	}
 	if nb.Admin.Spent != 6 {
 		t.Errorf("no-budget admin spent = %.1f, want 6", nb.Admin.Spent)
+	}
+}
+
+// TestHoursBudgetByContributor checks the per-person split: same bucketing as
+// the pools (stamped bucket, legacy fallback by ticket type), totals that add up
+// to the pool spends, resource names, one row per resource across email / git
+// user, email local part for unknown authors, and most-hours-first order.
+func TestHoursBudgetByContributor(t *testing.T) {
+	entry := func(author, bucket string, h float64) ticket.TimeEntry {
+		return ticket.TimeEntry{Author: author, Bucket: bucket, Hours: h}
+	}
+	tickets := []*ticket.Ticket{
+		{ID: "A", Type: "dev_task", TimeEntries: []ticket.TimeEntry{
+			entry("bob@x.com", "work", 10),
+			entry("sally@x.com", "qa", 3),
+			entry("bob@x.com", "", 2),        // legacy on dev_task -> work
+			entry("john@y.org", "admin", 1),  // stamped bucket wins over type
+			entry("bobby", "work", 4),        // Bob's git user -> Bob's row
+			entry("sally@x.com", "bogus", 1), // unknown bucket -> work
+		}},
+		{ID: "M", Type: "meeting", TimeEntries: []ticket.TimeEntry{
+			entry("sally@x.com", "", 5), // legacy on meeting -> admin
+			entry("john@y.org", "", 2),  // legacy on meeting -> admin
+			entry("", "qa", 0.5),        // no author
+		}},
+	}
+	resources := []ticket.Resource{
+		{Name: "Bob", Email: "bob@x.com", GitUser: "bobby"},
+		{Name: "Sally", Email: "Sally@X.com"},
+	}
+	b := ComputeHoursBudget(tickets, resources, nil, nil, nil)
+
+	type row struct {
+		name, author           string
+		work, admin, qa, total float64
+	}
+	want := []row{
+		{"Bob", "bob@x.com", 16, 0, 0, 16},
+		{"Sally", "Sally@X.com", 1, 5, 3, 9},
+		{"john", "john@y.org", 0, 3, 0, 3},
+		{"Unknown", "", 0, 0, 0.5, 0.5},
+	}
+	if len(b.ByContributor) != len(want) {
+		t.Fatalf("by_contributor = %+v, want %d rows", b.ByContributor, len(want))
+	}
+	var w, a, q float64
+	for i, c := range b.ByContributor {
+		g := row{c.Name, c.Author, c.Work, c.Admin, c.QA, c.Total}
+		if g != want[i] {
+			t.Errorf("row %d = %+v, want %+v", i, g, want[i])
+		}
+		if c.Work+c.Admin+c.QA != c.Total {
+			t.Errorf("%s: work+admin+qa %.1f != total %.1f", c.Name, c.Work+c.Admin+c.QA, c.Total)
+		}
+		w, a, q = w+c.Work, a+c.Admin, q+c.QA
+	}
+	if w != b.Work.Spent || a != b.Admin.Spent || q != b.QA.Spent {
+		t.Errorf("per-person sums %.1f/%.1f/%.1f != pools %.1f/%.1f/%.1f", w, a, q, b.Work.Spent, b.Admin.Spent, b.QA.Spent)
+	}
+	if b.Work.Spent != 17 || b.Admin.Spent != 8 || b.QA.Spent != 3.5 {
+		t.Errorf("pools = %.1f/%.1f/%.1f, want 17/8/3.5", b.Work.Spent, b.Admin.Spent, b.QA.Spent)
+	}
+
+	// Ties sort by name; no time logged means an empty (non-nil) list.
+	tie := ComputeHoursBudget([]*ticket.Ticket{{ID: "T", TimeEntries: []ticket.TimeEntry{
+		entry("zed@x.com", "work", 2), entry("amy@x.com", "work", 2),
+	}}}, nil, nil, nil, nil)
+	if tie.ByContributor[0].Name != "amy" || tie.ByContributor[1].Name != "zed" {
+		t.Errorf("tie order = %+v, want amy then zed", tie.ByContributor)
+	}
+	if empty := ComputeHoursBudget(nil, nil, nil, nil, nil); empty.ByContributor == nil || len(empty.ByContributor) != 0 {
+		t.Errorf("empty by_contributor = %#v, want []", empty.ByContributor)
+	}
+
+	// The card renders one bar per person, names escaped, in order.
+	tickets[0].TimeEntries = append(tickets[0].TimeEntries, entry("<b>@evil", "work", 0.25))
+	html := RenderHoursBudgetHTML(ComputeHoursBudget(tickets, resources, nil, nil, nil))
+	if !strings.Contains(html, "Logged by contributor") || strings.Contains(html, "<b>@evil") || !strings.Contains(html, "&lt;b&gt;") {
+		t.Errorf("card missing the contributor section or not escaping names")
+	}
+	if bi, si, ji := strings.Index(html, ">Bob<"), strings.Index(html, ">Sally<"), strings.Index(html, ">john<"); bi < 0 || !(bi < si && si < ji) {
+		t.Errorf("contributor order in card: Bob %d, Sally %d, john %d", bi, si, ji)
+	}
+	if strings.Contains(RenderHoursBudgetHTML(ComputeHoursBudget(nil, nil, nil, nil, nil)), "Logged by contributor") {
+		t.Error("no logged time: contributor section should be omitted")
 	}
 }
 

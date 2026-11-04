@@ -53,48 +53,179 @@ func newPoolBudget(budget *float64, spent float64) PoolBudget {
 }
 
 // HoursBudget tracks logged hours against the project's three hour pools: work
-// (build), admin/meeting (overhead), and QA (testing).
+// (build), admin/meeting (overhead), and QA (testing). ByContributor splits the
+// same logged hours per person; each person's work/admin/qa add up to the pools.
 type HoursBudget struct {
-	Work  PoolBudget `json:"work"`
-	Admin PoolBudget `json:"admin"`
-	QA    PoolBudget `json:"qa"`
+	Work          PoolBudget         `json:"work"`
+	Admin         PoolBudget         `json:"admin"`
+	QA            PoolBudget         `json:"qa"`
+	ByContributor []ContributorHours `json:"by_contributor"`
+}
+
+// ContributorHours is one person's logged hours, split by pool. There is no
+// per-person budget: the pools are budgeted for the project.
+type ContributorHours struct {
+	Author string  `json:"author"` // time-entry author (the resource's email when matched)
+	Name   string  `json:"name"`   // display name: resource name, else email local part
+	Work   float64 `json:"work"`
+	Admin  float64 `json:"admin"`
+	QA     float64 `json:"qa"`
+	Total  float64 `json:"total"`
+}
+
+// entryBucket is the pool a time entry burns: its stamped bucket, or for a
+// legacy entry with no stamp, admin on administration/meeting tickets else
+// work. Anything other than "qa" or "admin" counts as work.
+func entryBucket(t *ticket.Ticket, te ticket.TimeEntry) string {
+	switch te.Bucket {
+	case "qa", "admin":
+		return te.Bucket
+	case "":
+		if isAdminMeeting(t) {
+			return "admin"
+		}
+	}
+	return "work"
+}
+
+// contributorKey groups a time entry by its author: the matched resource (so a
+// person logging under both email and git user stays one row), else the raw
+// author. Returns the grouping key, the author label and the display name.
+func contributorKey(author string, resources []ticket.Resource) (key, label, name string) {
+	a := strings.TrimSpace(author)
+	if r, ok := findResource(a, resources); ok {
+		label = r.Email
+		if label == "" {
+			label = a
+		}
+		name = strings.TrimSpace(r.Name)
+		if name == "" {
+			name = emailLocal(label)
+		}
+		return "r:" + strings.ToLower(label), label, name
+	}
+	if a == "" {
+		return "", "", "Unknown"
+	}
+	return "a:" + strings.ToLower(a), a, emailLocal(a)
+}
+
+// emailLocal returns the part of an email before the @ (the whole string when
+// it has none).
+func emailLocal(s string) string {
+	if at := strings.IndexByte(s, '@'); at > 0 {
+		return s[:at]
+	}
+	return s
 }
 
 // ComputeHoursBudget buckets every logged hour into the work, admin/meeting, or
 // QA pool and compares each to its budget. Each time entry carries the bucket it
 // was stamped with at log time (QA when logged in qa_testing/rework or on a
-// qa-tagged ticket); legacy entries with no stamp fall back to type.
-func ComputeHoursBudget(tickets []*ticket.Ticket, workHours, adminHours, qaHours *float64) HoursBudget {
+// qa-tagged ticket); legacy entries with no stamp fall back to type. The same
+// hours are split per contributor (named from resources), most hours first.
+func ComputeHoursBudget(tickets []*ticket.Ticket, resources []ticket.Resource, workHours, adminHours, qaHours *float64) HoursBudget {
 	var workSpent, adminSpent, qaSpent float64
+	people := map[string]*ContributorHours{}
+	var order []string
 	for _, t := range tickets {
 		for _, te := range t.TimeEntries {
-			bucket := te.Bucket
-			if bucket == "" { // legacy entry: infer from ticket type
-				if isAdminMeeting(t) {
-					bucket = "admin"
-				} else {
-					bucket = "work"
-				}
+			key, label, name := contributorKey(te.Author, resources)
+			c := people[key]
+			if c == nil {
+				c = &ContributorHours{Author: label, Name: name}
+				people[key] = c
+				order = append(order, key)
 			}
-			switch bucket {
+			switch entryBucket(t, te) {
 			case "qa":
 				qaSpent += te.Hours
+				c.QA += te.Hours
 			case "admin":
 				adminSpent += te.Hours
+				c.Admin += te.Hours
 			default:
 				workSpent += te.Hours
+				c.Work += te.Hours
 			}
+			c.Total += te.Hours
 		}
 	}
+	by := make([]ContributorHours, 0, len(order))
+	for _, k := range order {
+		by = append(by, *people[k])
+	}
+	sort.SliceStable(by, func(i, j int) bool {
+		if by[i].Total != by[j].Total {
+			return by[i].Total > by[j].Total
+		}
+		return strings.ToLower(by[i].Name) < strings.ToLower(by[j].Name)
+	})
 	return HoursBudget{
-		Work:  newPoolBudget(workHours, workSpent),
-		Admin: newPoolBudget(adminHours, adminSpent),
-		QA:    newPoolBudget(qaHours, qaSpent),
+		Work:          newPoolBudget(workHours, workSpent),
+		Admin:         newPoolBudget(adminHours, adminSpent),
+		QA:            newPoolBudget(qaHours, qaSpent),
+		ByContributor: by,
 	}
 }
 
-// renderPool renders one pool's row: a label, the stat blocks, and a bar.
-func renderPool(label string, p PoolBudget) string {
+// Pool colors: the swatch beside each pool's label and that pool's segment in
+// the per-contributor bars.
+const (
+	poolColorWork  = "#1976d2"
+	poolColorAdmin = "#7b1fa2"
+	poolColorQA    = "#00897b"
+)
+
+// poolSwatch is a small color square marking a pool.
+func poolSwatch(color string) string {
+	return fmt.Sprintf(`<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:%s;margin-right:6px;vertical-align:-1px"></span>`, color)
+}
+
+// renderContributors renders one stacked bar per contributor (work / admin /
+// QA), scaled to the busiest person, with the hours beside it.
+func renderContributors(by []ContributorHours) string {
+	if len(by) == 0 {
+		return ""
+	}
+	esc := html.EscapeString
+	max := 0.0
+	for _, c := range by {
+		if c.Total > max {
+			max = c.Total
+		}
+	}
+	seg := func(h float64, color, label string) string {
+		if h <= 0 || max <= 0 {
+			return ""
+		}
+		return fmt.Sprintf(`<div title="%s %.1fh" style="width:%.2f%%;background:%s"></div>`, label, h, h/max*100, color)
+	}
+	var rows strings.Builder
+	for _, c := range by {
+		tip := c.Author
+		if tip == "" {
+			tip = "no author recorded"
+		}
+		rows.WriteString(fmt.Sprintf(
+			`<div style="display:flex;align-items:center;gap:12px;margin:6px 0;font-size:13px">`+
+				`<div title="%s" style="width:140px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">%s</div>`+
+				`<div style="flex:1;min-width:80px;height:12px;background:#eee;border-radius:4px;overflow:hidden;display:flex">%s%s%s</div>`+
+				`<div style="flex-shrink:0;text-align:right;color:#666;font-size:12px;white-space:nowrap">`+
+				`<strong style="color:#1a1a1a">%.1fh</strong> &middot; work %.1f &middot; admin %.1f &middot; QA %.1f</div></div>`,
+			esc(tip), esc(c.Name),
+			seg(c.Work, poolColorWork, "Work"), seg(c.Admin, poolColorAdmin, "Admin / meeting"), seg(c.QA, poolColorQA, "QA"),
+			c.Total, c.Work, c.Admin, c.QA))
+	}
+	legend := fmt.Sprintf(`<span style="font-size:12px;color:#666;text-transform:none;letter-spacing:0;margin-left:12px">%sWork &nbsp;%sAdmin / meeting &nbsp;%sQA</span>`,
+		poolSwatch(poolColorWork), poolSwatch(poolColorAdmin), poolSwatch(poolColorQA))
+	return fmt.Sprintf(`<div style="margin:0 0 6px;padding-top:14px;border-top:1px solid #eee"><div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#666;margin:0 0 8px">Logged by contributor%s</div>%s</div>`,
+		legend, rows.String())
+}
+
+// renderPool renders one pool's row: a swatch and label, the stat blocks, and
+// a bar.
+func renderPool(label, color string, p PoolBudget) string {
 	stat := func(value, sub, color string) string {
 		style := "font-size:22px;font-weight:700;line-height:1.1"
 		if color != "" {
@@ -104,7 +235,7 @@ func renderPool(label string, p PoolBudget) string {
 			`<div style="flex:1;min-width:110px"><div style="%s">%s</div><div style="font-size:12px;color:#666;margin-top:3px">%s</div></div>`,
 			style, value, sub)
 	}
-	head := fmt.Sprintf(`<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#666;margin:0 0 8px">%s</div>`, label)
+	head := fmt.Sprintf(`<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#666;margin:0 0 8px">%s%s</div>`, poolSwatch(color), label)
 
 	// No budget for this pool — just report the spend.
 	if p.Budget == nil || *p.Budget <= 0 {
@@ -153,7 +284,8 @@ func RenderHoursBudgetHTML(b HoursBudget) string {
   %s
   %s
   %s
-</div>`, header, renderPool("Work", b.Work), renderPool("Admin / meeting", b.Admin), renderPool("QA", b.QA), hint)
+  %s
+</div>`, header, renderPool("Work", poolColorWork, b.Work), renderPool("Admin / meeting", poolColorAdmin, b.Admin), renderPool("QA", poolColorQA, b.QA), renderContributors(b.ByContributor), hint)
 }
 
 // ---------------------------------------------------------------------------

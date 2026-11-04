@@ -404,7 +404,7 @@ func TestHeaderAndHelp(t *testing.T) {
 			t.Errorf("Help does not mention %q", want)
 		}
 	}
-	if config.AppVersion != "3.0.2" { // Blocked pill next to the status again (HATE-6snq): v3.0.2
+	if config.AppVersion != "3.0.3" { // Hours by contributor (HATE-478u), identity per machine (HATE-5t80): v3.0.3
 		t.Errorf("AppVersion = %s", config.AppVersion)
 	}
 }

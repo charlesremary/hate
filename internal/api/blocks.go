@@ -127,3 +127,19 @@ func getReady(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, rep)
 }
+
+// getHoursBudget handles GET /api/projects/{projectId}/hours-budget: logged
+// hours vs the work / admin / QA pools, plus by_contributor (each person's
+// hours per pool, most first). The dashboard card's numbers. Read-only.
+func getHoursBudget(w http.ResponseWriter, r *http.Request) {
+	root, ok := getProjectRoot(w, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	b, err := service.HoursBudget(root)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, b)
+}

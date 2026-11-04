@@ -46,7 +46,7 @@ func TestStdioBridge(t *testing.T) {
 	for _, v := range []string{"", "2025-11-25"} {
 		cs := bridged(t, v)
 		res, err := cs.ListTools(context.Background(), nil)
-		if err != nil || len(res.Tools) != 23 {
+		if err != nil || len(res.Tools) != 24 {
 			t.Fatalf("%q: tools = %d, %v", v, len(res.Tools), err)
 		}
 		out := mustOK(t, cs, "hate_create_tickets", map[string]any{"project": "est", "tickets": []any{map[string]any{"type": "task", "title": "via stdio " + v}}})

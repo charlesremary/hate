@@ -39,7 +39,7 @@ func (r Resource) EffectiveDailyHours() float64 {
 	return DefaultDailyHours
 }
 
-// GitIdentity holds the git user identity for a project.
+// GitIdentity is a git user name and email.
 type GitIdentity struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
@@ -102,7 +102,12 @@ type ProjectConfig struct {
 	Repos         []string           `json:"repos"`
 	AutoPush      bool               `json:"auto_push"`
 	Resources     []Resource         `json:"resources"`
-	GitIdentityV  *GitIdentity       `json:"git_identity,omitempty"`
+	// LegacyGitIdentity is the git_identity an older hate kept in this shared
+	// file. A personal identity must not live in a committed, synced file
+	// (HATE-5t80): it is read only as a fill-in for a machine with no identity
+	// of its own (see EffectiveIdentity), and EncodeConfig never writes it, so
+	// the next config write removes it.
+	LegacyGitIdentity *GitIdentity `json:"git_identity,omitempty"`
 	// ClosedAt is the ISO date (YYYY-MM-DD) the project was closed. Empty means
 	// open. While closed, ticket-write endpoints reject mutations and the
 	// project is filtered out of the sidebar by default.
