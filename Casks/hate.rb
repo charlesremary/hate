@@ -8,8 +8,8 @@
 # releases/hate-darwin-arm64.tar.gz, tags v<version> and pushes over SSH; the
 # url reads it at that tag, so every version keeps its own download.
 cask "hate" do
-  version "2.1.0"
-  sha256 "c39a7dafdfa6134c7b116a91c0eb1f6e5ff2cf9830601a54647dbf458d98aaef"
+  version "3.0.0"
+  sha256 "f323e911c3786f928cebf7b410d8b4d204605f96249e136b9b632ca0270b02d1"
 
   url "https://raw.githubusercontent.com/charlesremary/hate/v#{version}/releases/hate-darwin-arm64.tar.gz",
       verified: "raw.githubusercontent.com/charlesremary/hate/"
