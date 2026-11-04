@@ -213,7 +213,11 @@ clients create projects and work tickets with typed tools that follow the same r
 claude mcp add --transport http --scope user hate http://127.0.0.1:8000/mcp
 ```
 
-hate has to be running for the client to connect. Tools, errors and rules:
+hate has to be running for the client to connect. For stdio-only clients (or to
+have the client start hate for you), register the bridge instead:
+`claude mcp add --scope user hate -- hate mcp`. `hate mcp` forwards to the
+running app's `/mcp` and starts it in the background when nothing answers
+(`internal/mcpbridge`). Tools, errors and rules:
 [agent guide §15](docs/ticketing-and-cfp-guide.md#15-using-hate-from-an-mcp-client).
 
 ## Capacity and load

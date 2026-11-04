@@ -1087,7 +1087,18 @@ claude mcp list        # hate: http://127.0.0.1:8000/mcp (HTTP) - Connected
 ```
 
 Other clients: add an MCP server of type "http" / "streamable HTTP" with that
-URL. Clients that only speak stdio aren't supported yet.
+URL.
+
+Clients that only speak stdio (or if you'd rather not keep hate running
+yourself): use `hate mcp` as the command. It's a bridge that forwards every
+message to the running app's `/mcp`, starting hate in the background first if
+nothing answers on the port (`-port N`, default 8000; `-no-start` to fail
+instead). The one app process keeps the project lock, so nothing is written
+twice.
+
+```
+claude mcp add --scope user hate -- hate mcp
+```
 
 Rules of the road:
 

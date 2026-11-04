@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"hate/internal/api"
 	"hate/internal/config"
 	"hate/internal/gitacct"
+	"hate/internal/mcpbridge"
 	"hate/internal/mcpserver"
 	"hate/internal/service"
 	"hate/internal/teamsync"
@@ -46,6 +48,11 @@ func main() {
 	// gitacct.NetworkCommand): answer the one prompt and exit.
 	if code, ok := askpassMode(os.Args, os.Getenv(gitacct.AskpassEnv)); ok {
 		os.Exit(code)
+	}
+
+	// `hate mcp`: the stdio MCP bridge to the running app (HATE-qypd).
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		os.Exit(runMCPBridge(os.Args[2:]))
 	}
 
 	portFlag := flag.Int("port", 0, "HTTP port to listen on (default 8000, or $PORT)")
@@ -217,4 +224,43 @@ func isLoopback(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// runMCPBridge is `hate mcp [-port N]`: an MCP stdio server for clients that
+// only speak stdio. It forwards to the running app's /mcp (starting the app in
+// the background if none is listening), so the one app process keeps the
+// project lock. Errors go to stderr; stdout carries only MCP messages.
+func runMCPBridge(args []string) int {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	port := fs.Int("port", 0, "port of the running hate app (default 8000, or $PORT)")
+	noStart := fs.Bool("no-start", false, "don't start hate when it isn't running; fail instead")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	p := 8000
+	if v := os.Getenv("PORT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			p = n
+		}
+	}
+	if *port > 0 {
+		p = *port
+	}
+	base := fmt.Sprintf("http://127.0.0.1:%d", p)
+	if *noStart {
+		if !mcpbridge.Running(base) {
+			fmt.Fprintf(os.Stderr, "hate mcp: no hate app is answering on port %d; start hate first\n", p)
+			return 1
+		}
+	} else if err := mcpbridge.EnsureRunning(p, filepath.Join(os.TempDir(), "hate-mcp-app.log"), 10*time.Second); err != nil {
+		fmt.Fprintln(os.Stderr, "hate mcp:", err)
+		return 1
+	}
+	b := &mcpbridge.Bridge{URL: base + "/mcp"}
+	if err := b.Run(context.Background(), os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, "hate mcp:", err)
+		return 1
+	}
+	return 0
 }
