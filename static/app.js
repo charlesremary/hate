@@ -1045,7 +1045,8 @@ function populateLifecycleFilter(tickets) {
 function populateBlockFilter(tickets) {
   const sel = document.getElementById('filter-block');
   const current = sel.value;
-  const used = [...new Set(tickets.map(t => t.block).filter(Boolean))].sort((a, b) => a - b);
+  // Every block of the project (by date), plus any a ticket uses past the list.
+  const used = [...new Set([...projectBlocks.map(b => b.n), ...tickets.map(t => t.block).filter(Boolean)])].sort((a, b) => a - b);
   sel.innerHTML = '<option value="">All blocks</option>';
   const cur = projectBlocks.find(b => b.state === 'current');
   if (cur) {
@@ -1137,7 +1138,13 @@ function renderFilterMenu() {
   filterMenu.innerHTML = FILTERS.map(([id, label]) => {
     const sel = document.getElementById(id);
     const opts = [...sel.options];
-    if (opts.length <= 1 && !sel.value) return ''; // nothing to pick (e.g. no blocks)
+    if (id === 'filter-block' && opts.length <= 1 && !sel.value) {
+      return `<details class="fm-section" data-id="${id}"${filterMenuOpenSection === id ? ' open' : ''}>
+        <summary>${label}<span class="fm-current">Any</span></summary>
+        <div class="fm-note">This project doesn't plan in blocks. Turn it on in ⚙ Settings &rarr; <em>Planning blocks</em> (2 or 3 weeks), then give tickets a block.</div>
+      </details>`;
+    }
+    if (opts.length <= 1 && !sel.value) return ''; // nothing to pick
     const cur = sel.value ? sel.options[sel.selectedIndex]?.textContent : '';
     return `<details class="fm-section" data-id="${id}"${filterMenuOpenSection === id ? ' open' : ''}>
       <summary>${label}<span class="fm-current">${escapeHtml(cur || 'Any')}</span></summary>

@@ -680,6 +680,7 @@ form .nt-radios label { display: inline-flex; align-items: center; gap: 4px; mar
 .fm-opt { padding: 4px 12px 4px 24px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
 .fm-opt:hover { background: #e3f2fd; }
 .fm-opt.on { color: var(--accent); font-weight: 600; }
+.fm-note { padding: 4px 12px 8px 24px; color: #64748b; font-size: 12px; line-height: 1.4; }
 .fm-foot { border-top: 1px solid var(--border); margin-top: 4px; padding: 6px 12px; text-align: right; }
 .filter-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .filter-chip { display: inline-flex; align-items: center; gap: 4px; background: #e3f2fd; color: #0d47a1;

@@ -37,7 +37,7 @@ func TestRenderGanttPanel(t *testing.T) {
 	wants := []string{
 		`class="gantt-svg"`,
 		`/api/projects/TEST/gantt.drawio`, // export button href
-		`Export to draw.io`,
+		`Export &#9662;`, `download="gantt.drawio">draw.io`,
 		`Full plan`,      // view toggle
 		`Critical path`,  // view toggle
 		`id="gantt-cp"`,  // critical-path view container

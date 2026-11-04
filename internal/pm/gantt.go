@@ -501,14 +501,30 @@ func renderGanttPanel(snapshot *Snapshot, blocks []Block, note, exportURL string
         <button type="button" onclick="ganttView(this,'full')" style="%sbackground:#1976d2;color:#fff">Full plan</button>
         <button type="button" onclick="ganttView(this,'cp')" style="%sbackground:#fff;color:#374151;border-left:1px solid #d1d5db">Critical path</button>
       </div>
-      <a href="%s" download="gantt.drawio" style="text-decoration:none;background:#1976d2;color:#fff;padding:7px 14px;border-radius:6px;font-size:13px;white-space:nowrap">Export to draw.io</a>
-      <a href="%s" download title="Every ticket and this Gantt as an Excel workbook" style="text-decoration:none;background:#1976d2;color:#fff;padding:7px 14px;border-radius:6px;font-size:13px;white-space:nowrap">Export to Excel</a>
+      <details class="exp-menu">
+        <summary>Export &#9662;</summary>
+        <div class="exp-list">
+          <a href="%s" download="gantt.drawio">draw.io<span>the Gantt, to edit as a diagram</span></a>
+          <a href="%s" download>Excel<span>every ticket and the Gantt</span></a>
+        </div>
+      </details>
     </div>
   </div>
   <div id="gantt-full" style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;background:#fff">%s</div>
   <div id="gantt-cp" style="display:none;overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;background:#fff">%s</div>
   %s
+  <style>
+  .exp-menu { position: relative; }
+  .exp-menu > summary { list-style: none; cursor: pointer; background: #1976d2; color: #fff; padding: 7px 14px; border-radius: 6px; font-size: 13px; white-space: nowrap; user-select: none; }
+  .exp-menu > summary::-webkit-details-marker { display: none; }
+  .exp-list { position: absolute; right: 0; top: calc(100%% + 4px); z-index: 20; width: 240px; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.15); padding: 4px 0; }
+  .exp-list a { display: block; padding: 7px 12px; color: #111827; text-decoration: none; font-size: 13px; font-weight: 600; }
+  .exp-list a span { display: block; font-weight: 400; color: #6b7280; font-size: 12px; }
+  .exp-list a:hover { background: #e3f2fd; }
+  </style>
   <script>
+  document.addEventListener('click', function(e){ var m = document.querySelector('.exp-menu'); if (m && m.open && !m.contains(e.target)) m.open = false; });
+  document.addEventListener('keydown', function(e){ var m = document.querySelector('.exp-menu'); if (e.key === 'Escape' && m) m.open = false; });
   function ganttView(btn, which){
     document.getElementById('gantt-full').style.display = which==='full'?'block':'none';
     document.getElementById('gantt-cp').style.display = which==='cp'?'block':'none';
