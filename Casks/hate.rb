@@ -11,8 +11,7 @@ cask "hate" do
   version "3.0.3"
   sha256 "993d5bf2fc91faf04c1b52b5068aef2daa81f5aaf7faad8adc092a7901084cfa"
 
-  url "https://raw.githubusercontent.com/charlesremary/hate/v#{version}/releases/hate-darwin-arm64.tar.gz",
-      verified: "raw.githubusercontent.com/charlesremary/hate/"
+  url "https://raw.githubusercontent.com/charlesremary/hate/v#{version}/releases/hate-darwin-arm64.tar.gz"
   name "hate"
   desc "Git-backed ticketing for humans and agents, with a built-in MCP server"
   homepage "https://github.com/charlesremary/hate"
